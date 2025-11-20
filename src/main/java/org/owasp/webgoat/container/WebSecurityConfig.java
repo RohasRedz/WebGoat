@@ -2,87 +2,103 @@
  * SPDX-FileCopyrightText: Copyright © 2016 WebGoat authors
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
-package org.owasp.webgoat.webwolf;
+package org.owasp.webgoat.container;
 
 import lombok.AllArgsConstructor;
-import org.owasp.webgoat.container.AjaxAuthenticationEntryPoint;
-import org.owasp.webgoat.webwolf.user.UserService;
+import org.owasp.webgoat.container.users.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
+import org.springframework.context.annotation.Primary;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.password.NoOpPasswordEncoder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 
-/** Security configuration for WebWolf. */
+/** Security configuration for WebGoat. */
 @Configuration
 @AllArgsConstructor
 @EnableWebSecurity
 public class WebSecurityConfig {
 
-  private final UserService userDetailsService;
+    private final UserService userDetailsService;
 
-  @Bean
-  public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-    return http.authorizeHttpRequests(
-            auth -> {
-              auth.requestMatchers("/css/**", "/webjars/**", "/favicon.ico", "/js/**", "/images/**")
-                  .permitAll();
-              auth.requestMatchers(
-                      HttpMethod.GET,
-                      "/fileupload/**",
-                      "/files/**",
-                      "/landing/**",
-                      "/PasswordReset/**")
-                  .permitAll();
-              auth.requestMatchers(HttpMethod.POST, "/files", "/mail", "/requests").permitAll();
-              auth.anyRequest().authenticated();
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        return http
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers(
+                    "/favicon.ico",
+                    "/css/**",
+                    "/images/**",
+                    "/js/**",
+                    "/fonts/**",
+                    "/plugins/**",
+                    "/registration",
+                    "/register.mvc",
+                    "/actuator/**"
+                ).permitAll()
+                .anyRequest().authenticated()
+            )
+            .formLogin(login -> login
+                .loginPage("/login")
+                .defaultSuccessUrl("/welcome.mvc", true)
+                .usernameParameter("username")
+                .passwordParameter("password")
+                .permitAll()
+            )
+            .oauth2Login(oidc -> {
+                oidc.defaultSuccessUrl("/login-oauth.mvc");
+                oidc.loginPage("/login");
             })
-        .csrf(csrf -> csrf.disable())
-        .formLogin(
-            login ->
-                login
-                    .loginPage("/login")
-                    .failureUrl("/login?error=true")
-                    .defaultSuccessUrl("/home", true)
-                    .usernameParameter("username")
-                    .passwordParameter("password")
-                    .permitAll())
-        .oauth2Login(
-            oidc -> {
-              oidc.defaultSuccessUrl("/home");
-            })
-        .logout(logout -> logout.deleteCookies("WEBWOLFSESSION").invalidateHttpSession(true))
-        .exceptionHandling(
-            handling ->
-                handling.authenticationEntryPoint(new AjaxAuthenticationEntryPoint("/login")))
-        .build();
-  }
+            .logout(logout -> logout
+                .deleteCookies("JSESSIONID")
+                .invalidateHttpSession(true)
+            )
+            // ✅ Enable CSRF protection with secure token repository
+            .csrf(csrf -> csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
+            // ✅ Keep secure headers enabled
+            .headers(headers -> headers
+                .contentSecurityPolicy("default-src 'self'")
+                .frameOptions().sameOrigin()
+                .xssProtection(xss -> xss.block(true))
+            )
+            .exceptionHandling(handling ->
+                handling.authenticationEntryPoint(new AjaxAuthenticationEntryPoint("/login"))
+            )
+            .build();
+    }
 
-  @Autowired
-  public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService);
-  }
+    @Autowired
+    public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
+        auth.userDetailsService(userDetailsService)
+            .passwordEncoder(passwordEncoder()); // ✅ Use secure password encoder
+    }
 
-  @Bean
-  public UserDetailsService userDetailsServiceBean() {
-    return userDetailsService;
-  }
+    @Bean
+    @Primary
+    public UserDetailsService userDetailsServiceBean() {
+        return userDetailsService;
+    }
 
-  @Bean
-  public AuthenticationManager authenticationManager(
-      AuthenticationConfiguration authenticationConfiguration) throws Exception {
-    return authenticationConfiguration.getAuthenticationManager();
-  }
+    @Bean
+    public AuthenticationManager authenticationManager(
+        AuthenticationConfiguration authenticationConfiguration) throws Exception {
+        return authenticationConfiguration.getAuthenticationManager();
+    }
 
-  @Bean
-  public NoOpPasswordEncoder passwordEncoder() {
-    return (NoOpPasswordEncoder) NoOpPasswordEncoder.getInstance();
-  }
+    /**
+     * ✅ Secure password encoder using BCrypt
+     */
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        // BCrypt with strength 12 for better security
+        return new BCryptPasswordEncoder(12);
+    }
 }
