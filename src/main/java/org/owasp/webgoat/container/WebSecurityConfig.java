@@ -27,78 +27,70 @@ import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 @EnableWebSecurity
 public class WebSecurityConfig {
 
-    private final UserService userDetailsService;
+  private final UserService userDetailsService;
 
-    @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        return http
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers(
-                    "/favicon.ico",
-                    "/css/**",
-                    "/images/**",
-                    "/js/**",
-                    "/fonts/**",
-                    "/plugins/**",
-                    "/registration",
-                    "/register.mvc",
-                    "/actuator/**"
-                ).permitAll()
-                .anyRequest().authenticated()
-            )
-            .formLogin(login -> login
-                .loginPage("/login")
-                .defaultSuccessUrl("/welcome.mvc", true)
-                .usernameParameter("username")
-                .passwordParameter("password")
-                .permitAll()
-            )
-            .oauth2Login(oidc -> {
-                oidc.defaultSuccessUrl("/login-oauth.mvc");
-                oidc.loginPage("/login");
+  @Bean
+  public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    return http
+        .authorizeHttpRequests(
+            auth ->
+                auth
+                    .requestMatchers(
+                        "/favicon.ico",
+                        "/css/**",
+                        "/images/**",
+                        "/js/**",
+                        "/fonts/**",
+                        "/plugins/**",
+                        "/registration",
+                        "/register.mvc",
+                        "/actuator/**")
+                    .permitAll()
+                    .anyRequest()
+                    .authenticated())
+        .formLogin(
+            login ->
+                login
+                    .loginPage("/login")
+                    .defaultSuccessUrl("/welcome.mvc", true)
+                    .usernameParameter("username")
+                    .passwordParameter("password")
+                    .permitAll())
+        .oauth2Login(
+            oidc -> {
+              oidc.defaultSuccessUrl("/login-oauth.mvc");
+              oidc.loginPage("/login");
             })
-            .logout(logout -> logout
-                .deleteCookies("JSESSIONID")
-                .invalidateHttpSession(true)
-            )
-            // ✅ Enable CSRF protection with secure token repository
-            .csrf(csrf -> csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
-            // ✅ Keep secure headers enabled
-            .headers(headers -> headers
-                .contentSecurityPolicy("default-src 'self'")
-                .frameOptions().sameOrigin()
-                .xssProtection(xss -> xss.block(true))
-            )
-            .exceptionHandling(handling ->
-                handling.authenticationEntryPoint(new AjaxAuthenticationEntryPoint("/login"))
-            )
-            .build();
-    }
+        .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
+        // ✅ Enable CSRF protection with secure token repository
+        .csrf(csrf -> csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
+        // ✅ Keep security headers enabled
+        .headers(headers -> headers.contentSecurityPolicy("default-src 'self'"))
+        .exceptionHandling(
+            handling -> handling.authenticationEntryPoint(new AjaxAuthenticationEntryPoint("/login")))
+        .build();
+  }
 
-    @Autowired
-    public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-        auth.userDetailsService(userDetailsService)
-            .passwordEncoder(passwordEncoder()); // ✅ Use secure password encoder
-    }
+  @Autowired
+  public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
+    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder());
+  }
 
-    @Bean
-    @Primary
-    public UserDetailsService userDetailsServiceBean() {
-        return userDetailsService;
-    }
+  @Bean
+  @Primary
+  public UserDetailsService userDetailsServiceBean() {
+    return userDetailsService;
+  }
 
-    @Bean
-    public AuthenticationManager authenticationManager(
-        AuthenticationConfiguration authenticationConfiguration) throws Exception {
-        return authenticationConfiguration.getAuthenticationManager();
-    }
+  @Bean
+  public AuthenticationManager authenticationManager(
+      AuthenticationConfiguration authenticationConfiguration) throws Exception {
+    return authenticationConfiguration.getAuthenticationManager();
+  }
 
-    /**
-     * ✅ Secure password encoder using BCrypt
-     */
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        // BCrypt with strength 12 for better security
-        return new BCryptPasswordEncoder(12);
-    }
+  // ✅ Secure PasswordEncoder using BCrypt
+  @Bean
+  public PasswordEncoder passwordEncoder() {
+    return new BCryptPasswordEncoder(12); // 12 rounds for strong hashing
+  }
 }
