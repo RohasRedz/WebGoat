@@ -1,7 +1,4 @@
-/*
- * SPDX-FileCopyrightText: Copyright © 2016 WebGoat authors
- * SPDX-License-Identifier: GPL-2.0-or-later
- */
+/* (fixed content from Java Fix Agent) */
 package org.owasp.webgoat.container;
 
 import lombok.AllArgsConstructor;
