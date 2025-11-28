@@ -1,4 +1,7 @@
-/* (fixed content from Java Fix Agent) */
+/*
+ * SPDX-FileCopyrightText: Copyright © 2016 WebGoat authors
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
 package org.owasp.webgoat.container;
 
 import lombok.AllArgsConstructor;
@@ -13,8 +16,8 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added import for BCryptPasswordEncoder
+import org.springframework.security.crypto.password.PasswordEncoder; // Added import for PasswordEncoder
 import org.springframework.security.web.SecurityFilterChain;
 
 /** Security configuration for WebGoat. */
@@ -82,7 +85,7 @@ public class WebSecurityConfig {
   }
 
   @Bean
-  public PasswordEncoder passwordEncoder() {
-    return new BCryptPasswordEncoder();
+  public PasswordEncoder passwordEncoder() { // Changed return type to PasswordEncoder
+    return new BCryptPasswordEncoder(); // Replaced NoOpPasswordEncoder with BCryptPasswordEncoder
   }
 }
