@@ -11,6 +11,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
+import java.io.ObjectStreamClass; // Added import for ObjectStreamClass
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -29,6 +30,29 @@ import org.springframework.web.bind.annotation.RestController;
 })
 public class InsecureDeserializationTask implements AssignmentEndpoint {
 
+  // Custom ObjectInputStream to restrict deserialization to allowed classes
+  private static class ValidatingObjectInputStream extends ObjectInputStream {
+    public ValidatingObjectInputStream(ByteArrayInputStream in) throws IOException {
+      super(in);
+    }
+
+    @Override
+    protected Class<?> resolveClass(ObjectStreamClass desc) throws IOException, ClassNotFoundException {
+      // Allow only specific classes for deserialization
+      if (desc.getName().equals(VulnerableTaskHolder.class.getName()) ||
+          desc.getName().equals(String.class.getName()) ||
+          desc.getName().equals(Integer.class.getName()) || // Example: if primitive wrappers are expected
+          desc.getName().equals(Long.class.getName()) ||
+          desc.getName().equals(Boolean.class.getName()) ||
+          desc.getName().startsWith("[Ljava.lang.String;") // Allow String arrays
+          ) {
+        return super.resolveClass(desc);
+      }
+      // For any other class, throw an exception to prevent deserialization
+      throw new InvalidClassException("Unauthorized deserialization attempt for class " + desc.getName());
+    }
+  }
+
   @PostMapping("/InsecureDeserialization/task")
   @ResponseBody
   public AttackResult completed(@RequestParam String token) throws IOException {
@@ -39,8 +63,9 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
 
     b64token = token.replace('-', '+').replace('_', '/');
 
+    // FIX: Using a custom ValidatingObjectInputStream to prevent deserialization of arbitrary classes
     try (ObjectInputStream ois =
-        new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
+        new ValidatingObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) { // Changed to use ValidatingObjectInputStream
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
@@ -51,6 +76,7 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       }
       after = System.currentTimeMillis();
     } catch (InvalidClassException e) {
+      // Catching InvalidClassException specifically for unauthorized deserialization attempts
       return failed(this).feedback("insecure-deserialization.invalidversion").build();
     } catch (IllegalArgumentException e) {
       return failed(this).feedback("insecure-deserialization.expired").build();
