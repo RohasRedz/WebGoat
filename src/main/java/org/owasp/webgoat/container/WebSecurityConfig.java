@@ -16,8 +16,9 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // MODIFIED: Changed from NoOpPasswordEncoder
-import org.springframework.security.crypto.password.PasswordEncoder; // ADDED: Import PasswordEncoder interface
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added import
+import org.springframework.security.crypto.password.PasswordEncoder; // Added import
+// Removed: import org.springframework.security.crypto.password.NoOpPasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 /** Security configuration for WebGoat. */
@@ -39,4 +40,53 @@ public class WebSecurityConfig {
                         "/js/**",
                         "/fonts/**",
                         "/plugins/**",
-                        \
+                        "/registration",
+                        "/register.mvc",
+                        "/actuator/**")
+                    .permitAll()
+                    .anyRequest()
+                    .authenticated())
+        .formLogin(
+            login ->
+                login
+                    .loginPage("/login")
+                    .defaultSuccessUrl("/welcome.mvc", true)
+                    .usernameParameter("username")
+                    .passwordParameter("password")
+                    .permitAll())
+        .oauth2Login(
+            oidc -> {
+              oidc.defaultSuccessUrl("/login-oauth.mvc");
+              oidc.loginPage("/login");
+            })
+        .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
+        .csrf(csrf -> csrf.disable())
+        .headers(headers -> headers.disable())
+        .exceptionHandling(
+            handling ->
+                handling.authenticationEntryPoint(new AjaxAuthenticationEntryPoint("/login")))
+        .build();
+  }
+
+  @Autowired
+  public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
+    auth.userDetailsService(userDetailsService);
+  }
+
+  @Bean
+  @Primary
+  public UserDetailsService userDetailsServiceBean() {
+    return userDetailsService;
+  }
+
+  @Bean
+  public AuthenticationManager authenticationManager(
+      AuthenticationConfiguration authenticationConfiguration) throws Exception {
+    return authenticationConfiguration.getAuthenticationManager();
+  }
+
+  @Bean
+  public PasswordEncoder passwordEncoder() { // Changed return type to PasswordEncoder
+    return new BCryptPasswordEncoder(); // Replaced NoOpPasswordEncoder with BCryptPasswordEncoder
+  }
+}
