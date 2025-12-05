@@ -1,54 +1,58 @@
 /*
- * SPDX-FileCopyrightText: Copyright © 2016 WebGoat authors
+ * SPDX-FileCopyrightText: Copyright © 2017 WebGoat authors
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
-import org.owasp.webgoat.lessons.AbstractLesson;
-import org.owasp.webgoat.lessons.LessonData;
-import org.owasp.webgoat.lessons.LessonDataRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 
-import javax.validation.constraints.NotNull;
-import javax.validation.constraints.Size;
-import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.owasp.webgoat.container.LessonDataSource;
+import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
+import org.owasp.webgoat.container.assignments.AttackResult;
+import org.owasp.webgoat.lessons.challenges.Flags;
+import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.bind.annotation.RestController;
 
-/**
- * Lesson demonstrating secure query execution using PreparedStatement to prevent SQL injection.
- */
-@Component
-public class Assignment5 extends AbstractLesson {
+@RestController
+@Slf4j
+@RequiredArgsConstructor
+public class Assignment5 implements AssignmentEndpoint {
 
-    @Autowired
-    private LessonDataRepository lessonDataRepository;
+  private final LessonDataSource dataSource;
+  private final Flags flags;
 
-    @Override
-    public void start(@NotNull @Size(min = 1, max = 50) LessonData lessonData) {
-        try (Connection conn = DriverManager.getConnection("jdbc:h2:mem:webgoat", "sa", "")) {
-            String userInput = lessonData.getUserInput();
-
-            // ✅ Validate user input before using it in queries
-            if (userInput == null || userInput.trim().isEmpty()) {
-                throw new IllegalArgumentException("Username must not be empty");
-            }
-
-            // ✅ Use parameterized PreparedStatement to prevent SQL injection
-            String query = "SELECT * FROM users WHERE username = ?";
-            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
-                pstmt.setString(1, userInput.trim());
-                try (ResultSet rs = pstmt.executeQuery()) {
-                    while (rs.next()) {
-                        System.out.println("User: " + rs.getString("username"));
-                    }
-                }
-            }
-        } catch (Exception e) {
-            // Avoid printing sensitive details in production
-            e.printStackTrace();
-        }
+  @PostMapping("/challenge/5")
+  @ResponseBody
+  public AttackResult login(
+      @RequestParam String username_login, @RequestParam String password_login) throws Exception {
+    if (!StringUtils.hasText(username_login) || !StringUtils.hasText(password_login)) {
+      return failed(this).feedback("required4").build();
     }
+    if (!"Larry".equals(username_login)) {
+      return failed(this).feedback("user.not.larry").feedbackArgs(username_login).build();
+    }
+    try (var connection = dataSource.getConnection()) {
+      // FIX: Refactored to use PreparedStatement with placeholders to prevent SQL Injection
+      PreparedStatement statement =
+          connection.prepareStatement(
+              "select password from challenge_users where userid = ? and password = ?");
+      statement.setString(1, username_login); // Bind username parameter
+      statement.setString(2, password_login); // Bind password parameter
+      ResultSet resultSet = statement.executeQuery();
+
+      if (resultSet.next()) {
+        return success(this).feedback("challenge.solved").feedbackArgs(flags.getFlag(5)).build();
+      } else {
+        return failed(this).feedback("challenge.close").build();
+      }
+    }
+  }
 }
