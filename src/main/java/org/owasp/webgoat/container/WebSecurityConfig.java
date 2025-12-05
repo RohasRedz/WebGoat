@@ -16,9 +16,8 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added import
-import org.springframework.security.crypto.password.PasswordEncoder; // Added import
-// Removed: import org.springframework.security.crypto.password.NoOpPasswordEncoder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added import for BCryptPasswordEncoder
+import org.springframework.security.crypto.password.PasswordEncoder; // Added import for PasswordEncoder
 import org.springframework.security.web.SecurityFilterChain;
 
 /** Security configuration for WebGoat. */
@@ -69,8 +68,8 @@ public class WebSecurityConfig {
   }
 
   @Autowired
-  public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService);
+  public void configureGlobal(AuthenticationManagerBuilder auth, PasswordEncoder passwordEncoder) throws Exception {
+    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder); // Modified to use secure passwordEncoder
   }
 
   @Bean
@@ -86,7 +85,7 @@ public class WebSecurityConfig {
   }
 
   @Bean
-  public PasswordEncoder passwordEncoder() { // Changed return type to PasswordEncoder
-    return new BCryptPasswordEncoder(); // Replaced NoOpPasswordEncoder with BCryptPasswordEncoder
+  public PasswordEncoder passwordEncoder() { // Changed return type and implementation
+    return new BCryptPasswordEncoder();
   }
 }
