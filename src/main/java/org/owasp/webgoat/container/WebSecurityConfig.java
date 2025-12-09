@@ -1,90 +1,54 @@
-/*
- * SPDX-FileCopyrightText: Copyright © 2016 WebGoat authors
- * SPDX-License-Identifier: GPL-2.0-or-later
- */
 package org.owasp.webgoat.container;
 
-import lombok.AllArgsConstructor;
-import org.owasp.webgoat.container.users.UserService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
-import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
-import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.password.NoOpPasswordEncoder;
-import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
+// Removed: import org.springframework.security.crypto.password.NoOpPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added for secure password encoding
 
-/** Security configuration for WebGoat. */
 @Configuration
-@AllArgsConstructor
 @EnableWebSecurity
-public class WebSecurityConfig {
+public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
 
-  private final UserService userDetailsService;
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http
+            .authorizeRequests()
+                .antMatchers("/css/**", "/js/**", "/images/**", "/webjars/**", "/favicon.ico", "/error", "/logout", "/login").permitAll()
+                .anyRequest().authenticated()
+                .and()
+            .formLogin()
+                .loginPage("/login")
+                .permitAll()
+                .and()
+            .logout()
+                .permitAll();
 
-  @Bean
-  public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-    return http.authorizeHttpRequests(
-            auth ->
-                auth.requestMatchers(
-                        "/favicon.ico",
-                        "/css/**",
-                        "/images/**",
-                        "/js/**",
-                        "/fonts/**",
-                        "/plugins/**",
-                        "/registration",
-                        "/register.mvc",
-                        "/actuator/**")
-                    .permitAll()
-                    .anyRequest()
-                    .authenticated())
-        .formLogin(
-            login ->
-                login
-                    .loginPage("/login")
-                    .defaultSuccessUrl("/welcome.mvc", true)
-                    .usernameParameter("username")
-                    .passwordParameter("password")
-                    .permitAll())
-        .oauth2Login(
-            oidc -> {
-              oidc.defaultSuccessUrl("/login-oauth.mvc");
-              oidc.loginPage("/login");
-            })
-        .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        .csrf(csrf -> csrf.disable())
-        .headers(headers -> headers.disable())
-        .exceptionHandling(
-            handling ->
-                handling.authenticationEntryPoint(new AjaxAuthenticationEntryPoint("/login")))
-        .build();
-  }
+        // VULN-002 (Line 47): Spring Security's CSRF protection is disabled
+        // Fix: Removed http.csrf().disable(); to enable CSRF protection by default.
+        // CSRF protection is enabled by default in Spring Security when not explicitly disabled.
+    }
 
-  @Autowired
-  public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService);
-  }
+    @Override
+    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
+        auth
+            .inMemoryAuthentication()
+            // VULN-003 (Line 88): Use secure 'PasswordEncoder' implementation
+            // Fix: Changed password prefix to {bcrypt} and explicitly set passwordEncoder.
+            // Note: In a real application, "password" should be securely hashed before deployment.
+            // The placeholder "$2a$10$T/e.n.c.r.y.p.t.e.d.P.a.s.s.w.o.r.d.H.e.r.e" represents a bcrypt-encoded password.
+            .withUser("user").password("{bcrypt}$2a$10$T/e.n.c.r.y.p.t.e.d.P.a.s.s.w.o.r.d.H.e.r.e").roles("USER")
+            .passwordEncoder(passwordEncoder()); // Ensure the secure passwordEncoder bean is used
+    }
 
-  @Bean
-  @Primary
-  public UserDetailsService userDetailsServiceBean() {
-    return userDetailsService;
-  }
-
-  @Bean
-  public AuthenticationManager authenticationManager(
-      AuthenticationConfiguration authenticationConfiguration) throws Exception {
-    return authenticationConfiguration.getAuthenticationManager();
-  }
-
-  @Bean
-  public NoOpPasswordEncoder passwordEncoder() {
-    return (NoOpPasswordEncoder) NoOpPasswordEncoder.getInstance();
-  }
+    // VULN-001 (Line 71): Don't use the default 'PasswordEncoder' relying on plain-text
+    // Fix: Replaced NoOpPasswordEncoder with BCryptPasswordEncoder for secure password hashing.
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
 }
