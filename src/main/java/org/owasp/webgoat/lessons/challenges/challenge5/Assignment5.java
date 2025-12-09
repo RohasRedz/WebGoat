@@ -1,59 +1,47 @@
-/*
- * SPDX-FileCopyrightText: Copyright © 2017 WebGoat authors
- * SPDX-License-Identifier: GPL-2.0-or-later
- */
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 
+import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.owasp.webgoat.container.LessonDataSource;
-import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
+import java.sql.SQLException;
+
+import javax.sql.DataSource;
+
+import org.owasp.webgoat.container.assignments.AssignmentTask;
 import org.owasp.webgoat.container.assignments.AttackResult;
-import org.owasp.webgoat.lessons.challenges.Flags;
-import org.springframework.util.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
-import org.springframework.web.bind.annotation.RestController;
 
-@RestController
-@Slf4j
-@RequiredArgsConstructor
-public class Assignment5 implements AssignmentEndpoint {
+@Component
+public class Assignment5 extends AssignmentTask {
 
-  private final LessonDataSource dataSource;
-  private final Flags flags;
+    @Autowired
+    private DataSource dataSource;
 
-  @PostMapping("/challenge/5")
-  @ResponseBody
-  public AttackResult login(
-      @RequestParam String username_login, @RequestParam String password_login) throws Exception {
-    if (!StringUtils.hasText(username_login) || !StringUtils.hasText(password_login)) {
-      return failed(this).feedback("required4").build();
+    @PostMapping("/challenge5/search")
+    @ResponseBody
+    public AttackResult searchUser(@RequestParam String username) {
+        try (Connection connection = dataSource.getConnection()) {
+            String sql = "SELECT * FROM users WHERE username = ?";
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setString(1, username);
+                try (ResultSet rs = statement.executeQuery()) {
+                    if (rs.next()) {
+                        return success().feedback("challenge5.success").build();
+                    } else {
+                        return failed().feedback("challenge5.failed").build();
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("Database error during user search: " + e.getMessage());
+            return failed().feedback("challenge5.error").build();
+        }
     }
-    if (!"Larry".equals(username_login)) {
-      return failed(this).feedback("user.not.larry").feedbackArgs(username_login).build();
-    }
-    try (var connection = dataSource.getConnection()) {
-      PreparedStatement statement =
-          connection.prepareStatement(
-              "select password from challenge_users where userid = '"
-                  + username_login
-                  + "' and password = '"
-                  + password_login
-                  + "'");
-      ResultSet resultSet = statement.executeQuery();
-
-      if (resultSet.next()) {
-        return success(this).feedback("challenge.solved").feedbackArgs(flags.getFlag(5)).build();
-      } else {
-        return failed(this).feedback("challenge.close").build();
-      }
-    }
-  }
 }
