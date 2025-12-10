@@ -12,6 +12,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
@@ -41,31 +43,30 @@ public class ProfileUploadBase implements AssignmentEndpoint {
     if (file.isEmpty()) {
       return failed(this).feedback("path-traversal-profile-empty-file").build();
     }
-    if (!StringUtils.hasText(fullName)) { // Use hasText for better validation
+    if (StringUtils.isEmpty(fullName)) {
       return failed(this).feedback("path-traversal-profile-empty-name").build();
     }
 
-    // Remediation: Sanitize fullName to prevent path traversal
-    String sanitizedFullName = FilenameUtils.getName(fullName); // Get just the filename, remove path info
-    if (!StringUtils.hasText(sanitizedFullName)) {
+    // Sanitize fullName to prevent path traversal in the filename itself
+    String sanitizedFullName = FilenameUtils.getName(fullName);
+    if (sanitizedFullName.isEmpty()) {
         return failed(this).feedback("path-traversal-profile-invalid-filename").build();
     }
 
     File uploadDirectory = cleanupAndCreateDirectoryForUser(username);
-    if (uploadDirectory == null) { // Check if directory creation failed due to invalid username
-        return failed(this).feedback("path-traversal-profile-invalid-username-dir").build();
-    }
 
     try {
-      File uploadedFile = new File(uploadDirectory, sanitizedFullName);
-      // Remediation: Canonical path check before writing
-      String canonicalUploadPath = uploadDirectory.getCanonicalPath();
-      String canonicalTargetFilePath = uploadedFile.getCanonicalPath();
+      // Construct the file path securely
+      Path uploadedFilePath = Paths.get(uploadDirectory.getAbsolutePath(), sanitizedFullName).normalize();
+      File uploadedFile = uploadedFilePath.toFile();
 
-      if (!canonicalTargetFilePath.startsWith(canonicalUploadPath + File.separator)) {
-          // If the canonical path of the target file does not start with the canonical path
-          // of the intended directory, it's a path traversal attempt.
-          return failed(this).feedback("path-traversal-profile-attempt-write").feedbackArgs(canonicalTargetFilePath).build();
+      // Crucial: Canonicalize and validate the path to ensure it's within the intended directory
+      String canonicalUploadDirectoryPath = uploadDirectory.getCanonicalPath();
+      String canonicalUploadedFilePath = uploadedFile.getCanonicalPath();
+
+      if (!canonicalUploadedFilePath.startsWith(canonicalUploadDirectoryPath + File.separator)) {
+          // Attempted path traversal
+          return failed(this).feedback("path-traversal-attempt-detected").build();
       }
 
       uploadedFile.createNewFile();
@@ -86,22 +87,16 @@ public class ProfileUploadBase implements AssignmentEndpoint {
 
   @SneakyThrows
   protected File cleanupAndCreateDirectoryForUser(String username) {
-    // Remediation: Sanitize username for directory creation
-    String sanitizedUsername = username.replaceAll("[^a-zA-Z0-9.-]", "_"); // Allow alphanumeric, dot, dash
-    if (!StringUtils.hasText(sanitizedUsername)) {
-        return null; // Indicate failure to create directory
-    }
+    // Sanitize username to prevent path traversal in directory creation
+    String sanitizedUsername = FilenameUtils.getName(username);
+    Path uploadDirectoryPath = Paths.get(this.webGoatHomeDirectory, "/PathTraversal/" + sanitizedUsername).normalize();
+    File uploadDirectory = uploadDirectoryPath.toFile();
 
-    File baseDir = new File(this.webGoatHomeDirectory);
-    File uploadDirectory = new File(baseDir, "PathTraversal" + File.separator + sanitizedUsername);
-
-    // Remediation: Canonical path check for the created directory
-    String canonicalBaseDir = baseDir.getCanonicalPath();
+    // Ensure the resolved path is within the base directory (optional, but good practice)
+    String canonicalWebGoatHome = new File(this.webGoatHomeDirectory).getCanonicalPath();
     String canonicalUploadDir = uploadDirectory.getCanonicalPath();
-
-    if (!canonicalUploadDir.startsWith(canonicalBaseDir + File.separator + "PathTraversal" + File.separator)) {
-        // Log this as a severe error, should not happen with sanitized username
-        return null;
+    if (!canonicalUploadDir.startsWith(canonicalWebGoatHome)) {
+        throw new IOException("Attempted directory traversal in username for upload directory creation.");
     }
 
     if (uploadDirectory.exists()) {
@@ -136,37 +131,33 @@ public class ProfileUploadBase implements AssignmentEndpoint {
   }
 
   protected byte[] getProfilePictureAsBase64(String username) {
-    // Remediation: Sanitize username for directory access
-    String sanitizedUsername = username.replaceAll("[^a-zA-Z0-9.-]", "_");
-    if (!StringUtils.hasText(sanitizedUsername)) {
+    // Sanitize username to prevent path traversal in directory access
+    String sanitizedUsername = FilenameUtils.getName(username);
+    Path profilePictureDirectoryPath = Paths.get(this.webGoatHomeDirectory, "/PathTraversal/" + sanitizedUsername).normalize();
+    File profilePictureDirectory = profilePictureDirectoryPath.toFile();
+
+    try {
+      // Ensure the resolved path is within the base directory (optional, but good practice)
+      String canonicalWebGoatHome = new File(this.webGoatHomeDirectory).getCanonicalPath();
+      String canonicalProfileDir = profilePictureDirectory.getCanonicalPath();
+      if (!canonicalProfileDir.startsWith(canonicalWebGoatHome)) {
+          // Log this or handle as an error, returning default image for safety
+          return defaultImage();
+      }
+    } catch (IOException e) {
+        // Handle IOException during canonical path resolution, return default image for safety
         return defaultImage();
     }
-
-    File baseDir = new File(this.webGoatHomeDirectory);
-    File profilePictureDirectory = new File(baseDir, "PathTraversal" + File.separator + sanitizedUsername);
-
-    // Remediation: Canonical path check for the accessed directory
-    try {
-        String canonicalBaseDir = baseDir.getCanonicalPath();
-        String canonicalProfileDir = profilePictureDirectory.getCanonicalPath();
-
-        if (!canonicalProfileDir.startsWith(canonicalBaseDir + File.separator + "PathTraversal" + File.separator)) {
-            return defaultImage(); // Path traversal attempt detected
-        }
-    } catch (IOException e) {
-        return defaultImage(); // Error getting canonical path
-    }
-
 
     var profileDirectoryFiles = profilePictureDirectory.listFiles();
 
     if (profileDirectoryFiles != null && profileDirectoryFiles.length > 0) {
       return Arrays.stream(profileDirectoryFiles)
-          .filter(file -> FilenameUtils.isExtension(file.getName(), List.of("jpg", "png")) && !file.getName().contains("..")) // Added check for .. in filename
+          .filter(file -> FilenameUtils.isExtension(file.getName(), List.of("jpg", "png")))
           .findFirst()
           .map(
               file -> {
-                try (var inputStream = new FileInputStream(file)) { // Changed from profileDirectoryFiles[0] to file
+                try (var inputStream = new FileInputStream(profileDirectoryFiles[0])) {
                   return Base64.getEncoder().encode(FileCopyUtils.copyToByteArray(inputStream));
                 } catch (IOException e) {
                   return defaultImage();

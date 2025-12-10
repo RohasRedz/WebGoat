@@ -51,11 +51,10 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
     if (attackResult == null) {
 
       try (Connection connection = dataSource.getConnection()) {
-        // Remediation: Use PreparedStatement with parameterized query for checking user existence
-        String checkUserQuerySql = "select userid from sql_challenge_users where userid = ?";
-        PreparedStatement checkStatement = connection.prepareStatement(checkUserQuerySql);
-        checkStatement.setString(1, username); // Bind username safely
-        ResultSet resultSet = checkStatement.executeQuery();
+        String checkUserQuery = "select userid from sql_challenge_users where userid = ?";
+        PreparedStatement preparedStatementCheck = connection.prepareStatement(checkUserQuery);
+        preparedStatementCheck.setString(1, username);
+        ResultSet resultSet = preparedStatementCheck.executeQuery();
 
         if (resultSet.next()) {
           attackResult = failed(this).feedback("user.exists").feedbackArgs(username).build();
@@ -70,7 +69,6 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
               informationMessage(this).feedback("user.created").feedbackArgs(username).build();
         }
       } catch (SQLException e) {
-        log.error("SQL Exception during user registration: {}", e.getMessage()); // Log the exception
         attackResult = failed(this).output("Something went wrong").build();
       }
     }
@@ -78,9 +76,9 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
   }
 
   private AttackResult checkArguments(String username, String email, String password) {
-    if (!StringUtils.hasText(username)
-        || !StringUtils.hasText(email)
-        || !StringUtils.hasText(password)) {
+    if (StringUtils.isEmpty(username)
+        || StringUtils.isEmpty(email)
+        || StringUtils.isEmpty(password)) {
       return failed(this).feedback("input.invalid").build();
     }
     if (username.length() > 250 || email.length() > 30 || password.length() > 30) {

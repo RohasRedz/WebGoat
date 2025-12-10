@@ -8,8 +8,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.servlet.ModelAndView;
-import java.net.URI;
-import java.net.URISyntaxException;
+import org.springframework.web.servlet.view.RedirectView;
 
 /**
  * Provides a real 302 redirect for experimentation separate from assignment scoring.
@@ -18,24 +17,14 @@ import java.net.URISyntaxException;
 public class OpenRedirectRealRedirect {
 
   @GetMapping("/OpenRedirect/realRedirect")
-  public ModelAndView real(@RequestParam("url") String url) {
-    // Remediation: Validate the 'url' parameter to prevent Open Redirect
-    try {
-      URI uri = new URI(url);
-      // Allow only relative paths (no scheme, no host, starts with /)
-      if (uri.getScheme() == null && uri.getHost() == null && uri.getPath() != null && uri.getPath().startsWith("/")) {
-        // Further sanitize path to prevent path traversal within relative paths
-        String sanitizedPath = uri.normalize().getPath();
-        if (sanitizedPath.contains("..") || sanitizedPath.contains("%2e%2e")) {
-            return new ModelAndView("redirect:/"); // Redirect to a safe default if path traversal attempt
-        }
-        return new ModelAndView("redirect:" + sanitizedPath);
-      }
-    } catch (URISyntaxException e) {
-      // Log the exception for debugging, but do not expose to user
-      // Fall through to safe default redirect
+  public RedirectView real(@RequestParam("url") String url) {
+    // Validate the URL to prevent open redirects
+    if (url != null && url.startsWith("/") && !url.contains("://")) {
+      // Only allow internal redirects
+      return new RedirectView(url);
+    } else {
+      // Redirect to a safe default page or error page if the URL is invalid
+      return new RedirectView("/"); // Redirect to home page or an error page
     }
-    // If validation fails or an exception occurs, redirect to a safe default page
-    return new ModelAndView("redirect:/");
   }
 }

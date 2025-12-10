@@ -14,9 +14,12 @@ import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.io.FilenameUtils;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -28,7 +31,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.util.StringUtils; // Added for StringUtils.hasText
 
 @Slf4j
 @RestController
@@ -55,36 +57,41 @@ public class BlindSendFileAssignment implements AssignmentEndpoint, Initializabl
     var fileContents = "WebGoat 8.0 rocks... (" + randomAlphabetic(10) + ")";
     userToFileContents.put(user, fileContents);
 
-    // Remediation: Sanitize username and perform canonical path check for target directory
-    String sanitizedUsername = user.getUsername().replaceAll("[^a-zA-Z0-9.-]", "_"); // Allow alphanumeric, dot, dash
-    if (!StringUtils.hasText(sanitizedUsername)) {
-        log.error("Sanitized username is empty for user: {}", user.getUsername());
-        return; // Abort if username is invalid
-    }
+    // Sanitize username to prevent path traversal in directory creation
+    String sanitizedUsername = FilenameUtils.getName(user.getUsername());
+    Path targetDirectoryPath = Paths.get(webGoatHomeDirectory, "/XXE/" + sanitizedUsername).normalize();
+    File targetDirectory = targetDirectoryPath.toFile();
 
-    File baseXXEDirectory = new File(webGoatHomeDirectory, "XXE");
-    File targetDirectory = new File(baseXXEDirectory, sanitizedUsername);
-
+    // Ensure the resolved path is within the base directory
     try {
-        String canonicalBaseXXEDir = baseXXEDirectory.getCanonicalPath();
-        String canonicalTargetDir = targetDirectory.getCanonicalPath();
-
-        if (!canonicalTargetDir.startsWith(canonicalBaseXXEDir + File.separator)) {
-            log.error("Path traversal attempt detected for user {} when creating XXE directory: {}", user.getUsername(), canonicalTargetDir);
-            return; // Abort if path traversal detected
-        }
+      String canonicalWebGoatHome = new File(this.webGoatHomeDirectory).getCanonicalPath();
+      String canonicalTargetDir = targetDirectory.getCanonicalPath();
+      if (!canonicalTargetDir.startsWith(canonicalWebGoatHome)) {
+          log.error("Attempted directory traversal in username for secret file directory creation: {}", sanitizedUsername);
+          return; // Abort file creation
+      }
     } catch (IOException e) {
-        log.error("Error getting canonical path for XXE directory for user {}: {}", user.getUsername(), e.getMessage());
-        return; // Abort on IO error
+        log.error("Error canonicalizing paths for secret file directory: {}", sanitizedUsername, e);
+        return;
     }
 
     if (!targetDirectory.exists()) {
       targetDirectory.mkdirs();
     }
     try {
-      Files.writeString(new File(targetDirectory, "secret.txt").toPath(), fileContents, UTF_8);
+      // Ensure the file is created within the canonical path of the targetDirectory
+      File secretFile = new File(targetDirectory, "secret.txt");
+      String canonicalTargetDirPath = targetDirectory.getCanonicalPath();
+      String canonicalSecretFilePath = secretFile.getCanonicalPath();
+
+      if (!canonicalSecretFilePath.startsWith(canonicalTargetDirPath + File.separator)) {
+          log.error("Attempted path traversal when creating secret file for user: {}", sanitizedUsername);
+          return; // Abort file creation
+      }
+
+      Files.writeString(secretFile.toPath(), fileContents, UTF_8);
     } catch (IOException e) {
-      log.error("Unable to write 'secret.txt' to '{}' for user {}: {}", targetDirectory, user.getUsername(), e.getMessage());
+      log.error("Unable to write 'secret.txt' to '{}'", targetDirectory, e);
     }
   }
 
