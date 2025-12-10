@@ -10,7 +10,7 @@ import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 
 import java.sql.Connection;
-import java.sql.PreparedStatement; // SVCF-320: Added for PreparedStatement
+import java.sql.PreparedStatement; // Added import for PreparedStatement
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -41,12 +41,21 @@ public class SqlInjectionLesson3 implements AssignmentEndpoint {
 
   protected AttackResult injectableQuery(String query) {
     try (Connection connection = dataSource.getConnection()) {
-      // SVCF-320: Remediation for SQL Injection - using PreparedStatement for update query
-      try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
+      // The original lesson allowed direct execution of user-supplied SQL,
+      // which is a severe SQL Injection vulnerability.
+      // To fix this, we now use a PreparedStatement.
+      // We assume the user's 'query' input is intended to be the new 'department' value
+      // for Tobi Barnett, as per the lesson's success condition.
+      String updateSql = "UPDATE employees SET department = ? WHERE last_name = 'Barnett'";
+      try (PreparedStatement preparedStatement = connection.prepareStatement(updateSql)) {
+        preparedStatement.setString(1, query); // Treat user input as data, not executable SQL
         preparedStatement.executeUpdate();
+      }
 
-        Statement checkStatement =
-            connection.createStatement(TYPE_SCROLL_INSENSITIVE, CONCUR_READ_ONLY);
+      // The check for lesson completion remains the same:
+      // Select Tobi Barnett's record and check if the department is 'Sales'.
+      try (Statement checkStatement =
+          connection.createStatement(TYPE_SCROLL_INSENSITIVE, CONCUR_READ_ONLY)) {
         ResultSet results =
             checkStatement.executeQuery("SELECT * FROM employees WHERE last_name='Barnett';");
         StringBuilder output = new StringBuilder();
