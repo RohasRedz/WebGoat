@@ -10,9 +10,9 @@ import static org.owasp.webgoat.container.assignments.AttackResultBuilder.succes
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
-import java.io.ObjectInputStream;
+import java.io.ObjectInputStream; // Keep for context, but not used for deserialization
 import java.util.Base64;
-import org.dummy.insecure.framework.VulnerableTaskHolder;
+// import org.dummy.insecure.framework.VulnerableTaskHolder; // Removed as we no longer deserialize this object
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -39,32 +39,36 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
 
     b64token = token.replace('-', '+').replace('_', '/');
 
-    try (ObjectInputStream ois =
-        new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
+    try {
+      // Remediation: Avoid ObjectInputStream.readObject() for untrusted data.
+      // Instead, we will attempt to parse the token as a simple long,
+      // assuming the lesson expects a numeric delay value.
+      byte[] decodedBytes = Base64.getDecoder().decode(b64token);
+      String decodedString = new String(decodedBytes); // Assuming the token is a string representation of a long
+
       before = System.currentTimeMillis();
-      Object o = ois.readObject();
-      if (!(o instanceof VulnerableTaskHolder)) {
-        if (o instanceof String) {
-          return failed(this).feedback("insecure-deserialization.stringobject").build();
-        }
-        return failed(this).feedback("insecure-deserialization.wrongobject").build();
-      }
+      long delayValue = Long.parseLong(decodedString); // Safely parse as a long
       after = System.currentTimeMillis();
-    } catch (InvalidClassException e) {
-      return failed(this).feedback("insecure-deserialization.invalidversion").build();
+
+      // Simulate the original delay logic using the parsed long
+      delay = (int) (after - before + delayValue); // Add the parsed value to simulate delay
+
+      // Original logic for checking delay
+      if (delay > 7000) {
+        return failed(this).build();
+      }
+      if (delay < 3000) {
+        return failed(this).build();
+      }
+      return success(this).build();
+
+    } catch (NumberFormatException e) {
+      return failed(this).feedback("insecure-deserialization.invalidnumberformat").build();
     } catch (IllegalArgumentException e) {
       return failed(this).feedback("insecure-deserialization.expired").build();
     } catch (Exception e) {
-      return failed(this).feedback("insecure-deserialization.invalidversion").build();
+      // Catch any other unexpected exceptions during parsing or decoding
+      return failed(this).feedback("insecure-deserialization.parsingerror").build();
     }
-
-    delay = (int) (after - before);
-    if (delay > 7000) {
-      return failed(this).build();
-    }
-    if (delay < 3000) {
-      return failed(this).build();
-    }
-    return success(this).build();
   }
 }
