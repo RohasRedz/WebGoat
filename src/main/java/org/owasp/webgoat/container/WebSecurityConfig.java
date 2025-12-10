@@ -16,8 +16,10 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.password.NoOpPasswordEncoder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // SVCF-322: Added for secure password encoding
+import org.springframework.security.crypto.password.PasswordEncoder; // SVCF-322: Added for secure password encoding
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository; // SVCF-322: Added for CSRF protection
 
 /** Security configuration for WebGoat. */
 @Configuration
@@ -58,7 +60,8 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        .csrf(csrf -> csrf.disable())
+        // SVCF-322: Enabled CSRF protection and configured CookieCsrfTokenRepository
+        .csrf(csrf -> csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
         .headers(headers -> headers.disable())
         .exceptionHandling(
             handling ->
@@ -68,7 +71,7 @@ public class WebSecurityConfig {
 
   @Autowired
   public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService);
+    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder()); // SVCF-322: Configured passwordEncoder
   }
 
   @Bean
@@ -84,7 +87,7 @@ public class WebSecurityConfig {
   }
 
   @Bean
-  public NoOpPasswordEncoder passwordEncoder() {
-    return (NoOpPasswordEncoder) NoOpPasswordEncoder.getInstance();
+  public PasswordEncoder passwordEncoder() { // SVCF-322: Replaced NoOpPasswordEncoder with BCryptPasswordEncoder
+    return new BCryptPasswordEncoder();
   }
 }

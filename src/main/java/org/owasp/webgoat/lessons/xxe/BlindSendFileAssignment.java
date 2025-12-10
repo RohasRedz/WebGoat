@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.io.FilenameUtils; // SVCF-327: Added for path sanitization
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -53,14 +54,23 @@ public class BlindSendFileAssignment implements AssignmentEndpoint, Initializabl
   private void createSecretFileWithRandomContents(WebGoatUser user) {
     var fileContents = "WebGoat 8.0 rocks... (" + randomAlphabetic(10) + ")";
     userToFileContents.put(user, fileContents);
-    File targetDirectory = new File(webGoatHomeDirectory, "/XXE/" + user.getUsername());
+    // SVCF-327: Sanitize username to prevent path traversal in directory name
+    String sanitizedUsername = FilenameUtils.getName(user.getUsername());
+    File targetDirectory = new File(webGoatHomeDirectory, "/XXE/" + sanitizedUsername);
     if (!targetDirectory.exists()) {
       targetDirectory.mkdirs();
     }
     try {
+      // SVCF-327: Canonicalize and validate the path to ensure it's within the intended directory
+      String canonicalBaseDir = new File(webGoatHomeDirectory, "/XXE/").getCanonicalPath();
+      String canonicalTargetDir = targetDirectory.getCanonicalPath();
+      if (!canonicalTargetDir.startsWith(canonicalBaseDir)) {
+        log.error("Path traversal attempt detected for user: {}", user.getUsername());
+        return; // Abort if path traversal is detected
+      }
       Files.writeString(new File(targetDirectory, "secret.txt").toPath(), fileContents, UTF_8);
     } catch (IOException e) {
-      log.error("Unable to write 'secret.txt' to '{}", targetDirectory);
+      log.error("Unable to write 'secret.txt' to '{}': {}", targetDirectory, e.getMessage());
     }
   }
 

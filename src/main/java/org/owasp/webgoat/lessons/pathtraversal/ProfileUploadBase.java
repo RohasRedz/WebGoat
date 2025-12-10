@@ -12,6 +12,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path; // SVCF-325: Added for path normalization
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
@@ -46,9 +47,19 @@ public class ProfileUploadBase implements AssignmentEndpoint {
     }
 
     File uploadDirectory = cleanupAndCreateDirectoryForUser(username);
+    // SVCF-325: Sanitize fullName to prevent path traversal in filename
+    String sanitizedFullName = FilenameUtils.getName(fullName);
 
     try {
-      var uploadedFile = new File(uploadDirectory, fullName);
+      var uploadedFile = new File(uploadDirectory, sanitizedFullName); // SVCF-325: Use sanitized filename
+      // SVCF-325: Canonicalize and validate the path to ensure it's within the intended directory
+      String canonicalUploadPath = uploadDirectory.getCanonicalPath();
+      String canonicalFilePath = uploadedFile.getCanonicalPath();
+
+      if (!canonicalFilePath.startsWith(canonicalUploadPath + File.separator)) {
+        return failed(this).feedback("path-traversal-attempt-detected").build();
+      }
+
       uploadedFile.createNewFile();
       FileCopyUtils.copy(file.getBytes(), uploadedFile);
 
@@ -67,7 +78,9 @@ public class ProfileUploadBase implements AssignmentEndpoint {
 
   @SneakyThrows
   protected File cleanupAndCreateDirectoryForUser(String username) {
-    var uploadDirectory = new File(this.webGoatHomeDirectory, "/PathTraversal/" + username);
+    // SVCF-325: Ensure username is sanitized to prevent path traversal in directory name
+    String sanitizedUsername = FilenameUtils.getName(username);
+    var uploadDirectory = new File(this.webGoatHomeDirectory, "/PathTraversal/" + sanitizedUsername);
     if (uploadDirectory.exists()) {
       FileSystemUtils.deleteRecursively(uploadDirectory);
     }
@@ -77,6 +90,7 @@ public class ProfileUploadBase implements AssignmentEndpoint {
 
   private boolean attemptWasMade(File expectedUploadDirectory, File uploadedFile)
       throws IOException {
+    // SVCF-325: Ensure canonical paths are compared for accurate path traversal detection
     return !expectedUploadDirectory
         .getCanonicalPath()
         .equals(uploadedFile.getParentFile().getCanonicalPath());
@@ -100,7 +114,21 @@ public class ProfileUploadBase implements AssignmentEndpoint {
   }
 
   protected byte[] getProfilePictureAsBase64(String username) {
-    var profilePictureDirectory = new File(this.webGoatHomeDirectory, "/PathTraversal/" + username);
+    // SVCF-325: Ensure username is sanitized to prevent path traversal in directory name
+    String sanitizedUsername = FilenameUtils.getName(username);
+    var profilePictureDirectory = new File(this.webGoatHomeDirectory, "/PathTraversal/" + sanitizedUsername);
+    // SVCF-325: Canonicalize and validate the path to ensure it's within the intended directory
+    String canonicalBaseDir;
+    try {
+      canonicalBaseDir = new File(this.webGoatHomeDirectory, "/PathTraversal/").getCanonicalPath();
+      String canonicalProfileDir = profilePictureDirectory.getCanonicalPath();
+      if (!canonicalProfileDir.startsWith(canonicalBaseDir)) {
+        return defaultImage(); // Path traversal attempt, return default image
+      }
+    } catch (IOException e) {
+      return defaultImage();
+    }
+
     var profileDirectoryFiles = profilePictureDirectory.listFiles();
 
     if (profileDirectoryFiles != null && profileDirectoryFiles.length > 0) {
