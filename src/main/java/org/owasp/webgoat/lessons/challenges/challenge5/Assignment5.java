@@ -1,1 +1,57 @@
-/*\n * SPDX-FileCopyrightText: Copyright © 2017 WebGoat authors\n * SPDX-License-Identifier: GPL-2.0-or-later\n */\npackage org.owasp.webgoat.lessons.challenges.challenge5;\n\nimport static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;\nimport static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;\n\nimport java.sql.PreparedStatement;\nimport java.sql.ResultSet;\nimport lombok.RequiredArgsConstructor;\nimport lombok.extern.slf4j.Slf4j;\nimport org.owasp.webgoat.container.LessonDataSource;\nimport org.owasp.webgoat.container.assignments.AssignmentEndpoint;\nimport org.owasp.webgoat.container.assignments.AttackResult;\nimport org.owasp.webgoat.lessons.challenges.Flags;\nimport org.springframework.util.StringUtils;\nimport org.springframework.web.bind.annotation.PostMapping;\nimport org.springframework.web.bind.annotation.RequestParam;\nimport org.springframework.web.bind.annotation.ResponseBody;\nimport org.springframework.web.bind.annotation.RestController;\n\n@RestController\n@Slf4j\n@RequiredArgsConstructor\npublic class Assignment5 implements AssignmentEndpoint {\n\n  private final LessonDataSource dataSource;\n  private final Flags flags;\n\n  @PostMapping(\"/challenge/5\")\n  @ResponseBody\n  public AttackResult login(\n      @RequestParam String username_login, @RequestParam String password_login) throws Exception {\n    if (!StringUtils.hasText(username_login) || !StringUtils.hasText(password_login)) {\n      return failed(this).feedback(\"required4\").build();\n    }\n    if (!\"Larry\".equals(username_login)) {\n      return failed(this).feedback(\"user.not.larry\").feedbackArgs(username_login).build();\n    }\n    try (var connection = dataSource.getConnection()) {\n      PreparedStatement statement =\n          connection.prepareStatement(\n              \"select password from challenge_users where userid = ? and password = ?\");\n      statement.setString(1, username_login);\n      statement.setString(2, password_login);\n      ResultSet resultSet = statement.executeQuery();\n\n      if (resultSet.next()) {\n        return success(this).feedback(\"challenge.solved\").feedbackArgs(flags.getFlag(5)).build();\n      } else {\n        return failed(this).feedback(\"challenge.close\").build();\n      }\n    }\n  }\n}\n
+/*
+ * SPDX-FileCopyrightText: Copyright © 2017 WebGoat authors
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
+package org.owasp.webgoat.lessons.challenges.challenge5;
+
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
+
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.owasp.webgoat.container.LessonDataSource;
+import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
+import org.owasp.webgoat.container.assignments.AttackResult;
+import org.owasp.webgoat.lessons.challenges.Flags;
+import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@Slf4j
+@RequiredArgsConstructor
+public class Assignment5 implements AssignmentEndpoint {
+
+  private final LessonDataSource dataSource;
+  private final Flags flags;
+
+  @PostMapping("/challenge/5")
+  @ResponseBody
+  public AttackResult login(
+      @RequestParam String username_login, @RequestParam String password_login) throws Exception {
+    if (!StringUtils.hasText(username_login) || !StringUtils.hasText(password_login)) {
+      return failed(this).feedback("required4").build();
+    }
+    if (!"Larry".equals(username_login)) {
+      return failed(this).feedback("user.not.larry").feedbackArgs(username_login).build();
+    }
+    try (var connection = dataSource.getConnection()) {
+      PreparedStatement statement =
+          connection.prepareStatement(
+              "select password from challenge_users where userid = ? and password = ?");
+      statement.setString(1, username_login);
+      statement.setString(2, password_login);
+      ResultSet resultSet = statement.executeQuery();
+
+      if (resultSet.next()) {
+        return success(this).feedback("challenge.solved").feedbackArgs(flags.getFlag(5)).build();
+      } else {
+        return failed(this).feedback("challenge.close").build();
+      }
+    }
+  }
+}
