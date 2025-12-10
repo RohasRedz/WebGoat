@@ -7,7 +7,11 @@ package org.owasp.webgoat.lessons.sqlinjection.advanced;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.informationMessage;
 
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement; // Explicitly import PreparedStatement
+import java.sql.ResultSet;
+import java.sql.SQLException;
+// import java.sql.Statement; // Removed as it's no longer needed for the vulnerable query
 import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -40,7 +44,7 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
   }
 
   @PutMapping("/SqlInjectionAdvanced/register")
-  // assignment path is bounded to class so we use different http method :-)
+  // assignment path is bounded to class so we use different http method :-)"
   @ResponseBody
   public AttackResult registerNewUser(
       @RequestParam("username_reg") String username,
@@ -51,24 +55,29 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
     if (attackResult == null) {
 
       try (Connection connection = dataSource.getConnection()) {
-        String checkUserQuery =
-            "select userid from sql_challenge_users where userid = '" + username + "'";
-        Statement statement = connection.createStatement();
-        ResultSet resultSet = statement.executeQuery(checkUserQuery);
+        // Vulnerability: SQL query built directly from user input (CWE-89)
+        // Fix: Refactored to use a PreparedStatement with a parameter placeholder
+        // to prevent SQL Injection.
+        String checkUserQuery = "select userid from sql_challenge_users where userid = ?";
+        try (PreparedStatement checkStatement = connection.prepareStatement(checkUserQuery)) {
+          checkStatement.setString(1, username); // Bind username to the placeholder
+          ResultSet resultSet = checkStatement.executeQuery();
 
-        if (resultSet.next()) {
-          attackResult = failed(this).feedback("user.exists").feedbackArgs(username).build();
-        } else {
-          PreparedStatement preparedStatement =
-              connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)");
-          preparedStatement.setString(1, username);
-          preparedStatement.setString(2, email);
-          preparedStatement.setString(3, password);
-          preparedStatement.execute();
-          attackResult =
-              informationMessage(this).feedback("user.created").feedbackArgs(username).build();
-        }
+          if (resultSet.next()) {
+            attackResult = failed(this).feedback("user.exists").feedbackArgs(username).build();
+          } else {
+            PreparedStatement preparedStatement =
+                connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)");
+            preparedStatement.setString(1, username);
+            preparedStatement.setString(2, email);
+            preparedStatement.setString(3, password);
+            preparedStatement.execute();
+            attackResult =
+                informationMessage(this).feedback("user.created").feedbackArgs(username).build();
+          }
+        } // checkStatement is closed automatically by try-with-resources
       } catch (SQLException e) {
+        log.error("SQL Exception during user registration", e); // Log the exception for debugging
         attackResult = failed(this).output("Something went wrong").build();
       }
     }
