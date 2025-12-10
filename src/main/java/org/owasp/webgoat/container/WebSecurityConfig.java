@@ -16,10 +16,9 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added import for BCryptPasswordEncoder
-import org.springframework.security.crypto.password.PasswordEncoder; // Added import for PasswordEncoder
-// import org.springframework.security.crypto.password.NoOpPasswordEncoder; // Removed NoOpPasswordEncoder
-import static org.springframework.security.config.Customizer.withDefaults; // Added import for withDefaults
+// SVCF-222: Import BCryptPasswordEncoder for secure password hashing
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder; // SVCF-222: Use generic PasswordEncoder interface
 import org.springframework.security.web.SecurityFilterChain;
 
 /** Security configuration for WebGoat. */
@@ -61,7 +60,9 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        .csrf(withDefaults()) // Enabled CSRF protection by removing .disable()
+        // SVCF-222: Removed csrf.disable() to enable CSRF protection.
+        // Added ignoringRequestMatchers for h2-console as it typically doesn't use CSRF tokens.
+        .csrf(csrf -> csrf.ignoringRequestMatchers("/h2-console/**"))
         .headers(headers -> headers.disable())
         .exceptionHandling(
             handling ->
@@ -71,7 +72,9 @@ public class WebSecurityConfig {
 
   @Autowired
   public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder()); // Added passwordEncoder
+    auth.userDetailsService(userDetailsService)
+        // SVCF-222: Ensure AuthenticationManagerBuilder uses the secure password encoder
+        .passwordEncoder(passwordEncoder());
   }
 
   @Bean
@@ -87,7 +90,8 @@ public class WebSecurityConfig {
   }
 
   @Bean
-  public PasswordEncoder passwordEncoder() { // Changed to use BCryptPasswordEncoder
+  // SVCF-222: Replaced NoOpPasswordEncoder with BCryptPasswordEncoder for secure password hashing (CWE-916)
+  public PasswordEncoder passwordEncoder() {
     return new BCryptPasswordEncoder();
   }
 }
