@@ -59,6 +59,7 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
+        // .csrf(csrf -> csrf.disable()) // Removed to enable CSRF protection by default
         .headers(headers -> headers.disable())
         .exceptionHandling(
             handling ->
@@ -68,7 +69,7 @@ public class WebSecurityConfig {
 
   @Autowired
   public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder());
+    auth.userDetailsService(userDetailsService);
   }
 
   @Bean
