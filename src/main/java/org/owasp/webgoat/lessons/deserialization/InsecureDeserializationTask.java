@@ -11,7 +11,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
-import java.io.ObjectStreamClass;
+import java.io.ObjectInputFilter; // Added for deserialization allowlist
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -30,49 +30,6 @@ import org.springframework.web.bind.annotation.RestController;
 })
 public class InsecureDeserializationTask implements AssignmentEndpoint {
 
-  /**
-   * A custom ObjectInputStream that whitelists allowed classes during deserialization.
-   * This prevents deserialization of arbitrary types, mitigating gadget chain attacks.
-   */
-  private static class SafeObjectInputStream extends ObjectInputStream {
-    public SafeObjectInputStream(ByteArrayInputStream in) throws IOException {
-      super(in);
-    }
-
-    @Override
-    protected Class<?> resolveClass(ObjectStreamClass desc) throws IOException, ClassNotFoundException {
-      String className = desc.getName();
-
-      // Whitelist only the expected class and common safe types
-      if (className.equals(VulnerableTaskHolder.class.getName()) ||
-          className.equals(String.class.getName()) ||
-          className.equals(Integer.class.getName()) ||
-          className.equals(Long.class.getName()) ||
-          className.equals(Boolean.class.getName()) ||
-          className.equals(Byte.class.getName()) ||
-          className.equals(Short.class.getName()) ||
-          className.equals(Character.class.getName()) ||
-          className.equals(Float.class.getName()) ||
-          className.equals(Double.class.getName()) ||
-          desc.isPrimitive() || // Primitive types (int, boolean, etc.)
-          className.startsWith("[Ljava.lang.String;") || // String[]
-          className.startsWith("[Ljava.lang.Integer;") || // Integer[]
-          className.startsWith("[B") || // byte[]
-          className.startsWith("[S") || // short[]
-          className.startsWith("[I") || // int[]
-          className.startsWith("[J") || // long[]
-          className.startsWith("[F") || // float[]
-          className.startsWith("[D") || // double[]
-          className.startsWith("[Z") || // boolean[]
-          className.startsWith("[C")    // char[]
-          ) {
-        return super.resolveClass(desc);
-      }
-      // If the class is not in the whitelist, prevent its deserialization
-      throw new InvalidClassException("Unauthorized deserialization attempt", className);
-    }
-  }
-
   @PostMapping("/InsecureDeserialization/task")
   @ResponseBody
   public AttackResult completed(@RequestParam String token) throws IOException {
@@ -84,7 +41,27 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
     b64token = token.replace('-', '+').replace('_', '/');
 
     try (ObjectInputStream ois =
-        new SafeObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
+        new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
+      // Apply deserialization filter (allowlist) to prevent arbitrary object deserialization
+      ois.setObjectInputFilter(info -> {
+        if (info.serialClass() != null) {
+          String className = info.serialClass().getName();
+          // Explicitly allow VulnerableTaskHolder and String, and their arrays
+          if (className.equals("org.dummy.insecure.framework.VulnerableTaskHolder") ||
+              className.equals("java.lang.String") ||
+              className.startsWith("[Lorg.dummy.insecure.framework.VulnerableTaskHolder;") || // Array of VulnerableTaskHolder
+              className.startsWith("[Ljava.lang.String;")) { // Array of String
+            return ObjectInputFilter.Status.ALLOWED;
+          }
+          // Allow primitive types and arrays of primitives
+          if (info.serialClass().isPrimitive() || (info.serialClass().isArray() && info.serialClass().getComponentType().isPrimitive())) {
+              return ObjectInputFilter.Status.ALLOWED;
+          }
+        }
+        // Reject all other classes to prevent deserialization gadget chains
+        return ObjectInputFilter.Status.REJECTED;
+      });
+
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
@@ -95,12 +72,12 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       }
       after = System.currentTimeMillis();
     } catch (InvalidClassException e) {
-      // Catch our custom InvalidClassException for unauthorized types
-      return failed(this).feedback("insecure-deserialization.unauthorizedtype").build();
+      // This catch will now also handle classes rejected by the filter
+      return failed(this).feedback("insecure-deserialization.invalidversion").build();
     } catch (IllegalArgumentException e) {
       return failed(this).feedback("insecure-deserialization.expired").build();
     } catch (Exception e) {
-      // Catch other potential deserialization exceptions (e.g., ClassNotFoundException for whitelisted but missing classes)
+      // Generic catch-all for other deserialization errors
       return failed(this).feedback("insecure-deserialization.invalidversion").build();
     }
 
