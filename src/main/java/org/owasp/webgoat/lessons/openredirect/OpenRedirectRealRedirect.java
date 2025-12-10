@@ -17,7 +17,16 @@ public class OpenRedirectRealRedirect {
 
   @GetMapping("/OpenRedirect/realRedirect")
   public ModelAndView real(@RequestParam("url") String url) {
-    // Intentionally vulnerable: no validation
-    return new ModelAndView("redirect:" + url);
+    // Vulnerability: Open Redirect (CWE-601) - 'url' parameter used directly in redirect without validation.
+    // Fix: Validate the 'url' parameter to ensure it points to an internal path
+    // or redirect to a safe default if it's an external or invalid URL.
+    if (url != null && url.startsWith("/")) {
+      // Only allow redirects to internal paths within the application.
+      return new ModelAndView("redirect:" + url);
+    } else {
+      // For external or invalid URLs, redirect to a safe default page.
+      // This prevents attackers from redirecting users to malicious sites.
+      return new ModelAndView("redirect:/"); // Redirect to application root or a safe default page
+    }
   }
 }
