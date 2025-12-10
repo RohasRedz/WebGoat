@@ -9,9 +9,9 @@ import static org.owasp.webgoat.container.assignments.AttackResultBuilder.succes
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream; // Added missing import for InputStream
 import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
-import java.io.InputStream;
 import java.io.ObjectStreamClass;
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
@@ -42,7 +42,7 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
     b64token = token.replace('-', '+').replace('_', '/');
 
     try (ObjectInputStream ois =
-        new SecureObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
+        new SafeObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
@@ -53,11 +53,12 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       }
       after = System.currentTimeMillis();
     } catch (InvalidClassException e) {
-      // This catch block will now also handle InvalidClassException thrown by SecureObjectInputStream
+      // This catch block will now also handle InvalidClassException thrown by SafeObjectInputStream
       return failed(this).feedback("insecure-deserialization.invalidversion").build();
     } catch (IllegalArgumentException e) {
       return failed(this).feedback("insecure-deserialization.expired").build();
     } catch (Exception e) {
+      // Generic exception catch, preserved from original code
       return failed(this).feedback("insecure-deserialization.invalidversion").build();
     }
 
@@ -72,27 +73,27 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
   }
 
   /**
-   * A custom ObjectInputStream that whitelists allowed classes during deserialization
-   * to prevent insecure deserialization vulnerabilities (CWE-502).
-   * Only 'VulnerableTaskHolder', primitive types, arrays of objects, and basic java.lang types
-   * are permitted to be deserialized.
+   * Custom ObjectInputStream that implements a class whitelisting mechanism.
+   * Only allows deserialization of `VulnerableTaskHolder` and `String` classes,
+   * rejecting all others to prevent gadget chain attacks.
    */
-  private static class SecureObjectInputStream extends ObjectInputStream {
-      public SecureObjectInputStream(InputStream in) throws IOException {
-          super(in);
-      }
+  private static class SafeObjectInputStream extends ObjectInputStream {
+    public SafeObjectInputStream(InputStream in) throws IOException {
+      super(in);
+    }
 
-      @Override
-      protected Class<?> resolveClass(ObjectStreamClass desc) throws IOException, ClassNotFoundException {
-          // Whitelist specific classes and types that are expected to be deserialized.
-          // Any other class will trigger an InvalidClassException, preventing malicious deserialization.
-          if (desc.getName().equals("org.dummy.insecure.framework.VulnerableTaskHolder") ||
-              desc.isPrimitive() || // Allow primitive types (e.g., int, boolean)
-              desc.getName().startsWith("[L") || // Allow arrays of objects (e.g., [Ljava.lang.String;)
-              desc.getName().startsWith("java.lang.")) { // Allow basic Java language types (e.g., String, Integer)
-              return super.resolveClass(desc);
-          }
-          throw new InvalidClassException("Unauthorized deserialization attempt", desc.getName());
+    @Override
+    protected Class<?> resolveClass(ObjectStreamClass desc) throws IOException, ClassNotFoundException {
+      String className = desc.getName();
+      // Whitelist only the expected classes for this challenge.
+      // VulnerableTaskHolder is the primary expected object.
+      // String is also allowed as per the original logic that checks for it.
+      if (className.equals(VulnerableTaskHolder.class.getName()) ||
+          className.equals(String.class.getName())) {
+        return super.resolveClass(desc);
       }
+      // For any other class, throw an InvalidClassException to prevent deserialization.
+      throw new InvalidClassException("Unauthorized deserialization attempt", className);
+    }
   }
 }
