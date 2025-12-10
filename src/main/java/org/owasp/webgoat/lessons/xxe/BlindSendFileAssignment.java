@@ -1,1 +1,124 @@
-/*\n * SPDX-FileCopyrightText: Copyright © 2014 WebGoat authors\n * SPDX-License-Identifier: GPL-2.0-or-later\n */\npackage org.owasp.webgoat.lessons.xxe;\n\nimport static java.nio.charset.StandardCharsets.UTF_8;\nimport static org.apache.commons.lang3.RandomStringUtils.randomAlphabetic;\nimport static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;\nimport static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;\nimport static org.springframework.http.MediaType.ALL_VALUE;\nimport static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;\n\nimport java.io.File;\nimport java.io.IOException;\nimport java.nio.file.Files;\nimport java.util.HashMap;\nimport java.util.Map;\nimport lombok.extern.slf4j.Slf4j;\nimport org.apache.commons.io.FilenameUtils;\nimport org.owasp.webgoat.container.assignments.AssignmentEndpoint;\nimport org.owasp.webgoat.container.assignments.AssignmentHints;\nimport org.owasp.webgoat.container.assignments.AttackResult;\nimport org.owasp.webgoat.container.lessons.Initializable;\nimport org.owasp.webgoat.container.users.WebGoatUser;\nimport org.springframework.beans.factory.annotation.Value;\nimport org.springframework.security.core.annotation.AuthenticationPrincipal;\nimport org.springframework.web.bind.annotation.PostMapping;\nimport org.springframework.web.bind.annotation.RequestBody;\nimport org.springframework.web.bind.annotation.ResponseBody;\nimport org.springframework.web.bind.annotation.RestController;\n\n@Slf4j\n@RestController\n@AssignmentHints({\n  \"xxe.blind.hints.1\",\n  \"xxe.blind.hints.2\",\n  \"xxe.blind.hints.3\",\n  \"xxe.blind.hints.4\",\n  \"xxe.blind.hints.5\"\n})\npublic class BlindSendFileAssignment implements AssignmentEndpoint, Initializable {\n\n  private final String webGoatHomeDirectory;\n  private final CommentsCache comments;\n  private final Map<WebGoatUser, String> userToFileContents = new HashMap<>();\n\n  public BlindSendFileAssignment(\n      @Value(\"${webgoat.user.directory}\") String webGoatHomeDirectory, CommentsCache comments) {\n    this.webGoatHomeDirectory = webGoatHomeDirectory;\n    this.comments = comments;\n  }\n\n  private void createSecretFileWithRandomContents(WebGoatUser user) {\n    var fileContents = \"WebGoat 8.0 rocks... (\" + randomAlphabetic(10) + \")\";\n    userToFileContents.put(user, fileContents);\n    // Sanitize username to prevent path traversal\n    String sanitizedUsername = FilenameUtils.getName(user.getUsername());\n    File targetDirectory = new File(webGoatHomeDirectory, \"/XXE/\" + sanitizedUsername);\n    if (!targetDirectory.exists()) {\n      targetDirectory.mkdirs();\n    }\n    try {\n      Files.writeString(new File(targetDirectory, \"secret.txt\").toPath(), fileContents, UTF_8);\n    } catch (IOException e) {\n      log.error(\"Unable to write 'secret.txt' to '{}\", targetDirectory);\n    }\n  }\n\n  @PostMapping(path = \"xxe/blind\", consumes = ALL_VALUE, produces = APPLICATION_JSON_VALUE)\n  @ResponseBody\n  public AttackResult addComment(\n      @RequestBody String commentStr, @AuthenticationPrincipal WebGoatUser user) {\n    var fileContentsForUser = userToFileContents.getOrDefault(user, \"\");\n\n    // Solution is posted by the user as a separate comment\n    if (commentStr.contains(fileContentsForUser)) {\n      return success(this).build();\n    }\n\n    try {\n      Comment comment = comments.parseXml(commentStr, false);\n      if (fileContentsForUser.contains(comment.getText())) {\n        comment.setText(\"Nice try, you need to send the file to WebWolf\");\n      }\n      comments.addComment(comment, user, false);\n    } catch (Exception e) {\n      return failed(this).output(e.toString()).build();\n    }\n    return failed(this).build();\n  }\n\n  @Override\n  public void initialize(WebGoatUser user) {\n    comments.reset(user);\n    userToFileContents.remove(user);\n    createSecretFileWithRandomContents(user);\n  }\n}\n
+/*
+ * SPDX-FileCopyrightText: Copyright © 2014 WebGoat authors
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
+package org.owasp.webgoat.lessons.xxe;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.commons.lang3.RandomStringUtils.randomAlphabetic;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
+import static org.springframework.http.MediaType.ALL_VALUE;
+import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path; // Added for Path operations
+import java.nio.file.Paths; // Added for Path operations
+import java.util.HashMap;
+import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
+import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
+import org.owasp.webgoat.container.assignments.AssignmentHints;
+import org.owasp.webgoat.container.assignments.AttackResult;
+import org.owasp.webgoat.container.lessons.Initializable;
+import org.owasp.webgoat.container.users.WebGoatUser;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.bind.annotation.RestController;
+
+@Slf4j
+@RestController
+@AssignmentHints({
+  "xxe.blind.hints.1",
+  "xxe.blind.hints.2",
+  "xxe.blind.hints.3",
+  "xxe.blind.hints.4",
+  "xxe.blind.hints.5"
+})
+public class BlindSendFileAssignment implements AssignmentEndpoint, Initializable {
+
+  private final String webGoatHomeDirectory;
+  private final CommentsCache comments;
+  private final Map<WebGoatUser, String> userToFileContents = new HashMap<>();
+
+  public BlindSendFileAssignment(
+      @Value("${webgoat.user.directory}") String webGoatHomeDirectory, CommentsCache comments) {
+    this.webGoatHomeDirectory = webGoatHomeDirectory;
+    this.comments = comments;
+  }
+
+  // Helper method to validate if a target path is within a base directory
+  private boolean isPathWithinBase(File baseDir, File targetFile) throws IOException {
+    // Get canonical paths to resolve any '..' or '.' components
+    Path canonicalBasePath = baseDir.getCanonicalFile().toPath();
+    Path canonicalTargetPath = targetFile.getCanonicalFile().toPath();
+
+    // Check if the target path starts with the base path
+    return canonicalTargetPath.startsWith(canonicalBasePath);
+  }
+
+  private void createSecretFileWithRandomContents(WebGoatUser user) {
+    var fileContents = "WebGoat 8.0 rocks... (" + randomAlphabetic(10) + ")";
+    userToFileContents.put(user, fileContents);
+
+    // Sanitize username to prevent path traversal
+    // Allow alphanumeric, hyphen, underscore, and dot. Remove any other characters.
+    String sanitizedUsername = user.getUsername().replaceAll("[^a-zA-Z0-9-_.]", "");
+    if (sanitizedUsername.isEmpty()) {
+      log.error("Sanitized username is empty for user: {}", user.getUsername());
+      return; // Do not create file for invalid username
+    }
+
+    File targetDirectory = new File(webGoatHomeDirectory, "XXE" + File.separator + sanitizedUsername);
+
+    try {
+      // Validate targetDirectory is within webGoatHomeDirectory
+      if (!isPathWithinBase(new File(webGoatHomeDirectory), targetDirectory)) {
+        log.error("Attempted path traversal detected for user: {} in directory: {}", user.getUsername(), targetDirectory.getAbsolutePath());
+        return; // Prevent creating directory outside intended base
+      }
+
+      if (!targetDirectory.exists()) {
+        targetDirectory.mkdirs();
+      }
+      Files.writeString(new File(targetDirectory, "secret.txt").toPath(), fileContents, UTF_8);
+    } catch (IOException e) {
+      log.error("Unable to write 'secret.txt' to '{}' for user '{}': {}", targetDirectory, user.getUsername(), e.getMessage());
+    }
+  }
+
+  @PostMapping(path = "xxe/blind", consumes = ALL_VALUE, produces = APPLICATION_JSON_VALUE)
+  @ResponseBody
+  public AttackResult addComment(
+      @RequestBody String commentStr, @AuthenticationPrincipal WebGoatUser user) {
+    var fileContentsForUser = userToFileContents.getOrDefault(user, "");
+
+    // Solution is posted by the user as a separate comment
+    if (commentStr.contains(fileContentsForUser)) {
+      return success(this).build();
+    }
+
+    try {
+      Comment comment = comments.parseXml(commentStr, false);
+      if (fileContentsForUser.contains(comment.getText())) {
+        comment.setText("Nice try, you need to send the file to WebWolf");
+      }
+      comments.addComment(comment, user, false);
+    } catch (Exception e) {
+      return failed(this).output(e.toString()).build();
+    }
+    return failed(this).build();
+  }
+
+  @Override
+  public void initialize(WebGoatUser user) {
+    comments.reset(user);
+    userToFileContents.remove(user);
+    createSecretFileWithRandomContents(user);
+  }
+}
