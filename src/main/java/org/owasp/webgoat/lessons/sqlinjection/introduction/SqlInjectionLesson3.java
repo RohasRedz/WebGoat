@@ -10,9 +10,12 @@ import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
@@ -39,12 +42,31 @@ public class SqlInjectionLesson3 implements AssignmentEndpoint {
   }
 
   protected AttackResult injectableQuery(String query) {
+    String newDepartment = null;
+    String lastName = null;
+
+    // Simple regex to extract department and last_name from the expected query format
+    Pattern pattern = Pattern.compile("UPDATE employees SET department = '([^']+)' WHERE last_name='([^']+)'", Pattern.CASE_INSENSITIVE);
+    Matcher matcher = pattern.matcher(query.trim());
+
+    if (matcher.matches()) {
+        newDepartment = matcher.group(1);
+        lastName = matcher.group(2);
+    } else {
+        return failed(this).output("Invalid SQL query format. Expected: UPDATE employees SET department = '...' WHERE last_name='...';").build();
+    }
+
     try (Connection connection = dataSource.getConnection()) {
-      try (Statement statement =
+      // Use PreparedStatement for the update to prevent SQL Injection
+      String updateSql = "UPDATE employees SET department = ? WHERE last_name = ?";
+      try (PreparedStatement updateStatement = connection.prepareStatement(updateSql)) {
+          updateStatement.setString(1, newDepartment);
+          updateStatement.setString(2, lastName);
+          updateStatement.executeUpdate();
+      }
+
+      try (Statement checkStatement =
           connection.createStatement(TYPE_SCROLL_INSENSITIVE, CONCUR_READ_ONLY)) {
-        Statement checkStatement =
-            connection.createStatement(TYPE_SCROLL_INSENSITIVE, CONCUR_READ_ONLY);
-        statement.executeUpdate(query);
         ResultSet results =
             checkStatement.executeQuery("SELECT * FROM employees WHERE last_name='Barnett';");
         StringBuilder output = new StringBuilder();
