@@ -50,9 +50,17 @@ public class ProfileUploadBase implements AssignmentEndpoint {
     File uploadDirectory = cleanupAndCreateDirectoryForUser(username);
 
     try {
-      // Remediation: Sanitize fullName to prevent path traversal in filename
-      String sanitizedFullName = FilenameUtils.getName(fullName); // Get only the filename
-      var uploadedFile = new File(uploadDirectory, sanitizedFullName);
+      // Remediation: Sanitize fullName to prevent path traversal and ensure file is within intended directory.
+      // Use FilenameUtils.getName() to get just the filename, preventing directory manipulation.
+      String safeFileName = FilenameUtils.getName(fullName);
+      Path resolvedPath = Paths.get(uploadDirectory.getAbsolutePath(), safeFileName).normalize();
+
+      // Ensure the resolved path is still within the intended upload directory
+      if (!resolvedPath.startsWith(uploadDirectory.toPath())) {
+        return failed(this).feedback("path-traversal-attempt-detected").build();
+      }
+
+      var uploadedFile = resolvedPath.toFile();
       uploadedFile.createNewFile();
       FileCopyUtils.copy(file.getBytes(), uploadedFile);
 
@@ -71,10 +79,15 @@ public class ProfileUploadBase implements AssignmentEndpoint {
 
   @SneakyThrows
   protected File cleanupAndCreateDirectoryForUser(String username) {
-    // Remediation: Sanitize username to prevent path traversal in directory creation
-    String sanitizedUsername = FilenameUtils.getName(username); // Get only the filename part
-    var uploadDirectory =
-        new File(this.webGoatHomeDirectory, "/PathTraversal/" + sanitizedUsername);
+    // Remediation: Ensure username cannot cause path traversal when creating directory
+    // by sanitizing it or ensuring it's just a simple name.
+    // For this context, assuming username is already sanitized or validated to be a simple name.
+    Path userSpecificPath = Paths.get(this.webGoatHomeDirectory, "PathTraversal", username).normalize();
+    if (!userSpecificPath.startsWith(Paths.get(this.webGoatHomeDirectory, "PathTraversal"))) {
+        throw new IOException("Attempted path traversal in username for directory creation.");
+    }
+
+    var uploadDirectory = userSpecificPath.toFile();
     if (uploadDirectory.exists()) {
       FileSystemUtils.deleteRecursively(uploadDirectory);
     }
@@ -84,17 +97,15 @@ public class ProfileUploadBase implements AssignmentEndpoint {
 
   private boolean attemptWasMade(File expectedUploadDirectory, File uploadedFile)
       throws IOException {
-    // Remediation: Use Paths.get().normalize() and startsWith for robust path validation
-    Path expectedPath = expectedUploadDirectory.toPath().normalize();
-    Path uploadedParentPath = uploadedFile.getParentFile().toPath().normalize();
-    return !uploadedParentPath.startsWith(expectedPath);
+    // Remediation: Use canonical paths for comparison to prevent path traversal bypasses
+    return !expectedUploadDirectory
+        .getCanonicalFile()
+        .equals(uploadedFile.getParentFile().getCanonicalFile());
   }
 
   private AttackResult solvedIt(File uploadedFile) throws IOException {
-    // Remediation: Use Paths.get().normalize() for robust path validation
-    Path uploadedFilePath = uploadedFile.toPath().normalize();
-    Path parentPath = uploadedFilePath.getParent();
-    if (parentPath != null && parentPath.getFileName().toString().endsWith("PathTraversal")) {
+    // Remediation: Use canonical path for comparison
+    if (uploadedFile.getCanonicalFile().getParentFile().getName().endsWith("PathTraversal")) {
       return success(this).build();
     }
     return failed(this)
@@ -111,25 +122,21 @@ public class ProfileUploadBase implements AssignmentEndpoint {
   }
 
   protected byte[] getProfilePictureAsBase64(String username) {
-    // Remediation: Sanitize username for directory access
-    String sanitizedUsername = FilenameUtils.getName(username);
-    var profilePictureDirectory =
-        new File(this.webGoatHomeDirectory, "/PathTraversal/" + sanitizedUsername);
+    // Remediation: Ensure username cannot cause path traversal when accessing directory
+    Path profilePicturePath = Paths.get(this.webGoatHomeDirectory, "PathTraversal", username).normalize();
+    if (!profilePicturePath.startsWith(Paths.get(this.webGoatHomeDirectory, "PathTraversal"))) {
+        return defaultImage(); // Fallback to default image on traversal attempt
+    }
+    var profilePictureDirectory = profilePicturePath.toFile();
     var profileDirectoryFiles = profilePictureDirectory.listFiles();
 
     if (profileDirectoryFiles != null && profileDirectoryFiles.length > 0) {
       return Arrays.stream(profileDirectoryFiles)
-          .filter(
-              file ->
-                  FilenameUtils.isExtension(file.getName(), List.of("jpg", "png"))
-                      &&
-                      file.toPath()
-                          .normalize()
-                          .startsWith(profilePictureDirectory.toPath().normalize()))
+          .filter(file -> FilenameUtils.isExtension(file.getName(), List.of("jpg", "png")) && !file.getName().contains("..")) // Added check for ".." in filename
           .findFirst()
           .map(
               file -> {
-                try (var inputStream = new FileInputStream(profileDirectoryFiles[0])) {
+                try (var inputStream = new FileInputStream(file)) { // Use 'file' directly
                   return Base64.getEncoder().encode(FileCopyUtils.copyToByteArray(inputStream));
                 } catch (IOException e) {
                   return defaultImage();

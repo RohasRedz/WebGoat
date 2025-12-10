@@ -14,10 +14,11 @@ import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.io.FilenameUtils;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -54,16 +55,26 @@ public class BlindSendFileAssignment implements AssignmentEndpoint, Initializabl
   private void createSecretFileWithRandomContents(WebGoatUser user) {
     var fileContents = "WebGoat 8.0 rocks... (" + randomAlphabetic(10) + ")";
     userToFileContents.put(user, fileContents);
-    // Remediation: Sanitize username to prevent path traversal in directory creation
-    String sanitizedUsername = FilenameUtils.getName(user.getUsername()); // Added sanitization
-    File targetDirectory = new File(webGoatHomeDirectory, "/XXE/" + sanitizedUsername);
+
+    // Remediation: Ensure user.getUsername() cannot cause path traversal.
+    // Normalize the path and verify it stays within the intended base directory.
+    Path baseDir = Paths.get(webGoatHomeDirectory, "XXE");
+    Path userDir = baseDir.resolve(user.getUsername()).normalize();
+
+    // Crucial check: ensure the normalized user directory is still a child of the base directory
+    if (!userDir.startsWith(baseDir)) {
+        log.error("Path traversal attempt detected for user: {}", user.getUsername());
+        return; // Abort file creation
+    }
+
+    File targetDirectory = userDir.toFile();
     if (!targetDirectory.exists()) {
       targetDirectory.mkdirs();
     }
     try {
       Files.writeString(new File(targetDirectory, "secret.txt").toPath(), fileContents, UTF_8);
     } catch (IOException e) {
-      log.error("Unable to write 'secret.txt' to '{}'", targetDirectory);
+      log.error("Unable to write 'secret.txt' to '{}'", targetDirectory, e); // Log exception for debugging
     }
   }
 

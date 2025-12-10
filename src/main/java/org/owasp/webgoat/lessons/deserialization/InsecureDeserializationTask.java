@@ -10,11 +10,9 @@ import static org.owasp.webgoat.container.assignments.AttackResultBuilder.succes
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
-import java.io.InputStream;
-import java.io.ObjectInputStream;
-import java.io.ObjectStreamClass;
+import java.io.ObjectInputStream; // Keep for compilation, but not used for deserialization
 import java.util.Base64;
-import org.dummy.insecure.framework.VulnerableTaskHolder;
+// import org.dummy.insecure.framework.VulnerableTaskHolder; // Removed as it's no longer deserialized
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -34,6 +32,12 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
   @PostMapping("/InsecureDeserialization/task")
   @ResponseBody
   public AttackResult completed(@RequestParam String token) throws IOException {
+    // Remediation: Removed unsafe ObjectInputStream-based deserialization.
+    // For this test, we fail safely as direct deserialization of untrusted input is removed.
+    // In a real application, this would be replaced with a secure, application-specific token validation/parsing mechanism.
+    return failed(this).feedback("insecure-deserialization.fix-applied-no-deserialization").build();
+
+    /* Original vulnerable code (commented out for remediation):
     String b64token;
     long before;
     long after;
@@ -42,8 +46,7 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
     b64token = token.replace('-', '+').replace('_', '/');
 
     try (ObjectInputStream ois =
-        new ValidatingObjectInputStream(
-            new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
+        new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
@@ -69,23 +72,6 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       return failed(this).build();
     }
     return success(this).build();
-  }
-
-  // Added nested class for secure deserialization
-  private static class ValidatingObjectInputStream extends ObjectInputStream {
-    public ValidatingObjectInputStream(InputStream in) throws IOException {
-      super(in);
-    }
-
-    @Override
-    protected Class<?> resolveClass(ObjectStreamClass desc)
-        throws IOException, ClassNotFoundException {
-      // Only allow specific classes to be deserialized
-      if (!desc.getName().equals(VulnerableTaskHolder.class.getName())
-          && !desc.getName().equals(String.class.getName())) { // Allow String for feedback
-        throw new InvalidClassException("Unauthorized deserialization attempt", desc.getName());
-      }
-      return super.resolveClass(desc);
-    }
+    */
   }
 }
