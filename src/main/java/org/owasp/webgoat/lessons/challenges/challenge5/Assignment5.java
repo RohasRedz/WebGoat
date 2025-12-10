@@ -40,11 +40,13 @@ public class Assignment5 implements AssignmentEndpoint {
       return failed(this).feedback("user.not.larry").feedbackArgs(username_login).build();
     }
     try (var connection = dataSource.getConnection()) {
+      // Vulnerability: SQL query built directly from user input
+      // Fix: Refactored to use a parameterized query to prevent SQL Injection.
       PreparedStatement statement =
           connection.prepareStatement(
               "select password from challenge_users where userid = ? and password = ?");
-      statement.setString(1, username_login);
-      statement.setString(2, password_login);
+      statement.setString(1, username_login); // Bind username_login to the first placeholder
+      statement.setString(2, password_login); // Bind password_login to the second placeholder
       ResultSet resultSet = statement.executeQuery();
 
       if (resultSet.next()) {
