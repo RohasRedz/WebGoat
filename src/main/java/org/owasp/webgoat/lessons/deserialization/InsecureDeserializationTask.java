@@ -10,8 +10,9 @@ import static org.owasp.webgoat.container.assignments.AttackResultBuilder.succes
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
+import java.io.InputStream;
 import java.io.ObjectInputStream;
-import java.io.ObjectInputFilter; // SVCF-326: Added for serialization filtering
+import java.io.ObjectStreamClass;
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -41,13 +42,8 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
     b64token = token.replace('-', '+').replace('_', '/');
 
     try (ObjectInputStream ois =
-        new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
-      // SVCF-326: Remediation for Insecure Deserialization - applying serialization filter
-      ObjectInputFilter filter = ObjectInputFilter.Config.createFilter(
-          "org.dummy.insecure.framework.VulnerableTaskHolder;java.lang.String;!*"
-      );
-      ois.setObjectInputFilter(filter);
-
+        new ValidatingObjectInputStream(
+            new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
@@ -73,5 +69,23 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       return failed(this).build();
     }
     return success(this).build();
+  }
+
+  // Added nested class for secure deserialization
+  private static class ValidatingObjectInputStream extends ObjectInputStream {
+    public ValidatingObjectInputStream(InputStream in) throws IOException {
+      super(in);
+    }
+
+    @Override
+    protected Class<?> resolveClass(ObjectStreamClass desc)
+        throws IOException, ClassNotFoundException {
+      // Only allow specific classes to be deserialized
+      if (!desc.getName().equals(VulnerableTaskHolder.class.getName())
+          && !desc.getName().equals(String.class.getName())) { // Allow String for feedback
+        throw new InvalidClassException("Unauthorized deserialization attempt", desc.getName());
+      }
+      return super.resolveClass(desc);
+    }
   }
 }
