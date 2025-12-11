@@ -7,13 +7,14 @@ package org.owasp.webgoat.lessons.deserialization;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InvalidClassException;
-import java.io.ObjectInputStream;
-import java.io.ObjectInputFilter; // Added import for ObjectInputFilter
+import java.nio.charset.StandardCharsets; // REMEDIATION: Added for consistent character encoding
+import java.security.MessageDigest; // REMEDIATION: Added for constant-time comparison
 import java.util.Base64;
-import org.dummy.insecure.framework.VulnerableTaskHolder;
+import java.util.regex.Matcher; // REMEDIATION: Added for basic JSON parsing
+import java.util.regex.Pattern; // REMEDIATION: Added for basic JSON parsing
+import javax.crypto.Mac; // REMEDIATION: Added for HMAC calculation
+import javax.crypto.spec.SecretKeySpec; // REMEDIATION: Added for HMAC calculation
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -30,50 +31,81 @@ import org.springframework.web.bind.annotation.RestController;
 })
 public class InsecureDeserializationTask implements AssignmentEndpoint {
 
+  // REMEDIATION: Define a secure, secret key for HMAC. In a real application, this would be loaded
+  // from a secure configuration management system (e.g., environment variable, Vault).
+  private static final byte[] HMAC_SECRET_KEY_BYTES =
+      "superSecretKeyForWebGoatLesson".getBytes(StandardCharsets.UTF_8);
+  private static final String HMAC_ALGORITHM = "HmacSHA256";
+
   @PostMapping("/InsecureDeserialization/task")
   @ResponseBody
   public AttackResult completed(@RequestParam String token) throws IOException {
     String b64token;
-    long before;
-    long after;
-    int delay;
 
     b64token = token.replace('-', '+').replace('_', '/');
 
-    try (ObjectInputStream ois =
-        new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
-      // Apply serialization filter (JEP 290) to restrict deserializable classes
-      ObjectInputFilter filter = ObjectInputFilter.Config.createFilter(
-          "org.dummy.insecure.framework.VulnerableTaskHolder;java.lang.String;!*");
-      ois.setObjectInputFilter(filter);
+    try {
+      byte[] decodedBytes = Base64.getDecoder().decode(b64token);
+      String jsonPayload = new String(decodedBytes, StandardCharsets.UTF_8);
 
-      before = System.currentTimeMillis();
-      Object o = ois.readObject();
-      if (!(o instanceof VulnerableTaskHolder)) {
-        if (o instanceof String) {
-          return failed(this).feedback("insecure-deserialization.stringobject").build();
-        }
-        return failed(this).feedback("insecure-deserialization.wrongobject").build();
+      // REMEDIATION: Safely parse JSON payload using regex (simplified for this exercise).
+      // In a real application, use a robust JSON library like Jackson or Gson for parsing.
+      Pattern taskPattern = Pattern.compile("\"task\":\"([^\"]*)\"");
+      Pattern expPattern = Pattern.compile("\"exp\":(\\d+)");
+      Pattern sigPattern = Pattern.compile("\"sig\":\"([^\"]*)\"");
+
+      Matcher taskMatcher = taskPattern.matcher(jsonPayload);
+      Matcher expMatcher = expPattern.matcher(jsonPayload);
+      Matcher sigMatcher = sigPattern.matcher(jsonPayload);
+
+      String task = null;
+      long expiration = -1;
+      String receivedSig = null;
+
+      if (taskMatcher.find()) {
+        task = taskMatcher.group(1);
       }
-      after = System.currentTimeMillis();
-    } catch (InvalidClassException e) {
-      return failed(this).feedback("insecure-deserialization.invalidversion").build();
-    } catch (IllegalArgumentException e) {
-      return failed(this).feedback("insecure-deserialization.expired").build();
-    } catch (Exception e) {
-      // Catching generic Exception here is broad, but aligns with original code's error handling.
-      // A more specific catch for ClassNotFoundException or other deserialization issues
-      // could be added for finer-grained error reporting if needed.
-      return failed(this).feedback("insecure-deserialization.invalidversion").build();
-    }
+      if (expMatcher.find()) {
+        expiration = Long.parseLong(expMatcher.group(1));
+      }
+      if (sigMatcher.find()) {
+        receivedSig = sigMatcher.group(1);
+      }
 
-    delay = (int) (after - before);
-    if (delay > 7000) {
-      return failed(this).build();
+      if (task == null || expiration == -1 || receivedSig == null) {
+        return failed(this).feedback("insecure-deserialization.invalid_token_format").build();
+      }
+
+      // REMEDIATION: Validate expiration timestamp to prevent replay attacks with old tokens.
+      if (System.currentTimeMillis() > expiration) {
+        return failed(this).feedback("insecure-deserialization.token_expired").build();
+      }
+
+      // REMEDIATION: Recompute HMAC signature and compare securely using constant-time comparison.
+      Mac hmacSha256 = Mac.getInstance(HMAC_ALGORITHM);
+      SecretKeySpec secretKey = new SecretKeySpec(HMAC_SECRET_KEY_BYTES, HMAC_ALGORITHM);
+      hmacSha256.init(secretKey);
+
+      // The data that was originally signed to create the token's signature
+      String dataToSign = task + expiration;
+      byte[] computedSigBytes = hmacSha256.doFinal(dataToSign.getBytes(StandardCharsets.UTF_8));
+      byte[] receivedSigBytes = Base64.getDecoder().decode(receivedSig);
+
+      // Use constant-time comparison to prevent timing attacks
+      if (!MessageDigest.isEqual(computedSigBytes, receivedSigBytes)) {
+        return failed(this).feedback("insecure-deserialization.invalid_signature").build();
+      }
+
+      // REMEDIATION: If all checks pass, the token is considered valid and processed securely.
+      // The original lesson's timing logic is replaced with secure token validation.
+      return success(this).feedback("insecure-deserialization.secure_token_processed").build();
+
+    } catch (IllegalArgumentException e) {
+      // Catches errors related to malformed Base64 strings
+      return failed(this).feedback("insecure-deserialization.invalid_base64").build();
+    } catch (Exception e) {
+      // Catches any other parsing, cryptographic, or runtime exceptions
+      return failed(this).feedback("insecure-deserialization.token_processing_error").build();
     }
-    if (delay < 3000) {
-      return failed(this).build();
-    }
-    return success(this).build();
   }
 }

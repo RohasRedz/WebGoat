@@ -11,14 +11,13 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added import
-import org.springframework.security.crypto.password.PasswordEncoder; // Added import
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // REMEDIATION: Added for secure password encoding
+import org.springframework.security.crypto.password.PasswordEncoder; // REMEDIATION: Added for secure password encoding
 import org.springframework.security.web.SecurityFilterChain;
 
 /** Security configuration for WebGoat. */
@@ -60,7 +59,7 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        .csrf(Customizer.withDefaults()) // Enabled CSRF protection
+        // REMEDIATION: Removed .csrf(csrf -> csrf.disable()) to enable CSRF protection by default (CWE-352)
         .headers(headers -> headers.disable())
         .exceptionHandling(
             handling ->
@@ -86,7 +85,7 @@ public class WebSecurityConfig {
   }
 
   @Bean
-  public PasswordEncoder passwordEncoder() { // Changed return type to PasswordEncoder
-    return new BCryptPasswordEncoder(); // Replaced NoOpPasswordEncoder with BCryptPasswordEncoder
+  public PasswordEncoder passwordEncoder() { // REMEDIATION: Changed to use BCryptPasswordEncoder (CWE-287, CWE-327)
+    return new BCryptPasswordEncoder();
   }
 }

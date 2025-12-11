@@ -40,11 +40,12 @@ public class Assignment5 implements AssignmentEndpoint {
       return failed(this).feedback("user.not.larry").feedbackArgs(username_login).build();
     }
     try (var connection = dataSource.getConnection()) {
+      // REMEDIATION: Replaced string concatenation with PreparedStatement to prevent SQL Injection (CWE-89)
       PreparedStatement statement =
-          connection.prepareStatement( // SQL query now uses placeholders
+          connection.prepareStatement(
               "select password from challenge_users where userid = ? and password = ?");
-      statement.setString(1, username_login); // Bind username parameter
-      statement.setString(2, password_login); // Bind password parameter
+      statement.setString(1, username_login);
+      statement.setString(2, password_login);
       ResultSet resultSet = statement.executeQuery();
 
       if (resultSet.next()) {
