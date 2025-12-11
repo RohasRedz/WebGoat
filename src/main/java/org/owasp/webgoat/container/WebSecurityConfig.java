@@ -11,14 +11,13 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added for secure password encoding
+import org.springframework.security.crypto.password.PasswordEncoder; // Added for PasswordEncoder interface
 import org.springframework.security.web.SecurityFilterChain;
 
 /** Security configuration for WebGoat. */
@@ -60,8 +59,16 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        .csrf(Customizer.withDefaults()) // ENABLED CSRF PROTECTION
-        .headers(headers -> headers.disable())
+        // VULN-2: CSRF protection enabled by removing .disable(). Spring Security 6+ enables CSRF by default.
+        .csrf(csrf -> {}) // Explicitly configure CSRF to be enabled (default behavior)
+        // CWE-693: Configured security headers instead of disabling them.
+        .headers(headers -> headers
+            .xframeOptions(frame -> frame.deny()) // X-Frame-Options: DENY to prevent clickjacking
+            .contentTypeOptions(options -> options.nosniff()) // X-Content-Type-Options: nosniff to prevent MIME sniffing
+            .referrerPolicy(policy -> policy.strictOriginWhenCrossOrigin()) // Referrer-Policy: strict-origin-when-cross-origin
+            .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'")) // Basic CSP
+            .permissionsPolicy(permissions -> permissions.policy("camera=(), microphone=()")) // Basic Permissions-Policy
+        )
         .exceptionHandling(
             handling ->
                 handling.authenticationEntryPoint(new AjaxAuthenticationEntryPoint("/login")))
@@ -86,7 +93,8 @@ public class WebSecurityConfig {
   }
 
   @Bean
-  public PasswordEncoder passwordEncoder() { // CHANGED RETURN TYPE
-    return new BCryptPasswordEncoder(); // USING BCRYPT FOR PASSWORD ENCODING
+  // VULN-1 & VULN-3: Replaced NoOpPasswordEncoder with BCryptPasswordEncoder for secure password hashing.
+  public PasswordEncoder passwordEncoder() {
+    return new BCryptPasswordEncoder();
   }
 }
