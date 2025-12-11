@@ -12,8 +12,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path; // Added import
-import java.nio.file.Paths; // Added import
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
@@ -50,21 +48,18 @@ public class ProfileUploadBase implements AssignmentEndpoint {
     File uploadDirectory = cleanupAndCreateDirectoryForUser(username);
 
     try {
-      // Remediation: Sanitize fullName to prevent path traversal
-      String sanitizedFileName = FilenameUtils.getName(fullName); // Get only the base filename
+      // Fixed: Sanitize fullName to prevent path traversal
+      String sanitizedFileName = FilenameUtils.getName(fullName);
       if (sanitizedFileName.isEmpty()) {
           return failed(this).feedback("path-traversal-profile-invalid-filename").build();
       }
-
-      // Construct the file path securely
-      Path filePath = Paths.get(uploadDirectory.getAbsolutePath(), sanitizedFileName).normalize();
-
-      // Ensure the resolved path is still within the intended upload directory
-      if (!filePath.startsWith(uploadDirectory.getAbsolutePath())) {
-          return failed(this).feedback("path-traversal-profile-outside-directory").build();
+      var uploadedFile = new File(uploadDirectory, sanitizedFileName);
+      
+      // Ensure the file is created within the intended directory
+      if (!uploadedFile.getCanonicalPath().startsWith(uploadDirectory.getCanonicalPath())) {
+          return failed(this).feedback("path-traversal-profile-attempt-outside-directory").build();
       }
 
-      File uploadedFile = filePath.toFile();
       uploadedFile.createNewFile();
       FileCopyUtils.copy(file.getBytes(), uploadedFile);
 
@@ -83,12 +78,8 @@ public class ProfileUploadBase implements AssignmentEndpoint {
 
   @SneakyThrows
   protected File cleanupAndCreateDirectoryForUser(String username) {
-    // Remediation: Ensure username does not contain path traversal characters
-    String sanitizedUsername = FilenameUtils.getName(username); // Get only the base filename
-    if (sanitizedUsername.isEmpty()) {
-        throw new IOException("Invalid username for directory creation.");
-    }
-
+    // Fixed: Sanitize username to prevent path traversal in directory creation
+    String sanitizedUsername = FilenameUtils.getName(username);
     var uploadDirectory = new File(this.webGoatHomeDirectory, "/PathTraversal/" + sanitizedUsername);
     if (uploadDirectory.exists()) {
       FileSystemUtils.deleteRecursively(uploadDirectory);
@@ -99,14 +90,14 @@ public class ProfileUploadBase implements AssignmentEndpoint {
 
   private boolean attemptWasMade(File expectedUploadDirectory, File uploadedFile)
       throws IOException {
-    // Remediation: Use canonical paths for comparison to prevent path traversal bypasses
+    // This check is good but relies on canonical paths after file creation.
+    // Pre-sanitization of input is more robust.
     return !expectedUploadDirectory
         .getCanonicalPath()
         .equals(uploadedFile.getParentFile().getCanonicalPath());
   }
 
   private AttackResult solvedIt(File uploadedFile) throws IOException {
-    // Remediation: Use canonical paths for comparison to prevent path traversal bypasses
     if (uploadedFile.getCanonicalFile().getParentFile().getName().endsWith("PathTraversal")) {
       return success(this).build();
     }
@@ -124,22 +115,18 @@ public class ProfileUploadBase implements AssignmentEndpoint {
   }
 
   protected byte[] getProfilePictureAsBase64(String username) {
-    // Remediation: Sanitize username for directory access
+    // Fixed: Sanitize username for directory access
     String sanitizedUsername = FilenameUtils.getName(username);
-    if (sanitizedUsername.isEmpty()) {
-        return defaultImage(); // Return default image for invalid username
-    }
-
     var profilePictureDirectory = new File(this.webGoatHomeDirectory, "/PathTraversal/" + sanitizedUsername);
     var profileDirectoryFiles = profilePictureDirectory.listFiles();
 
     if (profileDirectoryFiles != null && profileDirectoryFiles.length > 0) {
       return Arrays.stream(profileDirectoryFiles)
-          .filter(file -> FilenameUtils.isExtension(file.getName(), List.of("jpg", "png")) && !file.isHidden()) // Added !file.isHidden()
+          .filter(file -> FilenameUtils.isExtension(file.getName(), List.of("jpg", "png")))
           .findFirst()
           .map(
               file -> {
-                try (var inputStream = new FileInputStream(file)) { // Use 'file' directly
+                try (var inputStream = new FileInputStream(profileDirectoryFiles[0])) {
                   return Base64.getEncoder().encode(FileCopyUtils.copyToByteArray(inputStream));
                 } catch (IOException e) {
                   return defaultImage();

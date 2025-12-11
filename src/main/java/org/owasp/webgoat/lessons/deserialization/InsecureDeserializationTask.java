@@ -11,7 +11,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
-import java.io.ObjectStreamClass; // Added import
+import java.io.ObjectInputFilter; // Added import
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -41,21 +41,16 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
     b64token = token.replace('-', '+').replace('_', '/');
 
     try (ObjectInputStream ois =
-        new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token))) {
-          // Remediation: Implement a serialization filter to restrict allowed classes
-          @Override
-          protected Class<?> resolveClass(ObjectStreamClass desc) throws IOException, ClassNotFoundException {
-            if (!desc.getName().equals(VulnerableTaskHolder.class.getName()) &&
-                !desc.getName().equals(String.class.getName()) && // Allow String for feedback
-                !desc.getName().startsWith("java.lang.")) { // Allow basic Java types
-              throw new InvalidClassException("Unauthorized deserialization attempt", desc.getName());
-            }
-            return super.resolveClass(desc);
-          }
-        }) {
+        new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
+      // Added serialization filter to restrict allowed classes
+      ois.setObjectInputFilter(ObjectInputFilter.Config.createFilter(
+          "org.dummy.insecure.framework.VulnerableTaskHolder;java.lang.String;java.lang.Long;java.lang.Integer;java.lang.Boolean;java.util.concurrent.TimeUnit;!*"
+      ));
+
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
+        // This check is now redundant due to the filter but kept for lesson context
         if (o instanceof String) {
           return failed(this).feedback("insecure-deserialization.stringobject").build();
         }

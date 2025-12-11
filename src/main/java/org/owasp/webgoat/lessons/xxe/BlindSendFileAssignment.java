@@ -14,8 +14,6 @@ import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path; // Added import
-import java.nio.file.Paths; // Added import
 import java.util.HashMap;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
@@ -56,31 +54,22 @@ public class BlindSendFileAssignment implements AssignmentEndpoint, Initializabl
   private void createSecretFileWithRandomContents(WebGoatUser user) {
     var fileContents = "WebGoat 8.0 rocks... (" + randomAlphabetic(10) + ")";
     userToFileContents.put(user, fileContents);
-
-    // Remediation: Sanitize username and ensure path is within webGoatHomeDirectory
+    // Fixed: Sanitize username to prevent path traversal in directory creation
     String sanitizedUsername = FilenameUtils.getName(user.getUsername());
-    if (sanitizedUsername.isEmpty()) {
-        log.error("Invalid username for secret file creation: {}", user.getUsername());
-        return;
-    }
-
-    Path baseDirPath = Paths.get(webGoatHomeDirectory, "XXE", sanitizedUsername).normalize();
-    File targetDirectory = baseDirPath.toFile();
-
+    File targetDirectory = new File(webGoatHomeDirectory, "/XXE/" + sanitizedUsername);
     if (!targetDirectory.exists()) {
       targetDirectory.mkdirs();
     }
-
     try {
-      // Ensure the file name is fixed and the path is within the base directory
-      Path secretFilePath = baseDirPath.resolve("secret.txt").normalize();
-      if (!secretFilePath.startsWith(baseDirPath)) {
-          log.error("Attempted path traversal during secret file creation for user {}", user.getUsername());
-          return;
+      // Ensure the file is created strictly within the targetDirectory
+      File secretFile = new File(targetDirectory, "secret.txt");
+      if (!secretFile.getCanonicalPath().startsWith(targetDirectory.getCanonicalPath())) {
+          log.error("Attempted path traversal during secret file creation for user: {}", user.getUsername());
+          return; // Abort file creation
       }
-      Files.writeString(secretFilePath, fileContents, UTF_8);
+      Files.writeString(secretFile.toPath(), fileContents, UTF_8);
     } catch (IOException e) {
-      log.error("Unable to write 'secret.txt' to '{}' for user {}", targetDirectory, user.getUsername(), e);
+      log.error("Unable to write 'secret.txt' to '{}/{}'", targetDirectory, e.getMessage());
     }
   }
 

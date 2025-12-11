@@ -51,11 +51,11 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
     if (attackResult == null) {
 
       try (Connection connection = dataSource.getConnection()) {
-        // Remediation: Use PreparedStatement with placeholders for checkUserQuery
-        String checkUserSql = "select userid from sql_challenge_users where userid = ?";
-        PreparedStatement checkStatement = connection.prepareStatement(checkUserSql);
-        checkStatement.setString(1, username);
-        ResultSet resultSet = checkStatement.executeQuery();
+        // Fixed: Using PreparedStatement for checkUserQuery to prevent SQL Injection
+        String checkUserQuerySql = "select userid from sql_challenge_users where userid = ?";
+        PreparedStatement checkUserStatement = connection.prepareStatement(checkUserQuerySql);
+        checkUserStatement.setString(1, username);
+        ResultSet resultSet = checkUserStatement.executeQuery();
 
         if (resultSet.next()) {
           attackResult = failed(this).feedback("user.exists").feedbackArgs(username).build();
@@ -70,8 +70,7 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
               informationMessage(this).feedback("user.created").feedbackArgs(username).build();
         }
       } catch (SQLException e) {
-        log.error("SQL Error during user registration for user {}", username, e); // Log the exception
-        attackResult = failed(this).output("Something went wrong during registration.").build(); // Generic error message
+        attackResult = failed(this).output("Something went wrong").build();
       }
     }
     return attackResult;
