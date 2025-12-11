@@ -7,7 +7,10 @@ package org.owasp.webgoat.lessons.sqlinjection.advanced;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.informationMessage;
 
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -51,11 +54,11 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
     if (attackResult == null) {
 
       try (Connection connection = dataSource.getConnection()) {
-        // Fixed: Using PreparedStatement for checkUserQuery to prevent SQL Injection
-        String checkUserQuerySql = "select userid from sql_challenge_users where userid = ?";
-        PreparedStatement checkUserStatement = connection.prepareStatement(checkUserQuerySql);
-        checkUserStatement.setString(1, username);
-        ResultSet resultSet = checkUserStatement.executeQuery();
+        // Remediation: Using PreparedStatement with parameterized queries to prevent SQL Injection
+        String checkUserQuery = "select userid from sql_challenge_users where userid = ?";
+        PreparedStatement checkUserStmt = connection.prepareStatement(checkUserQuery);
+        checkUserStmt.setString(1, username);
+        ResultSet resultSet = checkUserStmt.executeQuery();
 
         if (resultSet.next()) {
           attackResult = failed(this).feedback("user.exists").feedbackArgs(username).build();

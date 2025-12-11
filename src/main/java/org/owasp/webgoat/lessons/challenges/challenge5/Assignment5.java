@@ -7,6 +7,7 @@ package org.owasp.webgoat.lessons.challenges.challenge5;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 
+import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import lombok.RequiredArgsConstructor;
@@ -39,7 +40,8 @@ public class Assignment5 implements AssignmentEndpoint {
     if (!"Larry".equals(username_login)) {
       return failed(this).feedback("user.not.larry").feedbackArgs(username_login).build();
     }
-    try (var connection = dataSource.getConnection()) {
+    try (Connection connection = dataSource.getConnection()) {
+      // Remediation: Using PreparedStatement with parameterized queries to prevent SQL Injection
       PreparedStatement statement =
           connection.prepareStatement(
               "select password from challenge_users where userid = ? and password = ?");

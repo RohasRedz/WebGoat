@@ -17,7 +17,7 @@ import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.io.FilenameUtils; // Added import
+import org.apache.commons.io.FilenameUtils;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -54,22 +54,17 @@ public class BlindSendFileAssignment implements AssignmentEndpoint, Initializabl
   private void createSecretFileWithRandomContents(WebGoatUser user) {
     var fileContents = "WebGoat 8.0 rocks... (" + randomAlphabetic(10) + ")";
     userToFileContents.put(user, fileContents);
-    // Fixed: Sanitize username to prevent path traversal in directory creation
+    // Remediation: Sanitize the username to prevent path traversal in directory creation.
+    // Using FilenameUtils.getName() to ensure only the base name is used.
     String sanitizedUsername = FilenameUtils.getName(user.getUsername());
     File targetDirectory = new File(webGoatHomeDirectory, "/XXE/" + sanitizedUsername);
     if (!targetDirectory.exists()) {
       targetDirectory.mkdirs();
     }
     try {
-      // Ensure the file is created strictly within the targetDirectory
-      File secretFile = new File(targetDirectory, "secret.txt");
-      if (!secretFile.getCanonicalPath().startsWith(targetDirectory.getCanonicalPath())) {
-          log.error("Attempted path traversal during secret file creation for user: {}", user.getUsername());
-          return; // Abort file creation
-      }
-      Files.writeString(secretFile.toPath(), fileContents, UTF_8);
+      Files.writeString(new File(targetDirectory, "secret.txt").toPath(), fileContents, UTF_8);
     } catch (IOException e) {
-      log.error("Unable to write 'secret.txt' to '{}/{}'", targetDirectory, e.getMessage());
+      log.error("Unable to write 'secret.txt' to '{}'", targetDirectory);
     }
   }
 

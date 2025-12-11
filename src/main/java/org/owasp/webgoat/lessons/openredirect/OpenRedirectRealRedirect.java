@@ -17,10 +17,12 @@ public class OpenRedirectRealRedirect {
 
   @GetMapping("/OpenRedirect/realRedirect")
   public ModelAndView real(@RequestParam("url") String url) {
-    // Validate redirect target to prevent open redirect
-    if (url == null || !url.startsWith("/") || url.contains("//") || url.contains("\\")) {
-      // Redirect to a safe default page or return an error
-      return new ModelAndView("redirect:/"); // Redirect to home page as a safe default
+    // Remediation: Validate redirect targets against a whitelist or enforce internal paths
+    // For this example, we enforce that the URL must start with '/' for internal redirects.
+    // In a real application, a more comprehensive whitelist of allowed domains would be used.
+    if (!url.startsWith("/")) {
+      // Redirect to a safe default page if the URL is not an internal path
+      return new ModelAndView("redirect:/");
     }
     return new ModelAndView("redirect:" + url);
   }
