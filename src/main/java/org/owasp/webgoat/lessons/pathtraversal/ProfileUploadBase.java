@@ -12,6 +12,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Paths; // ADDED IMPORT
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
@@ -45,10 +46,12 @@ public class ProfileUploadBase implements AssignmentEndpoint {
       return failed(this).feedback("path-traversal-profile-empty-name").build();
     }
 
-    File uploadDirectory = cleanupAndCreateDirectoryForUser(username);
+    // REMEDIATION: Sanitize username for directory creation
+    File uploadDirectory = cleanupAndCreateDirectoryForUser(sanitizePathSegment(username));
 
     try {
-      var uploadedFile = new File(uploadDirectory, fullName);
+      // REMEDIATION: Sanitize fullName to prevent path traversal in filename
+      var uploadedFile = new File(uploadDirectory, FilenameUtils.getName(fullName));
       uploadedFile.createNewFile();
       FileCopyUtils.copy(file.getBytes(), uploadedFile);
 
@@ -67,7 +70,9 @@ public class ProfileUploadBase implements AssignmentEndpoint {
 
   @SneakyThrows
   protected File cleanupAndCreateDirectoryForUser(String username) {
-    var uploadDirectory = new File(this.webGoatHomeDirectory, "/PathTraversal/" + username);
+    // REMEDIATION: Ensure username is sanitized before path construction
+    var sanitizedUsername = sanitizePathSegment(username);
+    var uploadDirectory = new File(this.webGoatHomeDirectory, "/PathTraversal/" + sanitizedUsername);
     if (uploadDirectory.exists()) {
       FileSystemUtils.deleteRecursively(uploadDirectory);
     }
@@ -100,12 +105,14 @@ public class ProfileUploadBase implements AssignmentEndpoint {
   }
 
   protected byte[] getProfilePictureAsBase64(String username) {
-    var profilePictureDirectory = new File(this.webGoatHomeDirectory, "/PathTraversal/" + username);
+    // REMEDIATION: Ensure username is sanitized before path construction
+    var sanitizedUsername = sanitizePathSegment(username);
+    var profilePictureDirectory = new File(this.webGoatHomeDirectory, "/PathTraversal/" + sanitizedUsername);
     var profileDirectoryFiles = profilePictureDirectory.listFiles();
 
     if (profileDirectoryFiles != null && profileDirectoryFiles.length > 0) {
       return Arrays.stream(profileDirectoryFiles)
-          .filter(file -> FilenameUtils.isExtension(file.getName(), List.of("jpg", "png")))
+          .filter(file -> FilenameUtils.isExtension(file.getName(), List.of("jpg", "png")) && !file.getName().contains("..")) // ADDED: Prevent traversal in filename
           .findFirst()
           .map(
               file -> {
@@ -125,5 +132,15 @@ public class ProfileUploadBase implements AssignmentEndpoint {
   protected byte[] defaultImage() {
     var inputStream = getClass().getResourceAsStream("/images/account.png");
     return Base64.getEncoder().encode(FileCopyUtils.copyToByteArray(inputStream));
+  }
+
+  // ADDED: Helper method to sanitize path segments
+  private String sanitizePathSegment(String input) {
+      if (input == null || input.trim().isEmpty()) {
+          return "default"; // Or throw an exception, depending on policy
+      }
+      // Normalize and get the last component to prevent directory traversal
+      // This ensures only a simple filename/directory name is used
+      return Paths.get(input).normalize().getFileName().toString();
   }
 }

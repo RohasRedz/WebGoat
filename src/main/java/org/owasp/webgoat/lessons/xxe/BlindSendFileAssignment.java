@@ -14,6 +14,7 @@ import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Paths; // ADDED IMPORT
 import java.util.HashMap;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
@@ -53,14 +54,16 @@ public class BlindSendFileAssignment implements AssignmentEndpoint, Initializabl
   private void createSecretFileWithRandomContents(WebGoatUser user) {
     var fileContents = "WebGoat 8.0 rocks... (" + randomAlphabetic(10) + ")";
     userToFileContents.put(user, fileContents);
-    File targetDirectory = new File(webGoatHomeDirectory, "/XXE/" + user.getUsername());
+    // REMEDIATION: Sanitize username for directory creation to prevent path traversal
+    String sanitizedUsername = sanitizePathSegment(user.getUsername());
+    File targetDirectory = new File(webGoatHomeDirectory, "/XXE/" + sanitizedUsername);
     if (!targetDirectory.exists()) {
       targetDirectory.mkdirs();
     }
     try {
       Files.writeString(new File(targetDirectory, "secret.txt").toPath(), fileContents, UTF_8);
     } catch (IOException e) {
-      log.error("Unable to write 'secret.txt' to '{}", targetDirectory);
+      log.error("Unable to write 'secret.txt' to '{}"", targetDirectory);
     }
   }
 
@@ -92,5 +95,15 @@ public class BlindSendFileAssignment implements AssignmentEndpoint, Initializabl
     comments.reset(user);
     userToFileContents.remove(user);
     createSecretFileWithRandomContents(user);
+  }
+
+  // ADDED: Helper method to sanitize path segments
+  private String sanitizePathSegment(String input) {
+      if (input == null || input.trim().isEmpty()) {
+          return "default"; // Or throw an exception, depending on policy
+      }
+      // Normalize and get the last component to prevent directory traversal
+      // This ensures only a simple filename/directory name is used
+      return Paths.get(input).normalize().getFileName().toString();
   }
 }
