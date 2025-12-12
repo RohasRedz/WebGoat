@@ -59,7 +59,7 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        .csrf(csrf -> { /* CSRF enabled by default */ })
+        .csrf(csrf -> { /* CSRF enabled by defaultss */ })
         .headers(headers -> headers.disable())
         .exceptionHandling(
             handling ->
