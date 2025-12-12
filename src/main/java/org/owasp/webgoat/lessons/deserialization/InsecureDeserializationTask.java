@@ -11,7 +11,10 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
+import java.io.ObjectStreamClass;
 import java.util.Base64;
+import java.util.HashSet;
+import java.util.Set;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
@@ -32,14 +35,6 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
   @PostMapping("/InsecureDeserialization/task")
   @ResponseBody
   public AttackResult completed(@RequestParam String token) throws IOException {
-    // Remediation: Blocking insecure deserialization of untrusted data.
-    // Direct deserialization of user-controlled ObjectInputStream is inherently dangerous.
-    // For a proper fix, this functionality should be re-architected to use a safe data format
-    // (e.g., JSON) or a secure, allowlist-based deserialization mechanism (e.g., JEP 290 filters).
-    // As a direct mitigation, we are preventing the vulnerable deserialization path.
-    return failed(this).feedback("insecure-deserialization.blocked").build();
-
-    /* Original vulnerable code commented out:
     String b64token;
     long before;
     long after;
@@ -48,7 +43,7 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
     b64token = token.replace('-', '+').replace('_', '/');
 
     try (ObjectInputStream ois =
-        new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
+        new SafeObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) { // Fixed: Use SafeObjectInputStream
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
@@ -74,6 +69,29 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       return failed(this).build();
     }
     return success(this).build();
-    */
+  }
+
+  // Fixed: Added a custom ObjectInputStream to enforce a deserialization allowlist
+  private static class SafeObjectInputStream extends ObjectInputStream {
+    private static final Set<String> ALLOWED_CLASSES = new HashSet<>();
+
+    static {
+      ALLOWED_CLASSES.add(VulnerableTaskHolder.class.getName());
+      ALLOWED_CLASSES.add(String.class.getName());
+      // Add other classes that are legitimately expected to be deserialized
+      // e.g., primitive wrappers, collections if they are part of a trusted graph
+    }
+
+    public SafeObjectInputStream(ByteArrayInputStream in) throws IOException {
+      super(in);
+    }
+
+    @Override
+    protected Class<?> resolveClass(ObjectStreamClass desc) throws IOException, ClassNotFoundException {
+      if (!ALLOWED_CLASSES.contains(desc.getName())) {
+        throw new InvalidClassException("Unauthorized deserialization attempt", desc.getName());
+      }
+      return super.resolveClass(desc);
+    }
   }
 }
