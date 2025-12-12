@@ -12,7 +12,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path; // Added for Path
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
@@ -47,16 +47,13 @@ public class ProfileUploadBase implements AssignmentEndpoint {
     }
 
     File uploadDirectory = cleanupAndCreateDirectoryForUser(username);
+    String safeFilename = FilenameUtils.getName(fullName); // Sanitize filename
 
     try {
-      // Remediation: Sanitize fullName to prevent path traversal
-      String sanitizedFileName = FilenameUtils.getName(fullName); // Extracts only the filename
-      var uploadedFile = new File(uploadDirectory, sanitizedFileName);
-      
-      // Additional check to ensure the resolved path is within the expected directory
-      Path expectedPath = uploadDirectory.toPath().resolve(sanitizedFileName).normalize();
-      if (!expectedPath.startsWith(uploadDirectory.toPath().normalize())) {
-          return failed(this).feedback("path-traversal-attempt-detected").build();
+      File uploadedFile = new File(uploadDirectory, safeFilename);
+      // Ensure the canonical path of the intended file is still within the upload directory
+      if (!uploadedFile.getCanonicalPath().startsWith(uploadDirectory.getCanonicalPath())) {
+        return failed(this).feedback("path-traversal-attempt-detected").build();
       }
 
       uploadedFile.createNewFile();

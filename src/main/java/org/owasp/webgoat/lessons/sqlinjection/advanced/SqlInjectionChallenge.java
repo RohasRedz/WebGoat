@@ -51,24 +51,23 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
     if (attackResult == null) {
 
       try (Connection connection = dataSource.getConnection()) {
-        // Remediation: Use PreparedStatement with parameter binding for checkUserQuery
         String checkUserQuery =
             "select userid from sql_challenge_users where userid = ?";
         try (PreparedStatement statement = connection.prepareStatement(checkUserQuery)) {
           statement.setString(1, username);
-          ResultSet resultSet = statement.executeQuery();
-
-          if (resultSet.next()) {
-            attackResult = failed(this).feedback("user.exists").feedbackArgs(username).build();
-          } else {
-            PreparedStatement preparedStatement =
-                connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)");
-            preparedStatement.setString(1, username);
-            preparedStatement.setString(2, email);
-            preparedStatement.setString(3, password);
-            preparedStatement.execute();
-            attackResult =
-                informationMessage(this).feedback("user.created").feedbackArgs(username).build();
+          try (ResultSet resultSet = statement.executeQuery()) {
+            if (resultSet.next()) {
+              attackResult = failed(this).feedback("user.exists").feedbackArgs(username).build();
+            } else {
+              PreparedStatement preparedStatement =
+                  connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)");
+              preparedStatement.setString(1, username);
+              preparedStatement.setString(2, email);
+              preparedStatement.setString(3, password);
+              preparedStatement.execute();
+              attackResult =
+                  informationMessage(this).feedback("user.created").feedbackArgs(username).build();
+            }
           }
         }
       } catch (SQLException e) {
