@@ -12,6 +12,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
@@ -45,10 +47,14 @@ public class ProfileUploadBase implements AssignmentEndpoint {
       return failed(this).feedback("path-traversal-profile-empty-name").build();
     }
 
-    File uploadDirectory = cleanupAndCreateDirectoryForUser(username);
+    // Remediation: Sanitize username and filename
+    String sanitizedUsername = FilenameUtils.getName(username); // Ensure username is just a name
+    String sanitizedFullName = FilenameUtils.getName(fullName); // Ensure fullName is just a filename
+
+    File uploadDirectory = cleanupAndCreateDirectoryForUser(sanitizedUsername);
 
     try {
-      var uploadedFile = new File(uploadDirectory, fullName);
+      var uploadedFile = new File(uploadDirectory, sanitizedFullName); // Use sanitized filename
       uploadedFile.createNewFile();
       FileCopyUtils.copy(file.getBytes(), uploadedFile);
 
@@ -67,16 +73,21 @@ public class ProfileUploadBase implements AssignmentEndpoint {
 
   @SneakyThrows
   protected File cleanupAndCreateDirectoryForUser(String username) {
-    var uploadDirectory = new File(this.webGoatHomeDirectory, "/PathTraversal/" + username);
+    // Remediation: Sanitize username and normalize path
+    String sanitizedUsername = FilenameUtils.getName(username);
+    Path uploadPath = Paths.get(this.webGoatHomeDirectory, "PathTraversal", sanitizedUsername).normalize();
+    File uploadDirectory = uploadPath.toFile();
+
     if (uploadDirectory.exists()) {
       FileSystemUtils.deleteRecursively(uploadDirectory);
     }
-    Files.createDirectories(uploadDirectory.toPath());
+    Files.createDirectories(uploadPath); // Use Path for directory creation
     return uploadDirectory;
   }
 
   private boolean attemptWasMade(File expectedUploadDirectory, File uploadedFile)
       throws IOException {
+    // This check is still useful as a defense-in-depth, but primary fix is in path construction
     return !expectedUploadDirectory
         .getCanonicalPath()
         .equals(uploadedFile.getParentFile().getCanonicalPath());
@@ -100,7 +111,10 @@ public class ProfileUploadBase implements AssignmentEndpoint {
   }
 
   protected byte[] getProfilePictureAsBase64(String username) {
-    var profilePictureDirectory = new File(this.webGoatHomeDirectory, "/PathTraversal/" + username);
+    // Remediation: Sanitize username for path construction
+    String sanitizedUsername = FilenameUtils.getName(username);
+    Path profilePicturePath = Paths.get(this.webGoatHomeDirectory, "PathTraversal", sanitizedUsername).normalize();
+    File profilePictureDirectory = profilePicturePath.toFile();
     var profileDirectoryFiles = profilePictureDirectory.listFiles();
 
     if (profileDirectoryFiles != null && profileDirectoryFiles.length > 0) {
@@ -109,7 +123,7 @@ public class ProfileUploadBase implements AssignmentEndpoint {
           .findFirst()
           .map(
               file -> {
-                try (var inputStream = new FileInputStream(profileDirectoryFiles[0])) {
+                try (var inputStream = new FileInputStream(file)) { // Use 'file' directly
                   return Base64.getEncoder().encode(FileCopyUtils.copyToByteArray(inputStream));
                 } catch (IOException e) {
                   return defaultImage();
