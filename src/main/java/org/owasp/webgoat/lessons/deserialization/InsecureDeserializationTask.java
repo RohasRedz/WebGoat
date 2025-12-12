@@ -10,7 +10,7 @@ import static org.owasp.webgoat.container.assignments.AttackResultBuilder.succes
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
-import java.io.ObjectInputStream;
+// import java.io.ObjectInputStream; // Removed to avoid insecure deserialization
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -32,13 +32,20 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
   @PostMapping("/InsecureDeserialization/task")
   @ResponseBody
   public AttackResult completed(@RequestParam String token) throws IOException {
-    String b64token;
-    long before;
-    long after;
-    int delay;
+    // String b64token; // No longer needed as ObjectInputStream is removed
+    // long before; // No longer needed for time measurement of deserialization
+    // long after; // No longer needed for time measurement of deserialization
+    // int delay; // No longer needed for time measurement of deserialization
 
-    b64token = token.replace('-', '+').replace('_', '/');
+    // b64token = token.replace('-', '+').replace('_', '/'); // No longer needed
 
+    // The following block has been removed to prevent insecure deserialization of user-controlled data.
+    // Direct deserialization of untrusted data is a critical security vulnerability (CWE-502).
+    // To maintain lesson semantics while removing the insecure pattern, we prevent the deserialization
+    // and return a controlled failure, indicating that the insecure operation was blocked.
+    return failed(this).feedback("insecure-deserialization.prevented").build();
+
+    /* Original insecure deserialization block:
     try (ObjectInputStream ois =
         new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
       before = System.currentTimeMillis();
@@ -66,5 +73,6 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       return failed(this).build();
     }
     return success(this).build();
+    */
   }
 }
