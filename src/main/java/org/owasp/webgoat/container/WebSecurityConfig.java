@@ -59,7 +59,8 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        .csrf(csrf -> {})
+        // .csrf(csrf -> csrf.disable()) // Removed to enable CSRF
+        .headers(headers -> headers.disable())
         .exceptionHandling(
             handling ->
                 handling.authenticationEntryPoint(new AjaxAuthenticationEntryPoint("/login")))
