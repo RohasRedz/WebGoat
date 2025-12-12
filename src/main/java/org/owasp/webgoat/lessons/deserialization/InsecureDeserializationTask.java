@@ -32,6 +32,14 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
   @PostMapping("/InsecureDeserialization/task")
   @ResponseBody
   public AttackResult completed(@RequestParam String token) throws IOException {
+    // Remediation: Blocking insecure deserialization of untrusted data.
+    // Direct deserialization of user-controlled ObjectInputStream is inherently dangerous.
+    // For a proper fix, this functionality should be re-architected to use a safe data format
+    // (e.g., JSON) or a secure, allowlist-based deserialization mechanism (e.g., JEP 290 filters).
+    // As a direct mitigation, we are preventing the vulnerable deserialization path.
+    return failed(this).feedback("insecure-deserialization.blocked").build();
+
+    /* Original vulnerable code commented out:
     String b64token;
     long before;
     long after;
@@ -66,5 +74,6 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       return failed(this).build();
     }
     return success(this).build();
+    */
   }
 }
