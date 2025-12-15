@@ -11,7 +11,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
-import java.io.ObjectInputFilter; // Added import
+import java.io.ObjectInputFilter; // Added for serialization filter
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -42,9 +42,22 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
 
     try (ObjectInputStream ois =
         new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
-      // Set a serialization filter to allow only VulnerableTaskHolder
-      ois.setObjectInputFilter(ObjectInputFilter.Config.createSerializationFilter("org.dummy.insecure.framework.VulnerableTaskHolder;!*")
-);
+
+      // L45: Remediation for insecure deserialization using ObjectInputFilter (JEP 290)
+      // This filter whitelists only specific classes allowed for deserialization,
+      // preventing deserialization of malicious gadget classes.
+      ObjectInputFilter filter = ObjectInputFilter.Config.createFilter(
+          "org.dummy.insecure.framework.VulnerableTaskHolder;" + // Allow the expected task holder
+          "java.lang.String;" + // Allow String objects (checked in original logic)
+          "java.lang.Long;" + // Common primitive wrapper
+          "java.lang.Integer;" + // Common primitive wrapper
+          "java.lang.Boolean;" + // Common primitive wrapper
+          "java.util.ArrayList;" + // Common collection type
+          "java.util.HashMap;" + // Common collection type
+          "!*" // Reject all other classes
+      );
+      ois.setObjectInputFilter(filter);
+
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
@@ -59,6 +72,8 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
     } catch (IllegalArgumentException e) {
       return failed(this).feedback("insecure-deserialization.expired").build();
     } catch (Exception e) {
+      // This catch block handles other exceptions that might arise from deserialization,
+      // including those related to filter violations for non-InvalidClassException types.
       return failed(this).feedback("insecure-deserialization.invalidversion").build();
     }
 
