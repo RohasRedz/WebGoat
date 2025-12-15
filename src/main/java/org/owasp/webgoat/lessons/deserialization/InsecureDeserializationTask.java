@@ -11,7 +11,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
-import java.io.ObjectStreamClass; // Added for ObjectStreamClass
+import java.io.ObjectInputFilter; // Added import
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -41,8 +41,12 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
     b64token = token.replace('-', '+').replace('_', '/');
 
     try (ObjectInputStream ois =
-        new WhitelistingObjectInputStream( // Changed to use WhitelistingObjectInputStream
-            new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
+        new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
+      // Apply deserialization filter to restrict allowed classes
+      ObjectInputFilter filter = ObjectInputFilter.Config.createFilter(
+          "org.dummy.insecure.framework.VulnerableTaskHolder;java.lang.String;!*"); // Added deserialization filter
+      ois.setObjectInputFilter(filter);
+
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
@@ -68,21 +72,5 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       return failed(this).build();
     }
     return success(this).build();
-  }
-
-  // New inner class for whitelisting ObjectInputStream
-  private static class WhitelistingObjectInputStream extends ObjectInputStream {
-    public WhitelistingObjectInputStream(ByteArrayInputStream in) throws IOException {
-      super(in);
-    }
-
-    @Override
-    protected Class<?> resolveClass(ObjectStreamClass desc) throws IOException, ClassNotFoundException {
-      // Whitelist only the expected class
-      if (!desc.getName().equals(VulnerableTaskHolder.class.getName())) {
-        throw new InvalidClassException("Unauthorized deserialization attempt", desc.getName());
-      }
-      return super.resolveClass(desc);
-    }
   }
 }

@@ -16,8 +16,8 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added import for BCryptPasswordEncoder
-import org.springframework.security.crypto.password.PasswordEncoder; // Added import for PasswordEncoder
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added import
+import org.springframework.security.crypto.password.PasswordEncoder; // Added import
 import org.springframework.security.web.SecurityFilterChain;
 
 /** Security configuration for WebGoat. */
@@ -69,7 +69,7 @@ public class WebSecurityConfig {
 
   @Autowired
   public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder()); // Added passwordEncoder
+    auth.userDetailsService(userDetailsService);
   }
 
   @Bean
