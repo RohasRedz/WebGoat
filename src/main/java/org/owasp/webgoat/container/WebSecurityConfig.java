@@ -59,8 +59,8 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        // .csrf(csrf -> csrf.disable()) // Removed to enable CSRF protection (default in Spring Security 6.x)
-        .headers(headers -> headers.disable())
+        .csrf(csrf -> {})
+        .headers(headers -> {})
         .exceptionHandling(
             handling ->
                 handling.authenticationEntryPoint(new AjaxAuthenticationEntryPoint("/login")))
@@ -68,8 +68,8 @@ public class WebSecurityConfig {
   }
 
   @Autowired
-  public void configureGlobal(AuthenticationManagerBuilder auth, PasswordEncoder passwordEncoder) throws Exception { // Modified signature to inject PasswordEncoder
-    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder); // Configured AuthenticationManagerBuilder to use the secure PasswordEncoder
+  public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
+    auth.userDetailsService(userDetailsService);
   }
 
   @Bean
@@ -85,7 +85,7 @@ public class WebSecurityConfig {
   }
 
   @Bean
-  public PasswordEncoder passwordEncoder() { // Modified method to provide BCryptPasswordEncoder
-    return new BCryptPasswordEncoder();
+  public PasswordEncoder passwordEncoder() { // Changed return type to PasswordEncoder
+    return new BCryptPasswordEncoder(); // Replaced NoOpPasswordEncoder with BCryptPasswordEncoder
   }
 }
