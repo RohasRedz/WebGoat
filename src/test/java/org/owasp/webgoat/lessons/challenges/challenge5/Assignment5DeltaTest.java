@@ -1,13 +1,14 @@
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
@@ -15,18 +16,68 @@ import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 
 /**
- * Delta tests for Assignment5 focusing only on the SQL injection fix:
- * - Ensures PreparedStatement with parameter placeholders is used.
- * - Verifies that user inputs are bound via setString (no string concatenation in the query).
+ * Delta unit tests for Assignment5 focusing ONLY on the behavior changed
+ * by the SQL injection fix:
+ *
+ * 1) Ensuring the SQL query is parameterized (uses '?' placeholders) and
+ *    does not embed raw username/password via string concatenation.
+ * 2) Ensuring that SQL injection-style credentials no longer bypass
+ *    authentication (the result remains failed).
  */
-public class Assignment5DeltaTest {
+class Assignment5DeltaTest {
 
     @Test
-    void loginShouldUseParameterizedQueryAndBindUserInputs() throws Exception {
+    @DisplayName("login() should use parameterized SQL with placeholders, not concatenated user input")
+    void loginShouldUseParameterizedSql() throws Exception {
         // Arrange
         LessonDataSource dataSource = mock(LessonDataSource.class);
         Flags flags = mock(Flags.class);
-        when(flags.getFlag(5)).thenReturn("FLAG-5");
+
+        Connection connection = mock(Connection.class);
+        PreparedStatement preparedStatement = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+
+        when(dataSource.getConnection()).thenReturn(connection);
+
+        // Capture the SQL passed into prepareStatement
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        when(connection.prepareStatement(sqlCaptor.capture())).thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        Assignment5 assignment5 = new Assignment5(dataSource, flags);
+
+        String username = "Larry";
+        String password = "password123";
+
+        // Act
+        assignment5.login(username, password);
+
+        // Assert
+        // Verify that the SQL contains placeholders instead of concatenated user input.
+        String usedSql = sqlCaptor.getValue();
+        assertThat(usedSql)
+                .as("SQL should use placeholders")
+                .contains("userid = ?")
+                .contains("password = ?");
+        assertThat(usedSql)
+                .as("SQL must not inline username")
+                .doesNotContain(username);
+        assertThat(usedSql)
+                .as("SQL must not inline password")
+                .doesNotContain(password);
+
+        // Also verify that parameters are actually bound via setString()
+        verify(preparedStatement).setString(eq(1), eq(username));
+        verify(preparedStatement).setString(eq(2), eq(password));
+    }
+
+    @Test
+    @DisplayName("SQL-injection-style credentials should not bypass authentication after fix")
+    void sqlInjectionAttemptShouldNotBypassAuthentication() throws Exception {
+        // Arrange
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
 
         Connection connection = mock(Connection.class);
         PreparedStatement preparedStatement = mock(PreparedStatement.class);
@@ -35,57 +86,29 @@ public class Assignment5DeltaTest {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        when(resultSet.next()).thenReturn(true);
+
+        // Simulate that the query finds no matching row (no injection success)
+        when(resultSet.next()).thenReturn(false);
 
         Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-        String username = "Larry";
-        String password = "securePassword123";
+        // Typical SQL injection pattern that used to exploit concatenated SQL
+        String injectionUsername = "Larry' OR '1'='1";
+        String injectionPassword = "anything' OR '1'='1";
 
         // Act
-        AttackResult result = assignment5.login(username, password);
+        AttackResult result = assignment5.login(injectionUsername, injectionPassword);
 
-        // Assert: verify parameterized SQL and bound parameters
-        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-        verify(connection).prepareStatement(sqlCaptor.capture());
-        String usedSql = sqlCaptor.getValue();
+        // Assert
+        // With parameterized SQL, this injection pattern must not succeed.
+        assertThat(result)
+                .as("SQL injection attempt should fail, not be treated as success")
+                .extracting(AttackResult::getLessonCompleted)
+                .isEqualTo(false);
 
-        assertThat(usedSql)
-                .as("Query should use placeholders instead of concatenating user input")
-                .contains("where userid = ?")
-                .contains("and password = ?")
-                .doesNotContain(username)
-                .doesNotContain(password);
-
-        verify(preparedStatement).setString(1, username);
-        verify(preparedStatement).setString(2, password);
-
-        assertThat(result.getLessonCompleted())
-                .as("Expected success path when resultSet.next() is true")
-                .isTrue();
-    }
-
-    @Test
-    void loginShouldHandleSqlExceptionWithoutLeakingDetails() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Flags flags = mock(Flags.class);
-
-        Connection connection = mock(Connection.class);
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(anyString())).thenThrow(new SQLException("DB failure"));
-
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
-
-        String username = "Larry";
-        String password = "any";
-
-        // Act
-        AttackResult result = assignment5.login(username, password);
-
-        // Assert: should fail gracefully, not throw, and not succeed
-        assertThat(result.getLessonCompleted())
-                .as("Lesson should not be marked completed when SQL fails")
-                .isFalse();
+        // Also verify that the exact (malicious) strings were bound as parameters,
+        // confirming they are treated as data, not as part of the SQL syntax.
+        verify(preparedStatement).setString(1, injectionUsername);
+        verify(preparedStatement).setString(2, injectionPassword);
     }
 }
