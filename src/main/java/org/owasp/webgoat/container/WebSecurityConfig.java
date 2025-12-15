@@ -16,8 +16,8 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added import for BCryptPasswordEncoder
-import org.springframework.security.crypto.password.PasswordEncoder; // Added import for PasswordEncoder interface
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added for secure password encoding
+import org.springframework.security.crypto.password.PasswordEncoder; // Added for password encoder interface
 import org.springframework.security.web.SecurityFilterChain;
 
 /** Security configuration for WebGoat. */
@@ -59,8 +59,8 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        .csrf(csrf -> {})
-        .headers(headers -> {})
+        // .csrf(csrf -> csrf.disable()) // REMOVED: CSRF protection is now enabled by default
+        .headers(headers -> headers.disable())
         .exceptionHandling(
             handling ->
                 handling.authenticationEntryPoint(new AjaxAuthenticationEntryPoint("/login")))
@@ -68,8 +68,8 @@ public class WebSecurityConfig {
   }
 
   @Autowired
-  public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService);
+  public void configureGlobal(AuthenticationManagerBuilder auth, PasswordEncoder passwordEncoder) throws Exception {
+    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder);
   }
 
   @Bean
@@ -85,7 +85,7 @@ public class WebSecurityConfig {
   }
 
   @Bean
-  public PasswordEncoder passwordEncoder() { // Changed return type to PasswordEncoder
-    return new BCryptPasswordEncoder(); // Replaced NoOpPasswordEncoder with BCryptPasswordEncoder
+  public PasswordEncoder passwordEncoder() { // Changed to use BCryptPasswordEncoder
+    return new BCryptPasswordEncoder();
   }
 }
