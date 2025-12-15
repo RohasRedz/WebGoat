@@ -16,10 +16,9 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Changed from NoOpPasswordEncoder
-import org.springframework.security.crypto.password.PasswordEncoder; // Added for PasswordEncoder interface
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added import for BCryptPasswordEncoder
+import org.springframework.security.crypto.password.PasswordEncoder; // Added import for PasswordEncoder
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.csrf.CookieCsrfTokenRepository; // Added for CSRF token repository
 
 /** Security configuration for WebGoat. */
 @Configuration
@@ -60,7 +59,7 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        .csrf(csrf -> csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())) // Enabled CSRF protection
+        // .csrf(csrf -> csrf.disable()) // Removed to enable CSRF protection
         .headers(headers -> headers.disable())
         .exceptionHandling(
             handling ->
@@ -86,7 +85,7 @@ public class WebSecurityConfig {
   }
 
   @Bean
-  public PasswordEncoder passwordEncoder() { // Changed return type and implementation
-    return new BCryptPasswordEncoder();
+  public PasswordEncoder passwordEncoder() { // Changed return type to PasswordEncoder
+    return new BCryptPasswordEncoder(); // Replaced NoOpPasswordEncoder with BCryptPasswordEncoder
   }
 }
