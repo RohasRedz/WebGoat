@@ -11,7 +11,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
-import java.io.ObjectStreamClass; // Added import for ObjectStreamClass
+import java.io.ObjectInputFilter; // Added import
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -30,8 +30,6 @@ import org.springframework.web.bind.annotation.RestController;
 })
 public class InsecureDeserializationTask implements AssignmentEndpoint {
 
-  private final String ALLOWED_CLASS_NAME = VulnerableTaskHolder.class.getName(); // Added constant for allowed class
-
   @PostMapping("/InsecureDeserialization/task")
   @ResponseBody
   public AttackResult completed(@RequestParam String token) throws IOException {
@@ -43,7 +41,10 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
     b64token = token.replace('-', '+').replace('_', '/');
 
     try (ObjectInputStream ois =
-        new SafeObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)), ALLOWED_CLASS_NAME)) { // Changed to SafeObjectInputStream
+        new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
+      // Set a serialization filter to allow only VulnerableTaskHolder
+      ois.setObjectInputFilter(ObjectInputFilter.Config.createSerializationFilter("org.dummy.insecure.framework.VulnerableTaskHolder;!*")
+);
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
@@ -69,27 +70,5 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       return failed(this).build();
     }
     return success(this).build();
-  }
-
-  /**
-   * Custom ObjectInputStream to whitelist allowed classes during deserialization.
-   * This prevents deserialization of arbitrary types, mitigating RCE vulnerabilities.
-   */
-  private static class SafeObjectInputStream extends ObjectInputStream {
-    private final String allowedClassName;
-
-    public SafeObjectInputStream(ByteArrayInputStream bais, String allowedClassName) throws IOException {
-      super(bais);
-      this.allowedClassName = allowedClassName;
-    }
-
-    @Override
-    protected Class<?> resolveClass(ObjectStreamClass desc) throws IOException, ClassNotFoundException {
-      // Only allow deserialization of the explicitly whitelisted class
-      if (!desc.getName().equals(allowedClassName)) {
-        throw new InvalidClassException("Unauthorized deserialization attempt", desc.getName());
-      }
-      return super.resolveClass(desc);
-    }
   }
 }

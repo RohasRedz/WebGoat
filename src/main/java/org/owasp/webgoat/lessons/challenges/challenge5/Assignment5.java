@@ -42,9 +42,9 @@ public class Assignment5 implements AssignmentEndpoint {
     try (var connection = dataSource.getConnection()) {
       PreparedStatement statement =
           connection.prepareStatement(
-              "select password from challenge_users where userid = ? and password = ?"); // Fixed: Used parameterized query
-      statement.setString(1, username_login); // Fixed: Bound username_login
-      statement.setString(2, password_login); // Fixed: Bound password_login
+              "select password from challenge_users where userid = ? and password = ?"); // Modified SQL query
+      statement.setString(1, username_login); // Set username parameter
+      statement.setString(2, password_login); // Set password parameter
       ResultSet resultSet = statement.executeQuery();
 
       if (resultSet.next()) {
