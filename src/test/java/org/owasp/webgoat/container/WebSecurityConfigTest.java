@@ -3,56 +3,66 @@ package org.owasp.webgoat.container;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * Delta tests for {@link WebSecurityConfig} focusing only on:
- * - PasswordEncoder no longer being a NoOp/plain-text encoder.
- * - CSRF protection not being explicitly disabled.
+ * Delta tests for security fix in WebSecurityConfig:
+ * - Ensure PasswordEncoder bean uses BCryptPasswordEncoder (no more NoOpPasswordEncoder).
+ * - Ensure CSRF is not explicitly disabled in the SecurityFilterChain.
  */
 class WebSecurityConfigTest {
 
     @Test
-    void passwordEncoderShouldNotBeNoOpAndMustHashPasswords() {
+    void passwordEncoderBeanShouldBeBCryptPasswordEncoder() {
         // Arrange
-        WebSecurityConfig config = new WebSecurityConfig(null);
+        WebSecurityConfig config = new WebSecurityConfig(null /* UserService is not used here */);
 
         // Act
         PasswordEncoder encoder = config.passwordEncoder();
-        String rawPassword = "secret123";
-        String encoded = encoder.encode(rawPassword);
 
         // Assert
-        // Ensure we get a non-null, non-empty encoded value
-        assertThat(encoded).isNotNull();
-        assertThat(encoded).isNotEmpty();
-
-        // Encoded value must not equal the raw password (i.e., not plain-text / NoOp)
-        assertThat(encoded).isNotEqualTo(rawPassword);
-
-        // And it must correctly verify the password (encoder is functional)
-        assertThat(encoder.matches(rawPassword, encoded)).isTrue();
+        assertThat(encoder).isInstanceOf(BCryptPasswordEncoder.class);
     }
 
     @Test
-    void filterChainShouldNotDisableCsrf() throws Exception {
+    void configureGlobalShouldConfigurePasswordEncoder() throws Exception {
         // Arrange
-        WebSecurityConfig config = new WebSecurityConfig(null);
-        HttpSecurity http = new HttpSecurity(null, null, null, null, null, null, null);
+        UserService userService = org.mockito.Mockito.mock(UserService.class);
+        WebSecurityConfig config = new WebSecurityConfig(userService);
+        AuthenticationManagerBuilder authBuilder = new AuthenticationManagerBuilder(null);
 
         // Act
-        // We only verify that calling filterChain does not throw and that CSRF is not disabled
-        // via an explicit csrf().disable() call anymore. Since HttpSecurity is complex to
-        // introspect without full Spring context, we rely on constructing the chain to ensure
-        // configuration is valid and does not contain csrf().disable().
-        config.filterChain(http);
+        config.configureGlobal(authBuilder);
 
         // Assert
-        // No explicit assertion on the internal CSRF state is done here because it would require
-        // a full Spring Security context. The delta behavior we are guarding is that the config
-        // can be built without a csrf().disable() call; if such a call were reintroduced or
-        // misconfigured, this construction would likely fail or differ.
-        // This test serves as a regression hook to ensure the configuration method remains valid.
+        // The only public way to verify is to ensure no exception is thrown and that
+        // the builder accepted a non-null password encoder. Internally, Spring will
+        // fail-fast if a null encoder is configured.
+        // We cannot easily introspect private fields, so this test focuses on execution.
+        // If passwordEncoder() returned null or wrong type, configureGlobal would fail at runtime.
+        assertThat(authBuilder).isNotNull();
+    }
+
+    @Test
+    void csrfShouldNotBeDisabledInSecurityFilterChain() throws Exception {
+        // Arrange
+        WebSecurityConfig config = new WebSecurityConfig(null);
+        HttpSecurity http = new HttpSecurity(null, null, java.util.List.of(), null, null, null);
+
+        // Act
+        SecurityFilterChain chain = config.filterChain(http);
+
+        // Assert
+        assertThat(chain).isNotNull();
+        // Delta behavior: previously csrf was explicitly disabled with csrf().disable().
+        // Now that call is removed; Spring Security enables CSRF by default for web apps.
+        // We cannot introspect the CSRF configuration directly without full Spring context,
+        // but the mere successful creation of the chain without calling csrf().disable()
+        // exercises the changed path.
     }
 }

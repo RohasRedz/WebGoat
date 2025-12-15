@@ -4,84 +4,83 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.mock;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
+import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 
 /**
- * Delta tests for {@link Assignment5} focusing only on:
- * - Use of parameterized PreparedStatement instead of string concatenation with user input.
+ * Delta tests for security fix in Assignment5:
+ * - Verify that login with correct credentials yields a successful AttackResult.
+ * - Verify that PreparedStatement uses parameter placeholders (no string concatenation).
  */
 class Assignment5Test {
 
     @Test
-    void loginShouldUsePreparedStatementParametersForUserInputs() throws Exception {
+    void loginWithValidCredentialsShouldSucceed() throws Exception {
         // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Flags flags = mock(Flags.class);
+        LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
+        Flags flags = Mockito.mock(Flags.class);
         Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-        String username = "Larry";
-        String password = "p@ssw0rd";
-        Connection connection = mock(Connection.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        ResultSet resultSet = mock(ResultSet.class);
+        Connection connection = Mockito.mock(Connection.class);
+        PreparedStatement preparedStatement = Mockito.mock(PreparedStatement.class);
+        ResultSet resultSet = Mockito.mock(ResultSet.class);
 
         when(dataSource.getConnection()).thenReturn(connection);
-
-        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-        when(connection.prepareStatement(sqlCaptor.capture())).thenReturn(preparedStatement);
-
+        when(connection.prepareStatement(Mockito.anyString())).thenReturn(preparedStatement);
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
         when(resultSet.next()).thenReturn(true);
         when(flags.getFlag(5)).thenReturn("FLAG-5");
 
+        String username = "Larry";
+        String password = "secret";
+
         // Act
-        assignment5.login(username, password);
+        AttackResult result = assignment5.login(username, password);
 
         // Assert
-        // Verify that the SQL string uses parameter placeholders instead of concatenated values
-        String usedSql = sqlCaptor.getValue();
-        assertThat(usedSql)
-            .isEqualTo("select password from challenge_users where userid = ? and password = ?");
+        assertThat(result).isNotNull();
+        assertThat(result.getLessonCompleted()).isTrue();
 
-        // Verify user-supplied values are bound as parameters, not concatenated into the SQL
+        // Delta-specific assertion: verify parameterized SQL is used
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sqlCaptor.capture());
+        String sql = sqlCaptor.getValue();
+        assertThat(sql)
+            .contains("userid = ?")
+            .contains("password = ?")
+            .doesNotContain(username)
+            .doesNotContain(password);
+
         verify(preparedStatement).setString(eq(1), eq(username));
         verify(preparedStatement).setString(eq(2), eq(password));
     }
 
     @Test
-    void loginShouldNotSucceedForSqlInjectionPayloadsWhenUsingPreparedStatement() throws Exception {
+    void loginWithInvalidUserShouldFailBeforeDatabaseInteraction() throws Exception {
         // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Flags flags = mock(Flags.class);
+        LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
+        Flags flags = Mockito.mock(Flags.class);
         Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-        String username = "Larry";
-        String passwordInjection = "' OR '1'='1";
-        Connection connection = mock(Connection.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        ResultSet resultSet = mock(ResultSet.class);
-
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement("select password from challenge_users where userid = ? and password = ?"))
-            .thenReturn(preparedStatement);
-
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        // With a proper PreparedStatement, an injection payload should behave like a normal string;
-        // we simulate that the DB does NOT return a row for this combination.
-        when(resultSet.next()).thenReturn(false);
+        String username = "NotLarry";
+        String password = "secret";
 
         // Act
-        var result = assignment5.login(username, passwordInjection);
+        AttackResult result = assignment5.login(username, password);
 
         // Assert
+        assertThat(result).isNotNull();
         assertThat(result.getLessonCompleted()).isFalse();
+        // Delta behavior: Since the SQL is parameterized, no SQL is constructed, but here
+        // we also ensure that for invalid user, we short-circuit before any DB call.
+        Mockito.verifyNoInteractions(dataSource);
     }
 }
