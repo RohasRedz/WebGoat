@@ -1,103 +1,169 @@
-// Delta_UnitTest_Agent
-// NOTE: Package inferred from production class; adjust if project structure differs.
 package org.owasp.webgoat.container;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.owasp.webgoat.container.users.UserService;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
+import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.test.util.ReflectionTestUtils;
 import org.springframework.security.web.SecurityFilterChain;
 
-import java.util.List;
-
 /**
- * Delta unit tests for WebSecurityConfig (Jira: SVCF-655).
+ * Delta unit tests for WebSecurityConfig focusing only on:
+ * 1) CSRF is not disabled anymore (i.e., no explicit csrf.disable() is applied).
+ * 2) AuthenticationManagerBuilder is configured to use a PasswordEncoder (BCryptPasswordEncoder).
  *
- * Focus only on changed behavior:
- *  - CSRF protection must now be enabled (no longer disabled).
- *  - PasswordEncoder bean must use BCrypt (no longer NoOp/plaintext).
+ * These tests are intentionally scoped to the behavior changed by the security fix.
  */
 public class WebSecurityConfigDeltaTest {
 
-    /**
-     * Minimal stub of HttpSecurity to verify that CSRF is not disabled.
-     * We cannot easily assert the internals of the built SecurityFilterChain
-     * without a full Spring context, so we verify the configuration path
-     * indirectly by checking that the configuration lambda is not disabling CSRF.
-     *
-     * This test focuses on the regression: previously CSRF was explicitly disabled
-     * via csrf(csrf -> csrf.disable()).
-     */
     @Test
-    @DisplayName("CSRF must not be explicitly disabled on HttpSecurity")
-    void csrfIsNotDisabled() throws Exception {
-        WebSecurityConfig config = new WebSecurityConfig(null /* UserService is not used in filterChain */);
+    @DisplayName("filterChain should not disable CSRF explicitly")
+    void filterChain_shouldNotDisableCsrf() throws Exception {
+        // Arrange
+        UserService userService = mock(UserService.class);
+        WebSecurityConfig config = new WebSecurityConfig(userService);
 
-        // Create a real HttpSecurity but avoid starting a full context.
-        HttpSecurity http = new HttpSecurity(null, null, List.of(), null, null, null);
+        @SuppressWarnings("unchecked")
+        HttpSecurity http = mock(HttpSecurity.class);
 
-        SecurityFilterChain chain = config.filterChain(http);
-
-        // Assert that a SecurityFilterChain was created
-        assertThat(chain).isNotNull();
-
-        // Indirect verification:
-        // - The previous implementation used csrf(csrf -> csrf.disable()).
-        // - Now it uses csrf(Customizer.withDefaults()).
-        // There is no public "isDisabled" on CSRF, but we can assert that
-        // the CsrfConfigurer object on HttpSecurity is not marked as disabled.
+        // Mocks for the fluent API
+        HttpSecurity.AuthorizeHttpRequestsConfigurer authorizeConfigurer =
+                mock(HttpSecurity.AuthorizeHttpRequestsConfigurer.class, RETURNS_SELF);
+        HttpSecurity.FormLoginConfigurer formLoginConfigurer =
+                mock(HttpSecurity.FormLoginConfigurer.class, RETURNS_SELF);
+        HttpSecurity.OAuth2LoginConfigurer oauth2LoginConfigurer =
+                mock(HttpSecurity.OAuth2LoginConfigurer.class, RETURNS_SELF);
+        HttpSecurity.LogoutConfigurer logoutConfigurer =
+                mock(HttpSecurity.LogoutConfigurer.class, RETURNS_SELF);
+        HeadersConfigurer<HttpSecurity> headersConfigurer =
+                mock(HeadersConfigurer.class, RETURNS_SELF);
         CsrfConfigurer<HttpSecurity> csrfConfigurer =
-                (CsrfConfigurer<HttpSecurity>) ReflectionTestUtils.getField(http, "csrf");
-        // If configuration had been csrf(csrf -> csrf.disable()), the internal 'disable' flag
-        // would be set. We can assert that it is not explicitly disabled.
-        assertThat(csrfConfigurer).isNotNull();
-        Object disabled = ReflectionTestUtils.getField(csrfConfigurer, "disabled");
-        assertThat(disabled)
-                .as("CSRF should not be explicitly disabled anymore")
-                .isNotEqualTo(Boolean.TRUE);
+                mock(CsrfConfigurer.class, RETURNS_SELF);
+        HttpSecurity.ExceptionHandlingConfigurer exceptionHandlingConfigurer =
+                mock(HttpSecurity.ExceptionHandlingConfigurer.class, RETURNS_SELF);
+        SecurityFilterChain mockChain = mock(SecurityFilterChain.class);
+
+        // Stubbing for fluent methods used in filterChain
+        when(http.authorizeHttpRequests(any())).thenReturn(http);
+        when(http.formLogin(any())).thenReturn(http);
+        when(http.oauth2Login(any())).thenReturn(http);
+        when(http.logout(any())).thenReturn(http);
+        when(http.headers(any())).thenReturn(http);
+        when(http.csrf(any())).thenReturn(http); // We want to see if this is *called* at all
+        when(http.exceptionHandling(any())).thenReturn(http);
+        when(http.build()).thenReturn(mockChain);
+
+        // Act
+        SecurityFilterChain result = config.filterChain(http);
+
+        // Assert
+        assertNotNull(result, "SecurityFilterChain should be created");
+
+        // Capture how csrf() was configured, if at all
+        ArgumentCaptor<java.util.function.Consumer<CsrfConfigurer<HttpSecurity>>> csrfConsumerCaptor =
+                ArgumentCaptor.forClass(java.util.function.Consumer.class);
+
+        // Verify if csrf(...) was ever invoked; if the fix only removed csrf.disable(),
+        // it might not be called at all, which is acceptable as CSRF is enabled by default.
+        verify(http, atMostOnce()).csrf(csrfConsumerCaptor.capture());
+
+        if (!csrfConsumerCaptor.getAllValues().isEmpty()) {
+            java.util.function.Consumer<CsrfConfigurer<HttpSecurity>> csrfConsumer =
+                    csrfConsumerCaptor.getValue();
+            assertNotNull(csrfConsumer, "CSRF customizer should not be null if csrf() is invoked");
+
+            // Now verify that the consumer does NOT call csrf.disable()
+            // We do this by applying the consumer to a mocked CsrfConfigurer
+            CsrfConfigurer<HttpSecurity> mockedCsrf = mock(CsrfConfigurer.class, RETURNS_SELF);
+            csrfConsumer.accept(mockedCsrf);
+
+            // If disable() were called inside the consumer, verify(mockedCsrf).disable() would succeed.
+            // We assert the opposite: disable() must not be called.
+            verify(mockedCsrf, never()).disable();
+        }
+        // If csrf() is never called, we accept the default-secure behavior as valid,
+        // so there is nothing more to assert in that case.
     }
 
-    /**
-     * Verifies that the PasswordEncoder bean now returns a BCryptPasswordEncoder
-     * (or at least a PasswordEncoder whose implementation is BCryptPasswordEncoder),
-     * ensuring plaintext passwords are no longer used.
-     */
     @Test
-    @DisplayName("PasswordEncoder bean must use BCrypt implementation")
-    void passwordEncoderUsesBcrypt() {
-        WebSecurityConfig config = new WebSecurityConfig(null /* UserService not required here */);
+    @DisplayName("configureGlobal should configure AuthenticationManagerBuilder with a PasswordEncoder")
+    void configureGlobal_shouldUsePasswordEncoder() throws Exception {
+        // Arrange
+        UserService userService = mock(UserService.class);
+        WebSecurityConfig config = new WebSecurityConfig(userService);
 
+        AuthenticationManagerBuilder authBuilder = mock(AuthenticationManagerBuilder.class, RETURNS_SELF);
+        PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
+
+        // Act
+        config.configureGlobal(authBuilder, passwordEncoder);
+
+        // Assert
+        // Verify that the userDetailsService is registered
+        verify(authBuilder).userDetailsService(userService);
+        // Verify that the same PasswordEncoder instance provided is wired into the builder
+        verify(authBuilder).passwordEncoder(passwordEncoder);
+    }
+
+    @Test
+    @DisplayName("passwordEncoder bean should be a BCryptPasswordEncoder")
+    void passwordEncoderBean_shouldReturnBCryptPasswordEncoder() {
+        // Arrange
+        UserService userService = mock(UserService.class);
+        WebSecurityConfig config = new WebSecurityConfig(userService);
+
+        // Act
         PasswordEncoder encoder = config.passwordEncoder();
 
-        assertThat(encoder)
-                .as("PasswordEncoder bean should not be null")
-                .isNotNull();
+        // Assert
+        assertNotNull(encoder, "PasswordEncoder bean must not be null");
+        assertTrue(encoder instanceof BCryptPasswordEncoder,
+                "PasswordEncoder must be an instance of BCryptPasswordEncoder to avoid plain-text or weak encoding");
+    }
 
-        // Ensure it is not the old insecure NoOpPasswordEncoder
-        assertThat(encoder.getClass().getName())
-                .as("NoOpPasswordEncoder must not be used anymore")
-                .doesNotContain("NoOpPasswordEncoder");
+    @Test
+    @DisplayName("userDetailsServiceBean should return injected UserService instance (regression guard around configureGlobal change)")
+    void userDetailsServiceBean_shouldReturnInjectedUserService() {
+        // Arrange
+        UserService userService = mock(UserService.class);
+        WebSecurityConfig config = new WebSecurityConfig(userService);
 
-        // Ensure BCrypt is used
-        assertThat(encoder)
-                .as("PasswordEncoder should be an instance of BCryptPasswordEncoder")
-                .isInstanceOf(BCryptPasswordEncoder.class);
+        // Act
+        UserDetailsService userDetailsService = config.userDetailsServiceBean();
 
-        // Additional behavioral assertion: encoding must be non-plaintext and verify matches()
-        String rawPassword = "SensitiveP@ssw0rd";
-        String encoded = encoder.encode(rawPassword);
+        // Assert
+        assertSame(userService, userDetailsService,
+                "userDetailsServiceBean should still return the injected UserService after the security-related changes");
+    }
 
-        assertThat(encoded)
-                .as("Encoded password must differ from raw password to avoid plaintext storage")
-                .isNotEqualTo(rawPassword);
+    @Test
+    @DisplayName("authenticationManager bean creation should still be delegated to AuthenticationConfiguration")
+    void authenticationManagerBean_shouldDelegateToAuthenticationConfiguration() throws Exception {
+        // Arrange
+        UserService userService = mock(UserService.class);
+        WebSecurityConfig config = new WebSecurityConfig(userService);
 
-        assertThat(encoder.matches(rawPassword, encoded))
-                .as("PasswordEncoder must correctly verify BCrypt-hashed password")
-                .isTrue();
+        AuthenticationManager expectedManager = mock(AuthenticationManager.class);
+        AuthenticationConfiguration authenticationConfiguration = mock(AuthenticationConfiguration.class);
+        when(authenticationConfiguration.getAuthenticationManager()).thenReturn(expectedManager);
+
+        // Act
+        AuthenticationManager result = config.authenticationManager(authenticationConfiguration);
+
+        // Assert
+        assertSame(expectedManager, result,
+                "authenticationManager bean must still delegate to AuthenticationConfiguration after the fix");
+        verify(authenticationConfiguration).getAuthenticationManager();
     }
 }
