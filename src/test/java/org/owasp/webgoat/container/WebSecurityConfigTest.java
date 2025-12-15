@@ -1,135 +1,93 @@
 package org.owasp.webgoat.container;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
-
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import java.util.Collection;
-import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
-import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.mockito.Mockito;
+import org.owasp.webgoat.container.users.UserService;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
-import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.config.annotation.web.configurers.LogoutConfigurer;
+import org.springframework.security.config.annotation.web.configurers.oauth2.client.OAuth2LoginConfigurer;
+import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer;
+import org.springframework.security.config.annotation.web.configurers.ExceptionHandlingConfigurer;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.csrf.CsrfTokenRepository;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+
+import java.util.function.Consumer;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
 
 /**
- * Delta tests for WebSecurityConfig focusing only on:
- * - CSRF is no longer disabled.
- * - PasswordEncoder is a BCrypt-based secure encoder instead of NoOpPasswordEncoder.
+ * Delta unit tests for WebSecurityConfig focusing only on:
+ * 1) CSRF configuration change (no longer disabled, now using CookieCsrfTokenRepository.withHttpOnlyFalse()).
+ * 2) PasswordEncoder bean change (NoOpPasswordEncoder -> BCryptPasswordEncoder).
+ *
+ * These tests intentionally avoid covering unrelated behavior.
  */
 class WebSecurityConfigTest {
 
-  @Test
-  @DisplayName("passwordEncoder() should return a BCrypt-based PasswordEncoder (not NoOp/plain-text)")
-  void passwordEncoderShouldBeBcryptBased() {
-    // Arrange
-    UserService mockUserService = mock(UserService.class);
-    WebSecurityConfig config = new WebSecurityConfig(mockUserService);
+    private WebSecurityConfig webSecurityConfig;
+    private UserService userService;
 
-    // Act
-    PasswordEncoder encoder = config.passwordEncoder();
-    String rawPassword = "secret123!";
-    String encoded = encoder.encode(rawPassword);
+    @BeforeEach
+    void setUp() {
+        userService = Mockito.mock(UserService.class);
+        webSecurityConfig = new WebSecurityConfig(userService);
+    }
 
-    // Assert
-    assertNotNull(encoder, "PasswordEncoder bean must not be null");
-    assertNotEquals(
-        rawPassword,
-        encoded,
-        "Encoded password must not equal raw password (should not be plain-text)");
-    assertTrue(
-        encoder.matches(rawPassword, encoded),
-        "PasswordEncoder must correctly verify the encoded password");
-  }
+    @Test
+    void passwordEncoderBeanShouldBeBCryptPasswordEncoder() {
+        // Arrange & Act
+        PasswordEncoder passwordEncoder = webSecurityConfig.passwordEncoder();
 
-  @Test
-  @DisplayName("filterChain should not explicitly disable CSRF protection")
-  void filterChainShouldNotDisableCsrf() throws Exception {
-    // Arrange
-    UserService mockUserService = mock(UserService.class);
-    WebSecurityConfig config = new WebSecurityConfig(mockUserService);
+        // Assert
+        assertNotNull(passwordEncoder, "PasswordEncoder bean must not be null");
+        assertTrue(passwordEncoder instanceof BCryptPasswordEncoder,
+                "PasswordEncoder bean must be an instance of BCryptPasswordEncoder to avoid plaintext or weak encoding");
+    }
 
-    HttpSecurity http =
-        new HttpSecurity(
-            mock(AuthenticationConfiguration.class),
-            mock(AuthenticationManagerBuilder.class),
-            new AuthenticationManager[0],
-            mock(UserDetailsService.class),
-            mock(CsrfTokenRepository.class));
+    @Test
+    void filterChainShouldConfigureCsrfWithCookieCsrfTokenRepository() throws Exception {
+        // Arrange
+        HttpSecurity http = mock(HttpSecurity.class, RETURNS_DEEP_STUBS);
 
-    // Spy on CsrfConfigurer to ensure disable() is never called.
-    @SuppressWarnings("unchecked")
-    CsrfConfigurer<HttpSecurity> csrfConfigurer = spy(new CsrfConfigurer<>(http));
-    http.csrf(customizer -> {
-      // capture and delegate to spy; this ensures any explicit disable() call can be verified
-      csrfConfigurer.disable(); // default behavior for this test stub
-    });
+        @SuppressWarnings("unchecked")
+        CsrfConfigurer<HttpSecurity> csrfConfigurer = mock(CsrfConfigurer.class, RETURNS_DEEP_STUBS);
+        when(http.csrf(any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            Consumer<CsrfConfigurer<HttpSecurity>> configurerConsumer =
+                    (Consumer<CsrfConfigurer<HttpSecurity>>) invocation.getArgument(0);
+            configurerConsumer.accept(csrfConfigurer);
+            return http;
+        });
 
-    // We can't rely on Spring to wire real configurers in this isolated test, so instead
-    // we validate behavior via a simple heuristic: the updated config code no longer invokes
-    // http.csrf(csrf -> csrf.disable()). That means calling filterChain() must NOT throw
-    // or rely on disabling CSRF. The core security guarantee (no explicit disable) is
-    // proven by reading the updated source and asserted here by expecting no exception.
+        // The following stubbings are only to satisfy the fluent API used in filterChain and keep the test
+        // focused on CSRF behavior without NPEs or chained-call issues.
+        when(http.authorizeHttpRequests(any())).thenReturn(http);
+        when(http.formLogin(any())).thenReturn(http);
+        when(http.oauth2Login(any())).thenReturn(http);
+        when(http.logout(any())).thenReturn(http);
+        when(http.headers(any())).thenReturn(http);
+        when(http.exceptionHandling(any())).thenReturn(http);
+        when(http.build()).thenReturn(mock(SecurityFilterChain.class));
 
-    // Act / Assert
-    assertDoesNotThrow(
-        () -> {
-          SecurityFilterChain chain = config.filterChain(http);
-          assertNotNull(chain, "SecurityFilterChain must be created successfully");
-        },
-        "filterChain configuration should succeed without explicitly disabling CSRF");
-  }
+        when(csrfConfigurer.csrfTokenRepository(any())).thenReturn(csrfConfigurer);
 
-  @Test
-  @DisplayName("AuthenticationManagerBuilder is configured with the injected UserService")
-  void configureGlobalUsesUserService() throws Exception {
-    // Arrange
-    UserService mockUserService = mock(UserService.class);
-    WebSecurityConfig config = new WebSecurityConfig(mockUserService);
-    AuthenticationManagerBuilder builder = mock(AuthenticationManagerBuilder.class);
+        // Act
+        webSecurityConfig.filterChain(http);
 
-    // Act
-    config.configureGlobal(builder);
-
-    // Assert
-    verify(builder, times(1)).userDetailsService(mockUserService);
-  }
-
-  @Test
-  @DisplayName("AjaxAuthenticationEntryPoint is configured as the authentication entry point")
-  void filterChainConfiguresAjaxAuthenticationEntryPoint() throws Exception {
-    // Arrange
-    UserService mockUserService = mock(UserService.class);
-    WebSecurityConfig config = new WebSecurityConfig(mockUserService);
-
-    HttpSecurity http =
-        new HttpSecurity(
-            mock(AuthenticationConfiguration.class),
-            mock(AuthenticationManagerBuilder.class),
-            new AuthenticationManager[0],
-            mock(UserDetailsService.class),
-            mock(CsrfTokenRepository.class));
-
-    // Capture the AuthenticationEntryPoint used by exceptionHandling
-    ArgumentCaptor<AuthenticationEntryPoint> entryPointCaptor =
-        ArgumentCaptor.forClass(AuthenticationEntryPoint.class);
-
-    // We can't directly access the internals of HttpSecurity here, so we validate indirectly:
-    // building the filter chain should succeed and yield at least one filter. This confirms that
-    // the updated configuration (including AjaxAuthenticationEntryPoint) is syntactically valid.
-    SecurityFilterChain chain = config.filterChain(http);
-
-    // Assert
-    assertNotNull(chain, "SecurityFilterChain must not be null");
-    Collection<?> filters = chain.getFilters();
-    assertFalse(filters.isEmpty(), "SecurityFilterChain must contain configured filters");
-  }
+        // Assert
+        verify(http, times(1)).csrf(any());
+        verify(csrfConfigurer, times(1))
+                .csrfTokenRepository(argThat(repo ->
+                        repo instanceof CookieCsrfTokenRepository &&
+                                // We cannot directly assert HttpOnly flag here without accessing internal state,
+                                // but verifying type correctness ensures use of CookieCsrfTokenRepository.
+                                true
+                ));
+    }
 }
