@@ -11,7 +11,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
-import java.io.ObjectInputFilter; // Added import
+import java.io.ObjectInputFilter;
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -42,11 +42,7 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
 
     try (ObjectInputStream ois =
         new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
-      // Apply deserialization filter to restrict allowed classes
-      ObjectInputFilter filter = ObjectInputFilter.Config.createFilter(
-          "org.dummy.insecure.framework.VulnerableTaskHolder;java.lang.String;!*"); // Added deserialization filter
-      ois.setObjectInputFilter(filter);
-
+      ois.setObjectInputFilter(ObjectInputFilter.Config.createSerializationFilter("org.dummy.insecure.framework.VulnerableTaskHolder;!*;"));
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
