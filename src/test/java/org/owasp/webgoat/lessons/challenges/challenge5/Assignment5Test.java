@@ -1,86 +1,87 @@
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 
 /**
- * Delta tests for security fix in Assignment5:
- * - Verify that login with correct credentials yields a successful AttackResult.
- * - Verify that PreparedStatement uses parameter placeholders (no string concatenation).
+ * Delta unit tests for Assignment5 focusing only on:
+ * - Use of parameterized PreparedStatement instead of string concatenation for SQL
+ * - Ensuring user inputs are bound via setString(…) and not interpolated into the SQL text
  */
-class Assignment5Test {
+public class Assignment5Test {
 
     @Test
-    void loginWithValidCredentialsShouldSucceed() throws Exception {
+    @DisplayName("login should use a parameterized PreparedStatement instead of string concatenation")
+    void login_usesParameterizedPreparedStatement() throws Exception {
         // Arrange
-        LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
-        Flags flags = Mockito.mock(Flags.class);
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
-
-        Connection connection = Mockito.mock(Connection.class);
-        PreparedStatement preparedStatement = Mockito.mock(PreparedStatement.class);
-        ResultSet resultSet = Mockito.mock(ResultSet.class);
-
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(Mockito.anyString())).thenReturn(preparedStatement);
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        when(resultSet.next()).thenReturn(true);
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
         when(flags.getFlag(5)).thenReturn("FLAG-5");
 
+        Connection connection = mock(Connection.class);
+        PreparedStatement preparedStatement = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+
+        Assignment5 assignment5 = new Assignment5(dataSource, flags);
+
         String username = "Larry";
-        String password = "secret";
+        String password = "p@ssw0rd";
 
         // Act
         AttackResult result = assignment5.login(username, password);
 
         // Assert
-        assertThat(result).isNotNull();
-        assertThat(result.getLessonCompleted()).isTrue();
+        // Ensure the query text is the parameterized version
+        verify(connection).prepareStatement(eq(
+                "select password from challenge_users where userid = ? and password = ?"));
 
-        // Delta-specific assertion: verify parameterized SQL is used
-        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-        verify(connection).prepareStatement(sqlCaptor.capture());
-        String sql = sqlCaptor.getValue();
-        assertThat(sql)
-            .contains("userid = ?")
-            .contains("password = ?")
-            .doesNotContain(username)
-            .doesNotContain(password);
+        // Verify that user inputs are bound as parameters, not concatenated into SQL
+        verify(preparedStatement).setString(1, username);
+        verify(preparedStatement).setString(2, password);
 
-        verify(preparedStatement).setString(eq(1), eq(username));
-        verify(preparedStatement).setString(eq(2), eq(password));
+        verify(preparedStatement).executeQuery();
+        assertTrue(result.getLessonCompleted(),
+                "Successful login should still mark the challenge as solved after the SQLi fix");
+        assertTrue(result.getFeedback().contains("FLAG-5"),
+                "Successful login should still return the correct flag after the SQLi fix");
     }
 
     @Test
-    void loginWithInvalidUserShouldFailBeforeDatabaseInteraction() throws Exception {
+    @DisplayName("login should not execute query when username is not 'Larry'")
+    void login_doesNotExecuteQueryForNonLarryUser() throws Exception {
         // Arrange
-        LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
-        Flags flags = Mockito.mock(Flags.class);
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
+
+        Connection connection = mock(Connection.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+
         Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-        String username = "NotLarry";
-        String password = "secret";
-
         // Act
-        AttackResult result = assignment5.login(username, password);
+        AttackResult result = assignment5.login("Bob", "anything");
 
         // Assert
-        assertThat(result).isNotNull();
-        assertThat(result.getLessonCompleted()).isFalse();
-        // Delta behavior: Since the SQL is parameterized, no SQL is constructed, but here
-        // we also ensure that for invalid user, we short-circuit before any DB call.
-        Mockito.verifyNoInteractions(dataSource);
+        // Ensure no SQL is executed for invalid user to validate secure control flow is unchanged
+        verify(connection, never()).prepareStatement(anyString());
+        assertEquals(false, result.getLessonCompleted(),
+                "Non-Larry user should not succeed even after SQLi fix");
     }
 }

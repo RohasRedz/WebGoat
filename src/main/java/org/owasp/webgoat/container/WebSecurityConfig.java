@@ -19,6 +19,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 
 /** Security configuration for WebGoat. */
 @Configuration
@@ -59,7 +60,15 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        .headers(headers -> headers.disable())
+        .csrf(csrf -> csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
+        .headers(headers -> headers
+            .xssProtection(xss -> xss.headerValue("1; mode=block"))
+            .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'"))
+            .frameOptions(frameOptions -> frameOptions.deny())
+            .contentTypeOptions(contentTypeOptions -> contentTypeOptions.disable())
+            .referrerPolicy(referrerPolicy -> referrerPolicy.strictOriginWhenCrossOrigin())
+            .permissionsPolicy(permissionsPolicy -> permissionsPolicy.policy("geolocation=(), microphone=()"))
+        )
         .exceptionHandling(
             handling ->
                 handling.authenticationEntryPoint(new AjaxAuthenticationEntryPoint("/login")))
@@ -68,7 +77,7 @@ public class WebSecurityConfig {
 
   @Autowired
   public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder());
+    auth.userDetailsService(userDetailsService);
   }
 
   @Bean

@@ -1,63 +1,71 @@
 package org.owasp.webgoat.lessons.deserialization;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectOutputStream;
 import java.util.Base64;
+
 import org.dummy.insecure.framework.VulnerableTaskHolder;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.owasp.webgoat.container.assignments.AttackResult;
 
 /**
- * Delta tests for security fix in InsecureDeserializationTask:
- * - Verify that deserialization of a disallowed type fails (ObjectInputFilter whitelist applied).
- * - Verify that a whitelisted VulnerableTaskHolder can still be deserialized successfully.
+ * Delta unit tests for InsecureDeserializationTask focusing only on:
+ * - Introduction of ObjectInputFilter allowlisting
+ * - Ensuring non-allowed types are rejected while allowed type still works
  */
-class InsecureDeserializationTaskTest {
+public class InsecureDeserializationTaskTest {
 
-    @Test
-    void deserializationOfDisallowedTypeShouldFail() throws Exception {
-        // Arrange
-        InsecureDeserializationTask task = new InsecureDeserializationTask();
-
-        // Create a token containing a clearly disallowed type (e.g., java.lang.String is allowed as java.base,
-        // but the filter then enforces VulnerableTaskHolder; non-matching type should cause failure path).
-        String maliciousObject = "malicious-string";
-        String token = serializeToUrlSafeBase64(maliciousObject);
-
-        // Act
-        AttackResult result = task.completed(token);
-
-        // Assert
-        assertThat(result).isNotNull();
-        assertThat(result.getLessonCompleted()).isFalse();
+    /**
+     * Utility to Base64-url encode an arbitrary Serializable object in the same way
+     * the controller expects it (reverse of token.replace('-', '+').replace('_', '/')).
+     */
+    private String toUrlSafeBase64(Object value) throws Exception {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
+            oos.writeObject(value);
+        }
+        String b64 = Base64.getEncoder().encodeToString(baos.toByteArray());
+        // reverse of token.replace('-', '+').replace('_', '/')
+        return b64.replace('+', '-').replace('/', '_');
     }
 
     @Test
-    void deserializationOfVulnerableTaskHolderShouldSucceedWithinTimingWindowOrFailGracefully() throws Exception {
+    @DisplayName("completed should still accept VulnerableTaskHolder instances after adding ObjectInputFilter")
+    void completed_allowsVulnerableTaskHolder() throws Exception {
         // Arrange
         InsecureDeserializationTask task = new InsecureDeserializationTask();
         VulnerableTaskHolder holder = new VulnerableTaskHolder();
-        String token = serializeToUrlSafeBase64(holder);
+        String token = toUrlSafeBase64(holder);
 
         // Act
         AttackResult result = task.completed(token);
 
         // Assert
-        // We cannot reliably enforce the 37 second timing window in a unit test environment,
-        // but we can assert that the calls do not hit the generic invalidversion path caused
-        // by object filtering and that an AttackResult is returned.
-        assertThat(result).isNotNull();
+        // Even with the allowlist filter, the expected type must still be accepted
+        assertTrue(result.getLessonCompleted(),
+                "VulnerableTaskHolder should remain deserializable after introducing ObjectInputFilter allowlisting");
     }
 
-    private String serializeToUrlSafeBase64(Object obj) throws Exception {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
-            oos.writeObject(obj);
-        }
-        String base64 = Base64.getEncoder().encodeToString(baos.toByteArray());
-        // Mirror the token mangling used in InsecureDeserializationTask (reverse of replace)
-        return base64.replace('+', '-').replace('/', '_');
+    @Test
+    @DisplayName("completed should reject disallowed object types via ObjectInputFilter")
+    void completed_rejectsDisallowedTypes() throws Exception {
+        // Arrange
+        InsecureDeserializationTask task = new InsecureDeserializationTask();
+
+        // Use a harmless but disallowed type (e.g., java.lang.Integer) to avoid any environment-specific gadgets
+        Integer disallowedObject = Integer.valueOf(42);
+        String token = toUrlSafeBase64(disallowedObject);
+
+        // Act
+        AttackResult result = task.completed(token);
+
+        // Assert
+        // The filter pattern allows only java.lang.String and VulnerableTaskHolder; other types must fail
+        assertFalse(result.getLessonCompleted(),
+                "Disallowed object types must not complete the lesson after ObjectInputFilter allowlisting");
     }
 }
