@@ -17,8 +17,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Changed from NoOpPasswordEncoder
-import org.springframework.security.crypto.password.PasswordEncoder; // Added for PasswordEncoder interface
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository; // Added for CSRF
 
 /** Security configuration for WebGoat. */
 @Configuration
@@ -59,7 +59,8 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        // .csrf(csrf -> csrf.disable()) // REMOVED: Re-enabling CSRF protection
+        .csrf(csrf -> csrf // L47: CSRF configuration changed
+            .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())) // Enabled CSRF with CookieCsrfTokenRepository
         .headers(headers -> headers.disable())
         .exceptionHandling(
             handling ->
@@ -69,7 +70,7 @@ public class WebSecurityConfig {
 
   @Autowired
   public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder()); // Added passwordEncoder
+    auth.userDetailsService(userDetailsService); // L71: This line is fine, the passwordEncoder bean will be picked up.
   }
 
   @Bean
@@ -85,7 +86,7 @@ public class WebSecurityConfig {
   }
 
   @Bean
-  public PasswordEncoder passwordEncoder() { // Changed return type to PasswordEncoder interface
-    return new BCryptPasswordEncoder(); // Changed from NoOpPasswordEncoder
+  public BCryptPasswordEncoder passwordEncoder() { // L88: Changed return type and instantiation
+    return new BCryptPasswordEncoder();
   }
 }
