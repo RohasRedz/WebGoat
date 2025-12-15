@@ -31,9 +31,22 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-            this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
-            if (/.*\.lesson\/(\d{1,4})$/.test(document.URL)) {
-                this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
+
+            // Use a more precise and efficient pattern:
+            // - Match up to the first occurrence of ".lesson" and keep it.
+            // - Avoid overly broad ".*" after .lesson which can lead to inefficient backtracking.
+            this.set('lessonUrl', document.URL.replace(/(\.lesson).*$/, '$1'));
+
+            // Replace inefficient leading ".*" in the page number regex with an anchored, simpler pattern:
+            // - ^[^?]*\.lesson\/(\d{1,4})$ :
+            //   ^        : start of string
+            //   [^?]*    : any characters up to (but not including) a query string '?'
+            //   \.lesson/: literal ".lesson/"
+            //   (\d{1,4}): capture 1–4 digit page number
+            //   $        : end of string
+            var pageMatch = document.URL.match(/^[^?]*\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
             } else {
                 this.set('pageNum',0);
             }
