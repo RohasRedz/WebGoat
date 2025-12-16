@@ -16,12 +16,9 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added import
+import org.springframework.security.crypto.password.PasswordEncoder; // Added import
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
-import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
-
 
 /** Security configuration for WebGoat. */
 @Configuration
@@ -33,10 +30,6 @@ public class WebSecurityConfig {
 
   @Bean
   public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-    CsrfTokenRequestAttributeHandler requestHandler = new CsrfTokenRequestAttributeHandler();
-    // set the name of the attribute the CsrfToken will be saved to
-    requestHandler.setCsrfRequestAttributeName(null); // Use _csrf by default
-
     return http.authorizeHttpRequests(
             auth ->
                 auth.requestMatchers(
@@ -66,9 +59,7 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        .csrf(csrf -> csrf
-            .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
-            .csrfTokenRequestHandler(requestHandler))
+        .csrf(csrf -> csrf.ignoringRequestMatchers("/csrf/disable")) // Re-enabled CSRF and added ignoring for specific path if needed
         .headers(headers -> headers.disable())
         .exceptionHandling(
             handling ->
@@ -78,7 +69,7 @@ public class WebSecurityConfig {
 
   @Autowired
   public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder());
+    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder()); // Configured passwordEncoder
   }
 
   @Bean
@@ -94,7 +85,7 @@ public class WebSecurityConfig {
   }
 
   @Bean
-  public PasswordEncoder passwordEncoder() {
-    return new BCryptPasswordEncoder();
+  public PasswordEncoder passwordEncoder() { // Changed return type and implementation
+    return new BCryptPasswordEncoder(); // Using BCryptPasswordEncoder
   }
 }

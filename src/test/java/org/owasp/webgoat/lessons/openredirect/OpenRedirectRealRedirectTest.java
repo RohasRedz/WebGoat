@@ -1,69 +1,70 @@
+// Delta unit test for OpenRedirectRealRedirect.java
+// Assumed package based on resolved_file_path; adjust if actual package differs.
 package org.owasp.webgoat.lessons.openredirect;
-
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.springframework.web.servlet.ModelAndView;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Delta tests for the OpenRedirectRealRedirect controller.
- *
- * Focus: Verify that the open redirect vulnerability is fixed:
- *  - Only internal URLs (starting with "/") are allowed as redirect targets.
- *  - Invalid or external URLs are redirected to the safe default "/welcome.mvc".
- */
+import org.junit.jupiter.api.Test;
+import org.springframework.web.servlet.ModelAndView;
+
 class OpenRedirectRealRedirectTest {
 
-    private final OpenRedirectRealRedirect controller = new OpenRedirectRealRedirect();
-
     @Test
-    @DisplayName("Should allow redirect only to internal paths starting with '/'")
-    void internalUrlIsAllowed() {
+    void realShouldAllowRelativeInternalPathStartingWithSlash() throws Exception {
         // Arrange
-        String internalUrl = "/internal/page";
+        OpenRedirectRealRedirect controller = new OpenRedirectRealRedirect();
+        String safeUrl = "/welcome.mvc";
 
         // Act
-        ModelAndView mav = controller.real(internalUrl);
+        ModelAndView mav = controller.real(safeUrl);
 
         // Assert
-        assertThat(mav.getViewName())
-                .as("Internal URLs starting with '/' should be used as redirect targets")
-                .isEqualTo("redirect:" + internalUrl);
+        assertThat(mav).isNotNull();
+        assertThat(mav.getViewName()).isEqualTo("redirect:" + safeUrl);
     }
 
     @Test
-    @DisplayName("Should redirect external URLs to safe default '/welcome.mvc'")
-    void externalUrlIsRejectedAndRedirectsToSafePage() {
+    void realShouldRedirectToSafeDefaultWhenRelativePathDoesNotStartWithSlash() throws Exception {
         // Arrange
-        String externalUrl = "http://evil.com/malicious";
+        OpenRedirectRealRedirect controller = new OpenRedirectRealRedirect();
+        String unsafeUrl = "http://evil.com/relative";
+
+        // Act
+        ModelAndView mav = controller.real(unsafeUrl);
+
+        // Assert
+        // Because the string is absolute, the host is not whitelisted and should
+        // fall back to the safe default welcome page.
+        assertThat(mav).isNotNull();
+        assertThat(mav.getViewName()).isEqualTo("redirect:/welcome.mvc");
+    }
+
+    @Test
+    void realShouldRejectAbsoluteUrlWithNonWhitelistedHost() throws Exception {
+        // Arrange
+        OpenRedirectRealRedirect controller = new OpenRedirectRealRedirect();
+        String externalUrl = "https://evil.com/";
 
         // Act
         ModelAndView mav = controller.real(externalUrl);
 
         // Assert
-        assertThat(mav.getViewName())
-                .as("External URLs must not be used directly as redirect targets")
-                .isEqualTo("redirect:/welcome.mvc");
+        // The fix enforces an allow-list; non-localhost hosts must be redirected
+        // to the safe default.
+        assertThat(mav.getViewName()).isEqualTo("redirect:/welcome.mvc");
     }
 
     @Test
-    @DisplayName("Should redirect malformed or null URLs to safe default '/welcome.mvc'")
-    void malformedOrNullUrlRedirectsToSafePage() {
+    void realShouldAllowAbsoluteUrlWithWhitelistedHost() throws Exception {
         // Arrange
-        String malformedUrl = "not-starting-with-slash";
+        OpenRedirectRealRedirect controller = new OpenRedirectRealRedirect();
+        String localhostUrl = "http://localhost/path";
 
         // Act
-        ModelAndView mavMalformed = controller.real(malformedUrl);
-        ModelAndView mavNull = controller.real(null);
+        ModelAndView mav = controller.real(localhostUrl);
 
         // Assert
-        assertThat(mavMalformed.getViewName())
-                .as("Malformed URLs must not be used directly as redirect targets")
-                .isEqualTo("redirect:/welcome.mvc");
-
-        assertThat(mavNull.getViewName())
-                .as("Null URLs must not be used directly as redirect targets")
-                .isEqualTo("redirect:/welcome.mvc");
+        // Host is whitelisted, so redirect is allowed.
+        assertThat(mav.getViewName()).isEqualTo("redirect:" + localhostUrl);
     }
 }

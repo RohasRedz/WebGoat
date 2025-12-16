@@ -8,6 +8,9 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.servlet.ModelAndView;
+import org.springframework.web.servlet.view.RedirectView; // Added import
+import java.net.URI; // Added import
+import java.net.URISyntaxException; // Added import
 
 /**
  * Provides a real 302 redirect for experimentation separate from assignment scoring.
@@ -15,16 +18,24 @@ import org.springframework.web.servlet.ModelAndView;
 @Controller
 public class OpenRedirectRealRedirect {
 
+  private static final String ALLOWED_REDIRECT_HOST = "localhost"; // Example: Whitelist allowed host
+
   @GetMapping("/OpenRedirect/realRedirect")
-  public ModelAndView real(@RequestParam("url") String url) {
-    // Remediation: Validate the 'url' parameter to prevent open redirects.
-    // Only allow relative paths starting with '/' or a whitelisted domain.
-    // For this lesson, we enforce relative paths.
-    if (url != null && url.startsWith("/")) {
-      return new ModelAndView("redirect:" + url);
+  public ModelAndView real(@RequestParam("url") String url) throws URISyntaxException {
+    // Fixed: Validate redirect target against a whitelist and ensure it's a safe internal path
+    URI redirectUri = new URI(url);
+    if (redirectUri.isAbsolute()) {
+      // For absolute URLs, check against a whitelist of allowed hosts
+      if (!ALLOWED_REDIRECT_HOST.equalsIgnoreCase(redirectUri.getHost())) {
+        // Redirect to a safe default or error page if host is not whitelisted
+        return new ModelAndView("redirect:/welcome.mvc"); // Safe default redirect
+      }
     } else {
-      // Redirect to a safe default page or an error page if the URL is invalid
-      return new ModelAndView("redirect:/welcome.mvc"); // Redirect to a safe default page
+      // For relative URLs, ensure they start with '/' to prevent scheme/host manipulation
+      if (!url.startsWith("/")) {
+        return new ModelAndView("redirect:/welcome.mvc"); // Safe default redirect
+      }
     }
+    return new ModelAndView("redirect:" + url);
   }
 }

@@ -51,27 +51,25 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
     if (attackResult == null) {
 
       try (Connection connection = dataSource.getConnection()) {
-        // Remediation: Use PreparedStatement to prevent SQL Injection
+        // Fixed: Used parameterized query for checking user existence
         String checkUserQuery = "select userid from sql_challenge_users where userid = ?";
-        try (PreparedStatement statement = connection.prepareStatement(checkUserQuery)) {
-          statement.setString(1, username);
-          try (ResultSet resultSet = statement.executeQuery()) {
-            if (resultSet.next()) {
-              attackResult = failed(this).feedback("user.exists").feedbackArgs(username).build();
-            } else {
-              PreparedStatement preparedStatement =
-                  connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)");
-              preparedStatement.setString(1, username);
-              preparedStatement.setString(2, email);
-              preparedStatement.setString(3, password);
-              preparedStatement.execute();
-              attackResult =
-                  informationMessage(this).feedback("user.created").feedbackArgs(username).build();
-            }
-          }
+        PreparedStatement statement = connection.prepareStatement(checkUserQuery);
+        statement.setString(1, username);
+        ResultSet resultSet = statement.executeQuery();
+
+        if (resultSet.next()) {
+          attackResult = failed(this).feedback("user.exists").feedbackArgs(username).build();
+        } else {
+          PreparedStatement preparedStatement =
+              connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)");
+          preparedStatement.setString(1, username);
+          preparedStatement.setString(2, email);
+          preparedStatement.setString(3, password);
+          preparedStatement.execute();
+          attackResult =
+              informationMessage(this).feedback("user.created").feedbackArgs(username).build();
         }
       } catch (SQLException e) {
-        log.error("SQL Exception during user registration", e); // Log the exception for debugging
         attackResult = failed(this).output("Something went wrong").build();
       }
     }
