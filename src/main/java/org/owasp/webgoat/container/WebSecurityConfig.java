@@ -20,7 +20,8 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
-import org.springframework.security.web.csrf.CsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+
 
 /** Security configuration for WebGoat. */
 @Configuration
@@ -32,6 +33,10 @@ public class WebSecurityConfig {
 
   @Bean
   public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    CsrfTokenRequestAttributeHandler requestHandler = new CsrfTokenRequestAttributeHandler();
+    // set the name of the attribute the CsrfToken will be saved to
+    requestHandler.setCsrfRequestAttributeName(null); // Use _csrf by default
+
     return http.authorizeHttpRequests(
             auth ->
                 auth.requestMatchers(
@@ -61,7 +66,9 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository()))
+        .csrf(csrf -> csrf
+            .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+            .csrfTokenRequestHandler(requestHandler))
         .headers(headers -> headers.disable())
         .exceptionHandling(
             handling ->
@@ -71,8 +78,7 @@ public class WebSecurityConfig {
 
   @Autowired
   public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService)
-        .passwordEncoder(passwordEncoder());
+    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder());
   }
 
   @Bean
@@ -90,12 +96,5 @@ public class WebSecurityConfig {
   @Bean
   public PasswordEncoder passwordEncoder() {
     return new BCryptPasswordEncoder();
-  }
-
-  @Bean
-  public CsrfTokenRepository csrfTokenRepository() {
-    CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
-    repository.setCookiePath("/");
-    return repository;
   }
 }
