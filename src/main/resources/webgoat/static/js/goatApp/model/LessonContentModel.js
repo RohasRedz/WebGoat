@@ -1,106 +1,64 @@
-define([
-    'jquery',
+define(['jquery',
     'underscore',
     'backbone',
-    'goatApp/model/HTMLContentModel'
-], function (
-    $,
-    _,
-    Backbone,
-    HTMLContentModel
-) {
-    'use strict';
-
-    /**
-     * Normalize and validate lesson name input to avoid ReDoS and
-     * reduce the risk of injection into URLs.
-     *
-     * - Enforces a safe character set: letters, digits, underscore, hyphen, and dot.
-     * - Enforces a reasonable maximum length.
-     * - Rejects inputs that do not conform to this pattern.
-     */
-    function sanitizeLessonName(rawName) {
-        if (typeof rawName !== 'string') {
-            return null;
-        }
-
-        // Trim whitespace and enforce length limits
-        var name = $.trim(rawName);
-        if (!name.length || name.length > 128) {
-            return null;
-        }
-
-        // Allow only a restricted character set to avoid pathological regex cases
-        // and to prevent unexpected characters in lesson URLs.
-        var safeNamePattern = /^[A-Za-z0-9_.-]+$/;
-        if (!safeNamePattern.test(name)) {
-            return null;
-        }
-
-        return name;
-    }
+    'goatApp/model/HTMLContentModel'],
+     function($,
+        _,
+        Backbone,
+        HTMLContentModel){
 
     return HTMLContentModel.extend({
-        urlRoot: null,
+        urlRoot:null,
         defaults: {
-            items: null,
-            selectedItem: null
+            items:null,
+            selectedItem:null
         },
 
         initialize: function (options) {
-            // Intentionally left blank; no unsafe side effects.
+
         },
 
-        loadData: function (options) {
-            options = options || {};
-            var sanitizedName = sanitizeLessonName(options.name);
-
-            if (!sanitizedName) {
-                // Fail safely: do not attempt to fetch content with an invalid name.
-                // Do not log the raw input; just emit a generic error.
-                if (window && window.console) {
-                    console.error('Invalid lesson name provided; cannot load data.');
-                }
-                return;
-            }
-
-            // Use a simple, non-nested encoding approach and avoid constructing
-            // unnecessarily complex regular expressions.
-            this.urlRoot = encodeURIComponent(sanitizedName) + '.lesson';
-
+        loadData: function(options) {
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
             var self = this;
-            this.fetch().done(function (data) {
+            this.fetch().done(function(data) {
                 self.setContent(data);
             });
         },
 
-        setContent: function (content, loadHelps) {
+        setContent: function(content, loadHelps) {
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
+            this.set('content',content);
 
-            this.set('content', content);
+            // Derive lesson URL in a safe and efficient way
+            var currentUrl = document.URL;
+            var lessonUrl;
 
-            // Use a simpler, bounded regex without ambiguous backtracking patterns.
-            var currentUrl = String(document.URL || '');
-            this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
-
-            var pageNumMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageNumMatch && pageNumMatch[1]) {
-                this.set('pageNum', pageNumMatch[1]);
+            // Avoid using complex, potentially catastrophic backtracking regex.
+            // Instead, check for the ".lesson" suffix and replace it directly.
+            if (currentUrl.indexOf('.lesson') !== -1) {
+                lessonUrl = currentUrl.substring(0, currentUrl.indexOf('.lesson')) + '.lesson';
             } else {
-                this.set('pageNum', 0);
+                lessonUrl = currentUrl;
             }
+            this.set('lessonUrl', lessonUrl);
 
-            this.trigger('content:loaded', this, loadHelps);
+            // Extract page number using a simplified and bounded pattern
+            var pageNum = 0;
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch && pageMatch[1]) {
+                pageNum = parseInt(pageMatch[1], 10);
+            }
+            this.set('pageNum', pageNum);
+
+            this.trigger('content:loaded',this,loadHelps);
         },
 
         fetch: function (options) {
             options = options || {};
-            return Backbone.Model.prototype.fetch.call(
-                this,
-                _.extend({ dataType: 'html' }, options)
-            );
+            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
         }
     });
 });
