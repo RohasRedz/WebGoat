@@ -56,9 +56,6 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
       } catch (SQLException sqle) {
         log.error("SQL Exception during password retrieval", sqle);
         // do nothing
-      } catch (Exception e) {
-        log.error("General Exception during password retrieval", e);
-        // do nothing
       }
     } catch (Exception e) {
       log.error("General Exception during password retrieval", e);
