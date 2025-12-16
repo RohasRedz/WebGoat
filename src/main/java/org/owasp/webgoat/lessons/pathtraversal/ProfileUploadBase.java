@@ -12,6 +12,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path; // Import Path
+import java.nio.file.Paths; // Import Paths
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
@@ -48,7 +50,19 @@ public class ProfileUploadBase implements AssignmentEndpoint {
     File uploadDirectory = cleanupAndCreateDirectoryForUser(username);
 
     try {
-      var uploadedFile = new File(uploadDirectory, fullName);
+      // Remediation: Sanitize fullName and ensure file is created within the intended directory
+      String sanitizedFileName = FilenameUtils.getName(fullName); // Get only the filename, remove any path
+      if (sanitizedFileName.contains("..") || sanitizedFileName.contains("/") || sanitizedFileName.contains("\\")) {
+          return failed(this).feedback("path-traversal-profile-invalid-filename").build();
+      }
+
+      Path resolvedPath = Paths.get(uploadDirectory.getAbsolutePath(), sanitizedFileName).normalize();
+      // Ensure the resolved path is still within the intended upload directory
+      if (!resolvedPath.startsWith(uploadDirectory.getAbsolutePath())) {
+          return failed(this).feedback("path-traversal-profile-outside-directory").build();
+      }
+
+      var uploadedFile = resolvedPath.toFile();
       uploadedFile.createNewFile();
       FileCopyUtils.copy(file.getBytes(), uploadedFile);
 

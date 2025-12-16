@@ -17,7 +17,14 @@ public class OpenRedirectRealRedirect {
 
   @GetMapping("/OpenRedirect/realRedirect")
   public ModelAndView real(@RequestParam("url") String url) {
-    // Intentionally vulnerable: no validation
-    return new ModelAndView("redirect:" + url);
+    // Remediation: Validate the 'url' parameter to prevent open redirects.
+    // Only allow relative paths starting with '/' or a whitelisted domain.
+    // For this lesson, we enforce relative paths.
+    if (url != null && url.startsWith("/")) {
+      return new ModelAndView("redirect:" + url);
+    } else {
+      // Redirect to a safe default page or an error page if the URL is invalid
+      return new ModelAndView("redirect:/welcome.mvc"); // Redirect to a safe default page
+    }
   }
 }
