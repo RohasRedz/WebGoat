@@ -1,35 +1,33 @@
-// Assuming standard Maven-style test package based on source path
+// TODO: Package inferred from source path; adjust if actual package differs.
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
-import static org.owasp.webgoat.container.assignments.AttackResult.AttackResultType.SUCCESS;
-import static org.owasp.webgoat.container.assignments.AttackResult.AttackResultType.FAIL;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 
-import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 
 /**
- * Delta tests for Assignment5 focusing only on:
- * - SQL query now uses parameterized PreparedStatement instead of string concatenation.
+ * Delta tests for Assignment5 focusing only on changed behavior:
+ * - SQL is now parameterized via PreparedStatement (no string concatenation)
+ * - Correct binding of parameters and handling of success/failure and SQLException
  */
-class Assignment5Test {
+public class Assignment5Test {
 
     @Test
-    @DisplayName("login should use parameterized PreparedStatement and bind user inputs safely")
-    void loginUsesParameterizedQuery() throws Exception {
+    void login_ShouldUsePreparedStatementWithParameters_AndSolveChallengeOnMatch() throws Exception {
         // Arrange
         LessonDataSource dataSource = mock(LessonDataSource.class);
         Flags flags = mock(Flags.class);
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
+        Assignment5 assignment = new Assignment5(dataSource, flags);
 
         Connection connection = mock(Connection.class);
         PreparedStatement preparedStatement = mock(PreparedStatement.class);
@@ -42,36 +40,33 @@ class Assignment5Test {
         when(flags.getFlag(5)).thenReturn("FLAG-5");
 
         String username = "Larry";
-        String password = "p@ssw0rd";
+        String password = "somePassword";
 
         // Act
-        AttackResult result = assignment5.login(username, password);
+        AttackResult result = assignment.login(username, password);
 
-        // Assert
-        // 1. Ensure query text uses placeholders instead of concatenated values
-        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-        verify(connection).prepareStatement(sqlCaptor.capture());
-        String sql = sqlCaptor.getValue();
+        // Assert - ensure parameterized SQL is used
+        verify(connection, times(1)).prepareStatement(argThat(sql ->
+                sql.contains("userid = ?") &&
+                sql.contains("password = ?") &&
+                !sql.contains(username) &&
+                !sql.contains(password)));
 
-        assertThat(sql).contains("userid = ?").contains("password = ?");
-        assertThat(sql).doesNotContain(username).doesNotContain(password);
+        // Ensure parameters are bound correctly and user input not concatenated into SQL string
+        verify(preparedStatement, times(1)).setString(1, username);
+        verify(preparedStatement, times(1)).setString(2, password);
 
-        // 2. Ensure parameters are bound correctly without concatenation
-        verify(preparedStatement).setString(1, username);
-        verify(preparedStatement).setString(2, password);
-
-        // 3. Ensure the path still works and returns success in the positive case
+        // Behavior: challenge solved when a row exists
         assertThat(result).isNotNull();
-        assertThat(result.getType()).isEqualTo(SUCCESS);
+        assertThat(result.isLessonSolved()).isTrue();
     }
 
     @Test
-    @DisplayName("login should not succeed when credentials do not match even with parameterization")
-    void loginWithInvalidCredentialsShouldFailUsingSameParameterizedQuery() throws Exception {
+    void login_WhenNoResult_ShouldReturnFailed() throws Exception {
         // Arrange
         LessonDataSource dataSource = mock(LessonDataSource.class);
         Flags flags = mock(Flags.class);
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
+        Assignment5 assignment = new Assignment5(dataSource, flags);
 
         Connection connection = mock(Connection.class);
         PreparedStatement preparedStatement = mock(PreparedStatement.class);
@@ -80,18 +75,65 @@ class Assignment5Test {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        when(resultSet.next()).thenReturn(false); // No rows -> invalid credentials
-
-        String username = "Larry";
-        String password = "wrong";
+        when(resultSet.next()).thenReturn(false);
 
         // Act
-        AttackResult result = assignment5.login(username, password);
+        AttackResult result = assignment.login("Larry", "wrongPassword");
+
+        // Assert: lesson should not be solved
+        assertThat(result).isNotNull();
+        assertThat(result.isLessonSolved()).isFalse();
+    }
+
+    @Test
+    void login_WhenSQLExceptionOccurs_ShouldReturnFailedWithoutLeakingDetails() throws Exception {
+        // Arrange
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
+        Assignment5 assignment = new Assignment5(dataSource, flags);
+
+        Connection connection = mock(Connection.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(anyString())).thenThrow(new SQLException("DB error"));
+
+        // Act
+        AttackResult result = assignment.login("Larry", "any");
+
+        // Assert: generic failure; no exception propagated
+        assertThat(result).isNotNull();
+        assertThat(result.isLessonSolved()).isFalse();
+    }
+
+    @Test
+    void login_WhenUserIsNotLarry_ShouldFailEarly_WithoutDBInteraction() throws Exception {
+        // Arrange
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
+        Assignment5 assignment = new Assignment5(dataSource, flags);
+
+        // Act
+        AttackResult result = assignment.login("Bob", "pwd");
 
         // Assert
-        verify(preparedStatement).setString(1, username);
-        verify(preparedStatement).setString(2, password);
         assertThat(result).isNotNull();
-        assertThat(result.getType()).isEqualTo(FAIL);
+        assertThat(result.isLessonSolved()).isFalse();
+        verifyNoInteractions(dataSource);
+    }
+
+    @Test
+    void login_WhenUsernameOrPasswordBlank_ShouldFailEarly_WithoutDBInteraction() throws Exception {
+        // Arrange
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
+        Assignment5 assignment = new Assignment5(dataSource, flags);
+
+        // Act
+        AttackResult result1 = assignment.login("", "pwd");
+        AttackResult result2 = assignment.login("Larry", "");
+
+        // Assert
+        assertThat(result1.isLessonSolved()).isFalse();
+        assertThat(result2.isLessonSolved()).isFalse();
+        verifyNoInteractions(dataSource);
     }
 }

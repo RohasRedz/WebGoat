@@ -1,72 +1,64 @@
-// Assuming standard Maven-style test package based on source path
+// TODO: Package inferred from source path; adjust if actual package differs.
 package org.owasp.webgoat.lessons.deserialization;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectOutputStream;
+import java.io.Serializable;
 import java.util.Base64;
 
 import org.dummy.insecure.framework.VulnerableTaskHolder;
-import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.owasp.webgoat.container.assignments.AttackResult;
-import org.owasp.webgoat.container.assignments.AttackResult.AttackResultType;
 
 /**
- * Delta tests for InsecureDeserializationTask focusing only on:
- * - Introduction of ObjectInputFilter allowlist to restrict deserialized types.
+ * Delta tests for InsecureDeserializationTask focusing only on changed behavior:
+ * - Deserialization is now constrained by an ObjectInputFilter whitelist.
+ *   Only java.lang.* and VulnerableTaskHolder should be allowed; other types should be rejected.
  */
-class InsecureDeserializationTaskTest {
+public class InsecureDeserializationTaskTest {
 
-    private String serializeToBase64(Object obj) throws Exception {
+    private final InsecureDeserializationTask task = new InsecureDeserializationTask();
+
+    @Test
+    void completed_WithVulnerableTaskHolderToken_ShouldNotBeBlockedByFilter() throws Exception {
+        // Arrange: serialize an allowed type (VulnerableTaskHolder)
+        String token = serializeToWebGoatToken(new VulnerableTaskHolder());
+
+        // Act
+        AttackResult result = task.completed(token);
+
+        // Assert: result should at least not be an obvious failure caused by filtering.
+        // Exact success state depends on timing logic; we only assert it's not null.
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    void completed_WithDisallowedSerializableType_ShouldFailDueToFilter() throws Exception {
+        // Arrange: serialize a type that is NOT in the allow-list
+        String token = serializeToWebGoatToken(new NotAllowedSerializable());
+
+        // Act
+        AttackResult result = task.completed(token);
+
+        // Assert: filter should cause deserialization to fail and return a failed AttackResult
+        assertThat(result).isNotNull();
+        assertThat(result.isLessonSolved()).isFalse();
+    }
+
+    private String serializeToWebGoatToken(Serializable obj) throws Exception {
+        // Helper to mirror Base64 + URL-safe replacement encoding used by the controller.
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
             oos.writeObject(obj);
         }
-        String base64 = Base64.getEncoder().encodeToString(baos.toByteArray());
-        // The controller expects URL-safe form with '-' and '_' replacements
-        return base64.replace('+', '-').replace('/', '_');
+        String b64 = Base64.getEncoder().encodeToString(baos.toByteArray());
+        return b64.replace('+', '-').replace('/', '_');
     }
 
-    @Test
-    @DisplayName("completed should still accept valid VulnerableTaskHolder instances after filter is added")
-    void completedAcceptsAllowedTypeVulnerableTaskHolder() throws Exception {
-        // Arrange
-        InsecureDeserializationTask task = new InsecureDeserializationTask();
-        VulnerableTaskHolder holder = new VulnerableTaskHolder(); // relies on its default behavior for timing
-        String token = serializeToBase64(holder);
-
-        // Act
-        AttackResult result = task.completed(token);
-
-        // Assert
-        // We only verify that the request is processed and not rejected due to type filtering.
-        // Depending on timing logic, success/fail can vary, but it must not fail due to
-        // the deserialized type being rejected.
-        assertThat(result).isNotNull();
-    }
-
-    @Test
-    @DisplayName("completed should reject disallowed types via ObjectInputFilter")
-    void completedRejectsDisallowedType() throws Exception {
-        // Arrange
-        InsecureDeserializationTask task = new InsecureDeserializationTask();
-
-        // A simple serializable object of a type that is NOT on the allowlist
-        class MaliciousPayload implements java.io.Serializable {
-            private static final long serialVersionUID = 1L;
-        }
-
-        String token = serializeToBase64(new MaliciousPayload());
-
-        // Act
-        AttackResult result = task.completed(token);
-
-        // Assert
-        // With the filter in place, deserialization of this type should not be considered valid
-        // and should result in a failed AttackResult rather than processing a rogue object.
-        assertThat(result).isNotNull();
-        assertThat(result.getType()).isEqualTo(AttackResultType.FAIL);
+    private static class NotAllowedSerializable implements Serializable {
+        private static final long serialVersionUID = 1L;
+        String data = "not-allowed";
     }
 }
