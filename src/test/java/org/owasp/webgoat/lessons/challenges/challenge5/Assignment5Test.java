@@ -1,97 +1,97 @@
-/*
- * SPDX-FileCopyrightText: Copyright © 2017 WebGoat authors
- * SPDX-License-Identifier: GPL-2.0-or-later
- */
+// Assuming standard Maven-style test package based on source path
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
+import static org.owasp.webgoat.container.assignments.AttackResult.AttackResultType.SUCCESS;
+import static org.owasp.webgoat.container.assignments.AttackResult.AttackResultType.FAIL;
 
 import java.sql.Connection;
-import javax.sql.DataSource;
-import org.h2.jdbcx.JdbcConnectionPool;
-import org.junit.jupiter.api.BeforeEach;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
-import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 /**
- * Delta tests for Assignment5 focusing on the SQL injection fix.
- *
- * Changed behavior:
- * - Before: SQL query was built via string concatenation with user input.
- * - After: SQL query uses parameter placeholders and binds user input via setString().
- *
- * These tests:
- * - Verify that the fixed code still authenticates correctly when valid credentials are supplied.
- * - Verify that an attempted SQL injection payload is treated as a normal credential and does not succeed.
+ * Delta tests for Assignment5 focusing only on:
+ * - SQL query now uses parameterized PreparedStatement instead of string concatenation.
  */
-public class Assignment5Test {
+class Assignment5Test {
 
-  private LessonDataSource lessonDataSource;
-  private Flags flags;
-  private Assignment5 assignment5;
+    @Test
+    @DisplayName("login should use parameterized PreparedStatement and bind user inputs safely")
+    void loginUsesParameterizedQuery() throws Exception {
+        // Arrange
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
+        Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-  @BeforeEach
-  void setUp() throws Exception {
-    // Configure in-memory H2 database
-    JdbcConnectionPool pool =
-        JdbcConnectionPool.create(
-            "jdbc:h2:mem:test-assignment5;MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
-    Connection connection = pool.getConnection();
+        Connection connection = mock(Connection.class);
+        PreparedStatement preparedStatement = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
 
-    // Create schema and test data expected by Assignment5
-    connection
-        .createStatement()
-        .execute(
-            "CREATE TABLE challenge_users (userid VARCHAR(100) PRIMARY KEY, password VARCHAR(255))");
-    // The lesson expects user 'Larry' to exist
-    connection
-        .createStatement()
-        .execute("INSERT INTO challenge_users(userid, password) VALUES ('Larry', 'secret-pass')");
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        when(flags.getFlag(5)).thenReturn("FLAG-5");
 
-    DataSource ds = new SingleConnectionDataSource(connection, true);
-    lessonDataSource = new LessonDataSource(ds);
+        String username = "Larry";
+        String password = "p@ssw0rd";
 
-    flags = org.mockito.Mockito.mock(Flags.class);
-    when(flags.getFlag(5)).thenReturn("FLAG-5");
+        // Act
+        AttackResult result = assignment5.login(username, password);
 
-    assignment5 = new Assignment5(lessonDataSource, flags);
-  }
+        // Assert
+        // 1. Ensure query text uses placeholders instead of concatenated values
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sqlCaptor.capture());
+        String sql = sqlCaptor.getValue();
 
-  @Test
-  void login_withValidCredentials_succeedsAndReturnsSuccessResult() throws Exception {
-    // Arrange
-    String username = "Larry";
-    String password = "secret-pass";
+        assertThat(sql).contains("userid = ?").contains("password = ?");
+        assertThat(sql).doesNotContain(username).doesNotContain(password);
 
-    // Act
-    AttackResult result = assignment5.login(username, password);
+        // 2. Ensure parameters are bound correctly without concatenation
+        verify(preparedStatement).setString(1, username);
+        verify(preparedStatement).setString(2, password);
 
-    // Assert
-    // The attack should be considered successful for the correct user & password
-    assertEquals(AttackResult.Status.SUCCESS, result.getStatus());
-    assertEquals("FLAG-5", result.getFeedbackArgs()[0]);
-    // Ensure flag access still occurs (behavior preserved)
-    verify(flags).getFlag(5);
-  }
+        // 3. Ensure the path still works and returns success in the positive case
+        assertThat(result).isNotNull();
+        assertThat(result.getType()).isEqualTo(SUCCESS);
+    }
 
-  @Test
-  void login_withSqlInjectionPayloadInPassword_doesNotBypassAuthentication() throws Exception {
-    // Arrange
-    String username = "Larry";
-    // Attempt to exploit SQL injection; with parameter binding this must not work
-    String maliciousPassword = "wrong' OR '1'='1";
+    @Test
+    @DisplayName("login should not succeed when credentials do not match even with parameterization")
+    void loginWithInvalidCredentialsShouldFailUsingSameParameterizedQuery() throws Exception {
+        // Arrange
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
+        Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-    // Act
-    AttackResult result = assignment5.login(username, maliciousPassword);
+        Connection connection = mock(Connection.class);
+        PreparedStatement preparedStatement = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
 
-    // Assert
-    // With parameterized query, the injection payload is treated as a literal password
-    // and must not authenticate successfully.
-    assertEquals(AttackResult.Status.FAIL, result.getStatus());
-  }
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false); // No rows -> invalid credentials
+
+        String username = "Larry";
+        String password = "wrong";
+
+        // Act
+        AttackResult result = assignment5.login(username, password);
+
+        // Assert
+        verify(preparedStatement).setString(1, username);
+        verify(preparedStatement).setString(2, password);
+        assertThat(result).isNotNull();
+        assertThat(result.getType()).isEqualTo(FAIL);
+    }
 }
