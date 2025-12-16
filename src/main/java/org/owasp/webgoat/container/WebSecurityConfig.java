@@ -16,9 +16,11 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Changed import
-import org.springframework.security.crypto.password.PasswordEncoder; // Added import for interface
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRepository;
 
 /** Security configuration for WebGoat. */
 @Configuration
@@ -59,7 +61,7 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        // .csrf(csrf -> csrf.disable()) // Removed this line to enable CSRF
+        .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository()))
         .headers(headers -> headers.disable())
         .exceptionHandling(
             handling ->
@@ -69,7 +71,8 @@ public class WebSecurityConfig {
 
   @Autowired
   public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder()); // Added passwordEncoder
+    auth.userDetailsService(userDetailsService)
+        .passwordEncoder(passwordEncoder());
   }
 
   @Bean
@@ -85,7 +88,14 @@ public class WebSecurityConfig {
   }
 
   @Bean
-  public PasswordEncoder passwordEncoder() { // Changed return type to PasswordEncoder interface
-    return new BCryptPasswordEncoder(); // Changed to BCryptPasswordEncoder
+  public PasswordEncoder passwordEncoder() {
+    return new BCryptPasswordEncoder();
+  }
+
+  @Bean
+  public CsrfTokenRepository csrfTokenRepository() {
+    CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+    repository.setCookiePath("/");
+    return repository;
   }
 }
