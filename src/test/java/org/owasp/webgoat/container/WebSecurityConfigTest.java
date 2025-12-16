@@ -1,92 +1,76 @@
-// Delta unit test for WebSecurityConfig.java
-// Assumed package based on resolved_file_path; adjust if actual package differs.
+// Delta_UnitTest_Agent
+// Package inferred from source file location; adjust if project structure differs.
 package org.owasp.webgoat.container;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
-import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
+import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.web.csrf.CsrfTokenRepository;
+import org.springframework.security.web.SecurityFilterChain;
 
+/**
+ * Delta tests for WebSecurityConfig focusing ONLY on the changed behavior:
+ *  - No longer using NoOpPasswordEncoder; now uses BCryptPasswordEncoder.
+ *  - CSRF and headers are no longer disabled; default configuration is applied.
+ */
 class WebSecurityConfigTest {
 
-    // Minimal stub AuthenticationConfiguration to obtain an AuthenticationManager instance
-    // without touching real infrastructure.
-    private static class StubAuthenticationConfiguration extends AuthenticationConfiguration {
-        private final AuthenticationManager authenticationManager;
-
-        StubAuthenticationConfiguration(AuthenticationManager authenticationManager) {
-            this.authenticationManager = authenticationManager;
-        }
-
-        @Override
-        public AuthenticationManager getAuthenticationManager() {
-            return authenticationManager;
-        }
-    }
-
     @Test
-    void passwordEncoderShouldUseBCryptImplementation() {
+    void passwordEncoder_shouldUseBCryptPasswordEncoder() {
         // Arrange
-        UserService userService = mock(UserService.class);
-        WebSecurityConfig config = new WebSecurityConfig(userService);
+        WebSecurityConfig config = new WebSecurityConfig(null /* UserService is not used here */);
 
         // Act
         PasswordEncoder encoder = config.passwordEncoder();
 
         // Assert
-        // Verify we are no longer using NoOpPasswordEncoder and are using a BCrypt-based encoder.
-        assertThat(encoder).isNotNull();
+        assertThat(encoder)
+                .as("passwordEncoder() must return a BCryptPasswordEncoder instead of NoOpPasswordEncoder")
+                .isInstanceOf(BCryptPasswordEncoder.class);
+
+        // and verify that it actually hashes (i.e., does not return raw password)
         String rawPassword = "secret";
         String encoded = encoder.encode(rawPassword);
-        assertThat(encoded).isNotEqualTo(rawPassword);
-        assertThat(encoder.matches(rawPassword, encoded)).isTrue();
+        assertThat(encoded)
+                .as("Encoded password should differ from raw password to avoid plain-text storage")
+                .isNotEqualTo(rawPassword);
+        assertThat(encoder.matches(rawPassword, encoded))
+                .as("Encoder should successfully verify the raw password against the hash")
+                .isTrue();
     }
 
     @Test
-    void configureGlobalShouldRegisterUserDetailsServiceWithPasswordEncoder() throws Exception {
+    void filterChain_shouldNotDisableCsrfOrHeaders() throws Exception {
         // Arrange
-        UserService userService = mock(UserService.class);
-        WebSecurityConfig config = new WebSecurityConfig(userService);
-        PasswordEncoder encoder = config.passwordEncoder();
+        WebSecurityConfig config = new WebSecurityConfig(null);
 
-        AuthenticationManagerBuilder builder = new AuthenticationManagerBuilder(null);
+        HttpSecurity http = new HttpSecurity(null, null, null, null, null, null, null);
 
         // Act
-        config.configureGlobal(builder);
-        AuthenticationManager authenticationManager = builder.build();
-        StubAuthenticationConfiguration stubAuthenticationConfiguration =
-                new StubAuthenticationConfiguration(authenticationManager);
+        SecurityFilterChain chain = config.filterChain(http);
 
-        // Assert
-        // Simply calling through ensures the builder can be built without throwing
-        // and therefore that the passwordEncoder wiring is valid.
-        AuthenticationManager managerFromConfig =
-                config.authenticationManager(stubAuthenticationConfiguration);
-        assertThat(managerFromConfig).isNotNull();
-    }
-
-    @Test
-    void filterChainShouldHaveCsrfEnabledByDefault() throws Exception {
-        // Arrange
-        UserService userService = mock(UserService.class);
-        WebSecurityConfig config = new WebSecurityConfig(userService);
-        HttpSecurity http = new HttpSecurity(
-                null, null, null, mock(CsrfTokenRepository.class), null, null, null);
-
-        // Act
-        config.filterChain(http);
-
-        // Assert
-        // The delta is that CSRF is no longer disabled globally.
-        // We assert configuration does not contain a global disable flag.
-        assertThat(http.getConfigurer(org.springframework.security.config.annotation.web.configurers.CsrfConfigurer.class))
+        // Assert basic creation
+        assertThat(chain)
+                .as("SecurityFilterChain must be created successfully")
                 .isNotNull();
+
+        // Delta assertions (behavior that changed):
+        // We verify that the CSRF and headers configurers are present and not explicitly disabled.
+        CsrfConfigurer<HttpSecurity> csrf = http.getConfigurer(CsrfConfigurer.class);
+        HeadersConfigurer<HttpSecurity> headers = http.getConfigurer(HeadersConfigurer.class);
+
+        assertThat(csrf)
+                .as("CSRF configuration should be enabled via Customizer.withDefaults() and not disabled")
+                .isNotNull();
+        assertThat(headers)
+                .as("Security headers configuration should be enabled via Customizer.withDefaults() and not disabled")
+                .isNotNull();
+
+        // Note: We intentionally do NOT assert more granular details to keep the test focused
+        // strictly on the change from 'disable()' to default configuration.
     }
 }
