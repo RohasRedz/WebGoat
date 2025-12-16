@@ -1,64 +1,77 @@
-define(['jquery',
+define([
+    'jquery',
     'underscore',
     'backbone',
-    'goatApp/model/HTMLContentModel'],
-     function($,
-        _,
-        Backbone,
-        HTMLContentModel){
+    'goatApp/model/HTMLContentModel'
+],
+function ($, _, Backbone, HTMLContentModel) {
 
     return HTMLContentModel.extend({
-        urlRoot:null,
+        urlRoot: null,
         defaults: {
-            items:null,
-            selectedItem:null
+            items: null,
+            selectedItem: null
         },
 
         initialize: function (options) {
-
+            // No-op initializer kept for compatibility
         },
 
-        loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
+        loadData: function (options) {
+            // Ensure the lesson name is safely encoded and free from characters
+            // that could cause unsafe URL patterns.
+            var rawName = options && options.name ? String(options.name) : '';
+            // Basic length limit to avoid pathological inputs.
+            if (rawName.length > 256) {
+                rawName = rawName.slice(0, 256);
+            }
+
+            // Use encodeURIComponent once, then escape for safe use in the URL.
+            var safeName = _.escape(encodeURIComponent(rawName));
+            this.urlRoot = safeName + '.lesson';
+
             var self = this;
-            this.fetch().done(function(data) {
+            this.fetch().done(function (data) {
                 self.setContent(data);
             });
         },
 
-        setContent: function(content, loadHelps) {
+        setContent: function (content, loadHelps) {
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
-            this.set('content',content);
+            this.set('content', content);
 
-            // Derive lesson URL in a safe and efficient way
-            var currentUrl = document.URL;
-            var lessonUrl;
+            // Limit URL length to mitigate potential ReDoS on very long inputs.
+            var currentUrl = String(document.URL);
+            if (currentUrl.length > 2048) {
+                currentUrl = currentUrl.slice(0, 2048);
+            }
 
-            // Avoid using complex, potentially catastrophic backtracking regex.
-            // Instead, check for the ".lesson" suffix and replace it directly.
-            if (currentUrl.indexOf('.lesson') !== -1) {
-                lessonUrl = currentUrl.substring(0, currentUrl.indexOf('.lesson')) + '.lesson';
+            // Use a simpler, linear-time regex pattern rather than compound patterns
+            // that could lead to catastrophic backtracking on crafted input.
+            //
+            // Pattern: capture a numeric page number if present after ".lesson/"
+            // Example: https://.../xyz.lesson/12 -> matches "12"
+            var pageNumMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+
+            this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
+
+            if (pageNumMatch) {
+                this.set('pageNum', pageNumMatch[1]);
             } else {
-                lessonUrl = currentUrl;
+                this.set('pageNum', 0);
             }
-            this.set('lessonUrl', lessonUrl);
 
-            // Extract page number using a simplified and bounded pattern
-            var pageNum = 0;
-            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch && pageMatch[1]) {
-                pageNum = parseInt(pageMatch[1], 10);
-            }
-            this.set('pageNum', pageNum);
-
-            this.trigger('content:loaded',this,loadHelps);
+            this.trigger('content:loaded', this, loadHelps);
         },
 
         fetch: function (options) {
             options = options || {};
-            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
+            return Backbone.Model.prototype.fetch.call(
+                this,
+                _.extend({ dataType: "html" }, options)
+            );
         }
     });
 });
