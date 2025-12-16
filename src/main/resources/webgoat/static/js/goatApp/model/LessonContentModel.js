@@ -31,12 +31,27 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-            this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
-            if (/.*\.lesson\/(\d{1,4})$/.test(document.URL)) {
-                this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
+
+            var currentUrl = String(document.URL || '');
+            var lessonUrl = currentUrl;
+            var pageNum = 0;
+
+            lessonUrl = lessonUrl.replace(/\/(\d{1,4})$/, '');
+
+            if (/\.lesson(?:\/)?$/.test(lessonUrl)) {
+                lessonUrl = lessonUrl.replace(/\.lesson(?:\/)?$/, '.lesson');
             } else {
-                this.set('pageNum',0);
+                lessonUrl = lessonUrl + '.lesson';
             }
+
+            this.set('lessonUrl', lessonUrl);
+
+            var pageMatch = currentUrl.match(/\/(\d{1,4})$/);
+            if (pageMatch && pageMatch[1]) {
+                pageNum = parseInt(pageMatch[1], 10) || 0;
+            }
+
+            this.set('pageNum', pageNum);
             this.trigger('content:loaded',this,loadHelps);
         },
 
