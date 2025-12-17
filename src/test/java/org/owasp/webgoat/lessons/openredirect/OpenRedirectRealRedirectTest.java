@@ -1,64 +1,133 @@
-// Assumed package based on source file path; adjust if needed.
+// Delta_UnitTest_Agent
+// Package inferred from source file path; adjust if actual package differs.
 package org.owasp.webgoat.lessons.openredirect;
 
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.ModelAndView;
-import org.springframework.web.servlet.view.RedirectView;
+
+import java.lang.reflect.Field;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Delta tests for OpenRedirectRealRedirect focused on:
- * - Only allowing internal paths (starting with '/').
- * - Falling back to a safe internal URL for invalid/external URLs.
+ * Delta tests for OpenRedirectRealRedirect focusing only on the changed behavior:
+ * - Validation of user-controlled redirect URL via isValidRedirectUrl
+ * - Restricting redirects to safe internal paths
+ * - Falling back to a safe default (/home) for invalid URLs
+ *
+ * Original (vulnerable) behavior:
+ *   return new ModelAndView("redirect:" + url);
+ *
+ * Updated behavior (secured):
+ *   - Accept only validated internal paths (e.g. "/foo/bar")
+ *   - Reject external URLs (http://, https://, protocol-relative //)
+ *   - Reject path traversal (.., %2e%2e)
+ *   - Redirect invalid inputs to "/home"
  */
 class OpenRedirectRealRedirectTest {
 
-    @Test
-    void real_shouldRedirectToInternalPathWhenUrlStartsWithSlash() {
-        // Arrange
-        OpenRedirectRealRedirect controller = new OpenRedirectRealRedirect();
-        String internalPath = "/internal/page";
+    private final OpenRedirectRealRedirect controller = new OpenRedirectRealRedirect();
 
-        // Act
-        ModelAndView mav = controller.real(internalPath);
+    @Nested
+    @DisplayName("URL validation and redirect behavior")
+    class RedirectValidationTests {
 
-        // Assert
-        assertThat(mav.getView()).isInstanceOf(RedirectView.class);
-        RedirectView view = (RedirectView) mav.getView();
-        assertThat(view.getUrl()).isEqualTo(internalPath);
-    }
+        @Test
+        @DisplayName("Should allow safe internal relative paths")
+        void shouldAllowSafeInternalRelativePaths() {
+            // Arrange
+            String safeUrl = "/lessons/openredirect";
 
-    @Test
-    void real_shouldFallbackToSafeUrlWhenUrlIsExternal() {
-        // Arrange
-        OpenRedirectRealRedirect controller = new OpenRedirectRealRedirect();
-        String externalUrl = "https://evil.com/phish";
+            // Act
+            ModelAndView mav = controller.real(safeUrl);
 
-        // Act
-        ModelAndView mav = controller.real(externalUrl);
+            // Assert
+            assertThat(mav.getViewName()).isEqualTo("redirect:" + safeUrl);
+        }
 
-        // Assert
-        assertThat(mav.getView()).isInstanceOf(RedirectView.class);
-        RedirectView view = (RedirectView) mav.getView();
-        // Must not redirect to the attacker-controlled external URL
-        assertThat(view.getUrl()).isEqualTo("/OpenRedirect");
-    }
+        @Test
+        @DisplayName("Should reject absolute http URL and redirect to safe default")
+        void shouldRejectExternalHttpUrlAndUseSafeFallback() {
+            // Arrange
+            String externalUrl = "http://evil.com/phish";
 
-    @Test
-    void real_shouldFallbackToSafeUrlWhenUrlIsNullOrEmpty() {
-        // Arrange
-        OpenRedirectRealRedirect controller = new OpenRedirectRealRedirect();
+            // Act
+            ModelAndView mav = controller.real(externalUrl);
 
-        // Act
-        ModelAndView mavNull = controller.real(null);
-        ModelAndView mavEmpty = controller.real("");
+            // Assert
+            // Previously would have been "redirect:http://evil.com/phish"
+            assertThat(mav.getViewName()).isEqualTo("redirect:/home");
+        }
 
-        // Assert
-        assertThat(mavNull.getView()).isInstanceOf(RedirectView.class);
-        assertThat(((RedirectView) mavNull.getView()).getUrl()).isEqualTo("/OpenRedirect");
+        @Test
+        @DisplayName("Should reject protocol-relative URL and redirect to safe default")
+        void shouldRejectProtocolRelativeUrlAndUseSafeFallback() {
+            // Arrange
+            String externalUrl = "//evil.com/phish";
 
-        assertThat(mavEmpty.getView()).isInstanceOf(RedirectView.class);
-        assertThat(((RedirectView) mavEmpty.getView()).getUrl()).isEqualTo("/OpenRedirect");
+            // Act
+            ModelAndView mav = controller.real(externalUrl);
+
+            // Assert
+            assertThat(mav.getViewName()).isEqualTo("redirect:/home");
+        }
+
+        @Test
+        @DisplayName("Should reject path traversal attempts and redirect to safe default")
+        void shouldRejectPathTraversalAndUseSafeFallback() {
+            // Arrange
+            String traversalUrl = "/../../etc/passwd";
+
+            // Act
+            ModelAndView mav = controller.real(traversalUrl);
+
+            // Assert
+            assertThat(mav.getViewName()).isEqualTo("redirect:/home");
+        }
+
+        @Test
+        @DisplayName("Should reject encoded path traversal attempts and redirect to safe default")
+        void shouldRejectEncodedTraversalAndUseSafeFallback() {
+            // Arrange
+            String encodedTraversal = "/foo/%2e%2e/%2e%2e/secret";
+
+            // Act
+            ModelAndView mav = controller.real(encodedTraversal);
+
+            // Assert
+            assertThat(mav.getViewName()).isEqualTo("redirect:/home");
+        }
+
+        @Test
+        @DisplayName("Should reject null or blank URLs and redirect to safe default")
+        void shouldRejectNullOrBlankAndUseSafeFallback() {
+            // Null
+            ModelAndView mavNull = controller.real(null);
+            assertThat(mavNull.getViewName()).isEqualTo("redirect:/home");
+
+            // Blank
+            ModelAndView mavBlank = controller.real("   ");
+            assertThat(mavBlank.getViewName()).isEqualTo("redirect:/home");
+        }
+
+        @Test
+        @DisplayName("Safe regex pattern should only allow paths starting with slash and safe characters")
+        void safeRedirectPatternShouldOnlyAllowExpectedCharacters() throws Exception {
+            // This test introspects SAFE_REDIRECT_PATH_PATTERN to assert it is restrictive.
+            Field patternField = OpenRedirectRealRedirect.class.getDeclaredField("SAFE_REDIRECT_PATH_PATTERN");
+            patternField.setAccessible(true);
+            Pattern pattern = (Pattern) patternField.get(null);
+
+            assertThat(pattern.matcher("/valid/path-123_ABC.xyz").matches()).isTrue();
+            assertThat(pattern.matcher("/").matches()).isTrue();
+
+            // Disallowed because of spaces, query, or not starting with '/'
+            assertThat(pattern.matcher("no/leading/slash").matches()).isFalse();
+            assertThat(pattern.matcher("/has space").matches()).isFalse();
+            assertThat(pattern.matcher("/path?query=1").matches()).isFalse();
+        }
     }
 }
