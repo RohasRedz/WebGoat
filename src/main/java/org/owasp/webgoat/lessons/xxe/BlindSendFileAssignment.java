@@ -14,6 +14,8 @@ import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
@@ -53,14 +55,25 @@ public class BlindSendFileAssignment implements AssignmentEndpoint, Initializabl
   private void createSecretFileWithRandomContents(WebGoatUser user) {
     var fileContents = "WebGoat 8.0 rocks... (" + randomAlphabetic(10) + ")";
     userToFileContents.put(user, fileContents);
-    File targetDirectory = new File(webGoatHomeDirectory, "/XXE/" + user.getUsername());
+
+    // Sanitize username to prevent path traversal
+    String sanitizedUsername = user.getUsername().replaceAll("[^a-zA-Z0-9.-]", "_");
+    Path targetDirectoryPath = Paths.get(webGoatHomeDirectory, "XXE", sanitizedUsername).normalize();
+
+    // Ensure the resolved path is still within the intended base directory
+    if (!targetDirectoryPath.startsWith(Paths.get(webGoatHomeDirectory, "XXE").normalize())) {
+        log.error("Attempted path traversal detected for user: {}", user.getUsername());
+        return; // Abort file creation if path traversal is detected
+    }
+
+    File targetDirectory = targetDirectoryPath.toFile();
     if (!targetDirectory.exists()) {
       targetDirectory.mkdirs();
     }
     try {
       Files.writeString(new File(targetDirectory, "secret.txt").toPath(), fileContents, UTF_8);
     } catch (IOException e) {
-      log.error("Unable to write 'secret.txt' to '{}", targetDirectory);
+      log.error("Unable to write 'secret.txt' to '{}'", targetDirectory, e);
     }
   }
 
