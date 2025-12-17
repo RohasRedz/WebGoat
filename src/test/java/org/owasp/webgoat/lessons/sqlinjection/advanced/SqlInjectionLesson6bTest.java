@@ -1,99 +1,98 @@
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
-import java.io.IOException;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
+
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedConstruction;
-import org.mockito.MockedStatic;
-import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
-import org.owasp.webgoat.container.assignments.AttackResult;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.slf4j.Logger;
 
 /**
- * Delta tests focusing on:
- * - completed() delegating to checkPasswordForDave().
- * - Success when password matches, failure otherwise.
- * - Raw password is never exposed; only a boolean outcome is used.
+ * Delta tests for SqlInjectionLesson6b focusing on:
+ * - Replacing printStackTrace() with SLF4J logging.
+ * - Ensuring getPassword() behavior is preserved (returns "dave" on errors).
  */
-class SqlInjectionLesson6bTest {
+public class SqlInjectionLesson6bTest {
 
     private LessonDataSource dataSource;
-    private SqlInjectionLesson6b lesson;
+    private SqlInjectionLesson6b lesson6b;
+
     private Connection connection;
-    private PreparedStatement preparedStatement;
+    private Statement statement;
     private ResultSet resultSet;
 
     @BeforeEach
     void setUp() throws Exception {
         dataSource = mock(LessonDataSource.class);
-        lesson = spy(new SqlInjectionLesson6b(dataSource));
+        lesson6b = new SqlInjectionLesson6b(dataSource);
 
         connection = mock(Connection.class);
-        preparedStatement = mock(PreparedStatement.class);
+        statement = mock(Statement.class);
         resultSet = mock(ResultSet.class);
 
         when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+                .thenReturn(statement);
+        when(statement.executeQuery(anyString())).thenReturn(resultSet);
     }
 
     @Test
-    @DisplayName("completed() delegates to checkPasswordForDave and returns success if it returns true")
-    void completed_delegatesToCheckPasswordForDave_success() throws IOException {
+    void getPassword_logsSqlExceptionAndFallsBackToDefaultPassword() throws Exception {
         // Arrange
-        String providedPassword = "correct-password";
-        doReturn(true).when(lesson).checkPasswordForDave(providedPassword);
+        SQLException sqlException = new SQLException("db error");
+        when(statement.executeQuery(anyString())).thenThrow(sqlException);
+
+        Logger loggerMock = mock(Logger.class);
+        ReflectionTestUtils.setField(lesson6b, "log", loggerMock);
 
         // Act
-        AttackResult result = lesson.completed(providedPassword);
+        String password = lesson6b.getPassword();
+
+        // Assert: default password should be returned when an exception occurs
+        assertEquals("dave", password, "On SQL exception, getPassword should fall back to default 'dave'");
+
+        // Verify that the exception was logged via SLF4J instead of printStackTrace()
+        verify(loggerMock).error(eq("SQL Exception in getPassword: {}"),
+                eq(sqlException.getMessage()), eq(sqlException));
+    }
+
+    @Test
+    void getPassword_logsGeneralExceptionAndFallsBackToDefaultPassword() throws Exception {
+        // Arrange: make dataSource.getConnection() throw a generic exception
+        RuntimeException runtimeException = new RuntimeException("connection failed");
+        when(dataSource.getConnection()).thenThrow(runtimeException);
+
+        Logger loggerMock = mock(Logger.class);
+        ReflectionTestUtils.setField(lesson6b, "log", loggerMock);
+
+        // Act
+        String password = lesson6b.getPassword();
 
         // Assert
-        verify(lesson).checkPasswordForDave(providedPassword);
-        assertTrue(result.getLessonCompleted(), "Expected lesson to be completed when password is correct");
+        assertEquals("dave", password, "On general exception, getPassword should still return default 'dave'");
+
+        // Verify logging of the general exception
+        verify(loggerMock).error(eq("General Exception in getPassword: {}"),
+                eq(runtimeException.getMessage()), eq(runtimeException));
     }
 
     @Test
-    @DisplayName("completed() delegates to checkPasswordForDave and returns failure if it returns false")
-    void completed_delegatesToCheckPasswordForDave_failure() throws IOException {
+    void getPassword_returnsDatabasePasswordWhenQuerySucceeds() throws Exception {
         // Arrange
-        String providedPassword = "wrong-password";
-        doReturn(false).when(lesson).checkPasswordForDave(providedPassword);
+        when(resultSet.first()).thenReturn(true);
+        when(resultSet.getString("password")).thenReturn("db-password");
 
         // Act
-        AttackResult result = lesson.completed(providedPassword);
+        String password = lesson6b.getPassword();
 
-        // Assert
-        verify(lesson).checkPasswordForDave(providedPassword);
-        assertFalse(result.getLessonCompleted(), "Expected lesson not to be completed when password is incorrect");
-    }
-
-    @Test
-    @DisplayName("checkPasswordForDave uses PreparedStatement and never exposes raw password")
-    void checkPasswordForDave_usesPreparedStatement_andDoesNotExposePassword() throws SQLException {
-        // Arrange
-        String providedPassword = "any-pass";
-        when(resultSet.next()).thenReturn(true);
-
-        // Act
-        boolean matches = lesson.checkPasswordForDave(providedPassword);
-
-        // Assert: verify SQL structure and parameter binding
-        verify(connection).prepareStatement(
-                "SELECT password FROM user_system_data WHERE user_name = 'dave' AND password = ?");
-        verify(preparedStatement).setString(1, providedPassword);
-        verify(preparedStatement).executeQuery();
-        verify(resultSet).next();
-
-        assertTrue(matches, "Expected true when resultSet returns at least one row");
-        // No assertion on raw password value because it is never returned by the method.
+        // Assert: confirms that the refactor did not break normal behavior
+        assertEquals("db-password", password);
     }
 }
