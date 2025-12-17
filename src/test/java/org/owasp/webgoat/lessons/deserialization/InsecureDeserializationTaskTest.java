@@ -1,70 +1,57 @@
+/* Delta tests for InsecureDeserializationTask focusing on ObjectInputFilter behavior. */
 package org.owasp.webgoat.lessons.deserialization;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import org.dummy.insecure.framework.VulnerableTaskHolder;
+import org.junit.jupiter.api.Test;
+import org.owasp.webgoat.container.assignments.AttackResult;
 
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectOutputStream;
 import java.util.Base64;
 
-import org.dummy.insecure.framework.VulnerableTaskHolder;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.owasp.webgoat.container.assignments.AttackResult;
+import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Delta tests for {@link InsecureDeserializationTask} focused on the deserialization filter.
- *
- * Before: User-controlled Base64 token was deserialized with an unrestricted ObjectInputStream.
- * After:  An ObjectInputFilter is applied, whitelisting only VulnerableTaskHolder and String.
- *
- * These tests verify:
- *  - A serialized VulnerableTaskHolder token is still accepted (whitelisted).
- *  - A serialized disallowed type (e.g., java.lang.Integer) is rejected, demonstrating
- *    that arbitrary gadget chains can no longer be deserialized.
- */
-public class InsecureDeserializationTaskTest {
+class InsecureDeserializationTaskTest {
 
-    private String toBase64WebToken(Object o) throws Exception {
+    private final InsecureDeserializationTask task = new InsecureDeserializationTask();
+
+    private String toUrlSafeBase64(Object obj) throws Exception {
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         try (ObjectOutputStream oos = new ObjectOutputStream(bos)) {
-            oos.writeObject(o);
+            oos.writeObject(obj);
         }
-        String base64 = Base64.getEncoder().encodeToString(bos.toByteArray());
-        // Mirror the token mangling logic from production: '+' -> '-', '/' -> '_'
-        return base64.replace('+', '-').replace('/', '_');
+        String standardB64 = Base64.getEncoder().encodeToString(bos.toByteArray());
+        return standardB64.replace('+', '-').replace('/', '_');
     }
 
     @Test
-    @DisplayName("completed should accept whitelisted VulnerableTaskHolder token")
-    void completedAcceptsWhitelistedType() throws Exception {
-        // Arrange
-        InsecureDeserializationTask task = new InsecureDeserializationTask();
+    void completed_shouldAcceptVulnerableTaskHolderWhenFilterAllowsIt() throws Exception {
         VulnerableTaskHolder holder = new VulnerableTaskHolder();
-        String token = toBase64WebToken(holder);
+        String token = toUrlSafeBase64(holder);
 
-        // Act
         AttackResult result = task.completed(token);
 
-        // Assert
-        // Depending on timing window, the lesson may not be 'completed', but the important
-        // delta property is that it does not immediately fail due to deserialization filter
         assertThat(result).isNotNull();
     }
 
     @Test
-    @DisplayName("completed should reject token containing disallowed type due to deserialization filter")
-    void completedRejectsDisallowedType() throws Exception {
-        // Arrange
-        InsecureDeserializationTask task = new InsecureDeserializationTask();
-        // Integer is not in the allowlist "VulnerableTaskHolder;java.lang.String;!*"
-        String token = toBase64WebToken(Integer.valueOf(123));
+    void completed_shouldRejectStringObject() throws Exception {
+        String payload = "Just a String";
+        String token = toUrlSafeBase64(payload);
 
-        // Act
         AttackResult result = task.completed(token);
 
-        // Assert
-        // Any failure result here shows the filter blocked the payload; we only care
-        // that arbitrary types are no longer accepted.
+        assertThat(result).isNotNull();
+        assertThat(result.getLessonCompleted()).isFalse();
+    }
+
+    @Test
+    void completed_shouldFailForDisallowedType() throws Exception {
+        Runtime malicious = Runtime.getRuntime();
+        String token = toUrlSafeBase64(malicious);
+
+        AttackResult result = task.completed(token);
+
         assertThat(result).isNotNull();
         assertThat(result.getLessonCompleted()).isFalse();
     }
