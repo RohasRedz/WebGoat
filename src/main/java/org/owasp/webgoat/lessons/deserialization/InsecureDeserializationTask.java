@@ -10,8 +10,8 @@ import static org.owasp.webgoat.container.assignments.AttackResultBuilder.succes
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
-import java.io.ObjectInputFilter;
 import java.io.ObjectInputStream;
+import java.io.ObjectStreamClass;
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -41,10 +41,7 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
     b64token = token.replace('-', '+').replace('_', '/');
 
     try (ObjectInputStream ois =
-        new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
-      ois.setObjectInputFilter(
-          ObjectInputFilter.Config.createFilter(
-              "java.lang.String;java.lang.Number;org.dummy.insecure.framework.VulnerableTaskHolder;!*"));
+        new ValidatingObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
@@ -70,5 +67,25 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       return failed(this).build();
     }
     return success(this).build();
+  }
+
+  private static class ValidatingObjectInputStream extends ObjectInputStream {
+    public ValidatingObjectInputStream(ByteArrayInputStream in) throws IOException {
+      super(in);
+    }
+
+    @Override
+    protected Class<?> resolveClass(ObjectStreamClass desc) throws IOException, ClassNotFoundException {
+      if (!desc.getName().equals(VulnerableTaskHolder.class.getName()) &&
+          !desc.getName().startsWith("java.lang.") &&
+          !desc.getName().startsWith("java.util.") &&
+          !desc.getName().startsWith("java.io.") &&
+          !desc.getName().startsWith("java.security.") &&
+          !desc.getName().startsWith("java.net.") &&
+          !desc.getName().startsWith("[Ljava.lang.")) { // For arrays of whitelisted types
+        throw new InvalidClassException("Unauthorized deserialization attempt", desc.getName());
+      }
+      return super.resolveClass(desc);
+    }
   }
 }
