@@ -3,8 +3,12 @@ define([
     'underscore',
     'backbone',
     'goatApp/model/HTMLContentModel'
-],
-function ($, _, Backbone, HTMLContentModel) {
+], function (
+    $,
+    _,
+    Backbone,
+    HTMLContentModel
+) {
 
     return HTMLContentModel.extend({
         urlRoot: null,
@@ -25,44 +29,57 @@ function ($, _, Backbone, HTMLContentModel) {
             });
         },
 
+        /**
+         * Extract the lesson base URL and page number from the current location
+         * in a more robust and efficient way than the previous broad regexes.
+         */
+        _parseLessonUrl: function () {
+            var href = window.location && window.location.href ? window.location.href : (document.URL || '');
+            // Normalize to avoid query/hash noise when computing the 'lessonUrl'
+            // and page number. We work on the full href, but with explicit, simple
+            // regex anchors to prevent inefficient backtracking.
+            var baseLessonUrl;
+            var pageNum = 0;
+
+            // 1. Compute base lesson URL:
+            //    Replace a trailing ".lesson" or ".lesson/<digits>" with ".lesson".
+            //    Previous pattern: document.URL.replace(/\.lesson.*/,'.lesson')
+            //    New patterns are anchored to the end or to a clear, bounded suffix.
+            var lessonBaseRegex = /(\.lesson)(?:\/\d{1,4})?(?:[#?].*)?$/;
+            if (lessonBaseRegex.test(href)) {
+                baseLessonUrl = href.replace(lessonBaseRegex, '.lesson');
+            } else {
+                // Fallback: if it doesn't match expected patterns, use original href
+                baseLessonUrl = href;
+            }
+
+            // 2. Extract page number (if present) from a trailing ".lesson/<1-4 digits>"
+            //    Previous pattern: /.*\.lesson\/(\d{1,4})$/
+            //    New pattern is simpler and anchored:
+            var pageRegex = /\.lesson\/(\d{1,4})$/;
+            var pageMatch = href.match(pageRegex);
+            if (pageMatch && pageMatch[1]) {
+                pageNum = parseInt(pageMatch[1], 10);
+                if (!Number.isFinite(pageNum)) {
+                    pageNum = 0;
+                }
+            }
+
+            return {
+                lessonUrl: baseLessonUrl,
+                pageNum: pageNum
+            };
+        },
+
         setContent: function (content, loadHelps) {
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
             this.set('content', content);
 
-            var currentUrl = document.URL;
-
-            /**
-             * FIX: Mitigate inefficient regular expression complexity (ReDoS).
-             *
-             * Original patterns:
-             *   document.URL.replace(/\.lesson.*/, '.lesson')
-             *   /.*\.lesson\/(\d{1,4})$/
-             *
-             * Issues:
-             *   - Leading `.*` combined with other tokens can cause expensive backtracking
-             *     on very long or adversarial inputs.
-             *
-             * Strategy:
-             *   - Use more precise and non-greedy patterns.
-             *   - Avoid unanchored `.*` where not strictly necessary.
-             *   - Keep behavior identical for normal lesson URLs.
-             */
-
-            // Safer pattern: match anything up to ".lesson" minimally, then normalize.
-            var safeLessonUrl = currentUrl.replace(/^([\s\S]*?\.lesson).*$/, '$1');
-            this.set('lessonUrl', safeLessonUrl);
-
-            // Safer page number extraction:
-            // - Explicitly look for ".lesson/<1-4 digits>" near the end.
-            // - Avoid leading `.*` with ambiguous backtracking.
-            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
-            } else {
-                this.set('pageNum', 0);
-            }
+            var parsed = this._parseLessonUrl();
+            this.set('lessonUrl', parsed.lessonUrl);
+            this.set('pageNum', parsed.pageNum);
 
             this.trigger('content:loaded', this, loadHelps);
         },
@@ -71,7 +88,7 @@ function ($, _, Backbone, HTMLContentModel) {
             options = options || {};
             return Backbone.Model.prototype.fetch.call(
                 this,
-                _.extend({ dataType: "html" }, options)
+                _.extend({ dataType: 'html' }, options)
             );
         }
     });
