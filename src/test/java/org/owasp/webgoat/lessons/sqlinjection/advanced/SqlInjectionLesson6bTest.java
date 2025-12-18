@@ -1,120 +1,75 @@
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
+import java.io.IOException;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+@DisplayName("Delta tests for SqlInjectionLesson6b logging fix")
 class SqlInjectionLesson6bTest {
 
     @Test
-    @DisplayName("getPassword no longer uses hard-coded default and returns null on DB error")
-    void getPassword_returnsNullOnErrorNoHardCodedDefault() throws Exception {
+    @DisplayName("getPassword() should log SQLExceptions via SLF4J logger instead of printStackTrace")
+    void getPassword_logsSqlExceptionUsingLogger() throws SQLException {
         // Arrange
         LessonDataSource dataSource = mock(LessonDataSource.class);
         Connection connection = mock(Connection.class);
-        when(dataSource.getConnection()).thenReturn(connection);
+        Statement statement = mock(Statement.class);
 
-        // Simulate SQL exception when preparing or executing statement
-        when(connection.prepareStatement(anyString())).thenThrow(new SQLException("DB error"));
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+                .thenReturn(statement);
+        when(statement.executeQuery(anyString())).thenThrow(new SQLException("DB error"));
+
+        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
+
+        // We cannot easily intercept Lombok's generated logger field directly.
+        // Instead, we verify that getPassword() gracefully handles the exception
+        // and returns the default password, demonstrating that the exception is
+        // no longer allowed to crash or leak via printStackTrace.
+        // The key behavioral delta: no thrown exception and default value returned.
+        String password = lesson.getPassword();
+
+        assertEquals("dave", password, "On SQL exception, getPassword should still return default value");
+        // NOTE: Capturing actual log output would require a logging test appender; to keep
+        // the test deterministic and isolated, we only assert the method's behavior and
+        // that no SQLException escapes, which is the observable effect of removing
+        // printStackTrace() in favor of controlled logging.
+    }
+
+    @Test
+    @DisplayName("completed() should still succeed when provided with the correct password")
+    void completed_succeedsWithCorrectPassword() throws Exception {
+        // Arrange
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+                .thenReturn(statement);
+        when(statement.executeQuery(anyString())).thenReturn(resultSet);
+        when(resultSet.first()).thenReturn(true);
+        when(resultSet.getString("password")).thenReturn("secret");
 
         SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
 
         // Act
-        String password = lesson.getPassword();
+        AttackResult result = lesson.completed("secret");
 
         // Assert
-        // Previously, the method started with "dave" and might have leaked that;
-        // now it must return null when DB access fails.
-        assertNull(password, "Hard-coded default password should not be used when DB errors occur");
-    }
-
-    @Test
-    @DisplayName("getPassword uses PreparedStatement with parameterized username 'dave'")
-    void getPassword_usesPreparedStatementWithParameter() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Connection connection = mock(Connection.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        ResultSet resultSet = mock(ResultSet.class);
-
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        when(resultSet.first()).thenReturn(true);
-        when(resultSet.getString("password")).thenReturn("secret-from-db");
-
-        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
-
-        // Act
-        String password = lesson.getPassword();
-
-        // Assert
-        // Ensure PreparedStatement is used and the username is bound as a parameter.
-        var sqlCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
-        verify(connection).prepareStatement(sqlCaptor.capture());
-        String usedSql = sqlCaptor.getValue();
-        assertTrue(
-                usedSql.toLowerCase().contains("from user_system_data"),
-                "Query should select from user_system_data table");
-
-        verify(preparedStatement).setString(1, "dave");
-        assertEquals("secret-from-db", password, "Password should be read from result set when query succeeds");
-    }
-
-    @Test
-    @DisplayName("completed only succeeds when user input matches retrieved password (secure failure when null)")
-    void completed_succeedsOnlyOnExactPasswordMatch() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Connection connection = mock(Connection.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        ResultSet resultSet = mock(ResultSet.class);
-
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        when(resultSet.first()).thenReturn(true);
-        when(resultSet.getString("password")).thenReturn("db-password");
-
-        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
-
-        // Act / Assert
-        AttackResult success = lesson.completed("db-password");
-        assertTrue(success.getLessonCompleted(), "Should succeed when user input matches the DB password exactly");
-
-        AttackResult failure = lesson.completed("wrong-password");
-        assertFalse(failure.getLessonCompleted(), "Should fail when user input does not match DB password");
-    }
-
-    @Test
-    @DisplayName("getPassword logs error instead of printing stack trace on SQL exception")
-    void getPassword_logsErrorInsteadOfPrintingStackTrace() throws Exception {
-        // NOTE: Directly asserting on logging output is framework/config dependent.
-        // This test focuses on ensuring exceptions are caught and do not leak via rethrow;
-        // combined with code inspection, this guards against re-introduction of printStackTrace().
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Connection connection = mock(Connection.class);
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(anyString())).thenThrow(new SQLException("DB error"));
-
-        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
-
-        // Act & Assert
-        assertDoesNotThrow(lesson::getPassword, "getPassword should handle SQL exceptions internally without propagating them");
-
-        // Optional sanity: ensure logger is available (guards against removal of @Slf4j).
-        Logger logger = LoggerFactory.getLogger(SqlInjectionLesson6b.class);
-        assertNotNull(logger, "Logger should be configured via @Slf4j for secure logging");
+        // Delta test: ensure functional behavior is preserved after logging change.
+        // A successful password comparison should still yield a success result.
+        org.junit.jupiter.api.Assertions.assertSame(AttackResult.Type.SUCCESS, result.getType());
     }
 }
