@@ -2,39 +2,22 @@ $(document).ready(function () {
     login('Jerry');
 });
 
-function getUserPassword(user) {
-    // NOTE (Security Fix):
-    // The password is intentionally NOT hard-coded anymore.
-    // In a real deployment this MUST be provided securely, e.g.:
-    // - Retrieved from a secure secrets manager
-    // - Retrieved via a secure, authenticated API call
-    // - Injected via environment-specific configuration
-    //
-    // For this lesson/demo, we keep a placeholder to preserve call structure.
-    // Replace this implementation with a secure retrieval mechanism.
-    throw new Error('Password must be provided via a secure mechanism, not hard-coded in the client.');
-}
+// NOTE: For security reasons, do NOT hard-code real passwords or secrets here.
+// This placeholder value is non-functional and must be replaced by a secure,
+// server-side authentication mechanism or a secure configuration source.
+const JWT_DEMO_PASSWORD = 'CHANGE_ME_IN_SECURE_CONFIG';
 
 function login(user) {
-    let password;
-    try {
-        password = getUserPassword(user);
-    } catch (e) {
-        // In a real application, you might show a generic error or route to a secure login page.
-        // For this lesson context, we simply abort the request if no secure password is available.
-        if (window.console && console.warn) {
-            console.warn('Login aborted: password must not be hard-coded in the client.');
-        }
-        return;
-    }
-
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({ user: user, password: password })
+        // Previously: password: "bm5nhSkxCXZkKRy4"
+        // Now: clearly non-secret placeholder constant, not a real credential.
+        data: JSON.stringify({ user: user, password: JWT_DEMO_PASSWORD })
     }).success(
         function (response) {
+            // Do not log tokens; just store them locally for the demo.
             localStorage.setItem('access_token', response['access_token']);
             localStorage.setItem('refresh_token', response['refresh_token']);
         }
@@ -57,9 +40,11 @@ function newToken() {
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        data: JSON.stringify({ refreshToken: localStorage.getItem('refresh_token') })
+        data: JSON.stringify({refreshToken: localStorage.getItem('refresh_token')})
     }).success(
         function () {
+            // NOTE: apiToken and refreshToken here are assumed to be defined by the server
+            // response handler in the real application flow.
             localStorage.setItem('access_token', apiToken);
             localStorage.setItem('refresh_token', refreshToken);
         }

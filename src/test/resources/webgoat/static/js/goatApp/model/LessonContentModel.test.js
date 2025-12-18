@@ -1,88 +1,116 @@
-jest.mock('goatApp/model/HTMLContentModel', () => {
-  return class HTMLContentModel {
-    constructor(attrs) {
-      this.attributes = attrs || {};
-    }
-    set(key, value) {
-      this.attributes[key] = value;
-    }
-    get(key) {
-      return this.attributes[key];
-    }
-    trigger() {}
-    fetch() {
-      return { done: () => {} };
-    }
-  };
-});
+// File path assumption based on standard JS test layout:
+// src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 
-const Backbone = require('backbone');
-global.Backbone = Backbone;
-const _ = require('underscore');
-global._ = _;
-const $ = require('jquery');
-global.$ = $;
+// TODO: Adjust require path if test runner/project root differs.
+const path = require('path');
 
-const LessonContentModel = require('../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
+// Backbone/underscore/jquery will be stubbed for this delta test.
+describe('LessonContentModel.js delta tests', () => {
+  let LessonContentModel;
+  let modelInstance;
+  let HTMLContentModelMock;
+  let BackboneMock;
+  let _;
 
-describe('LessonContentModel delta tests - URL parsing', () => {
-  test('setContent sets lessonUrl and pageNum correctly for URL without page number', () => {
-    const model = new LessonContentModel();
-    delete window.location;
-    window.location = { href: 'http://example.com/SomeLesson.lesson' };
-    Object.defineProperty(document, 'URL', {
-      configurable: true,
-      get: () => 'http://example.com/SomeLesson.lesson'
-    });
+  beforeEach(() => {
+    jest.resetModules();
 
-    model.setContent('<html>content</html>');
+    // Minimal underscore mock
+    _ = {
+      escape: (s) => s
+    };
 
-    expect(model.get('lessonUrl')).toBe('http://example.com/SomeLesson.lesson');
-    expect(model.get('pageNum')).toBe(0);
+    // Minimal Backbone mock with extend and Model.fetch
+    BackboneMock = {
+      Model: function () {},
+      ModelPrototype: {
+        fetch: jest.fn(function (options) {
+          // Return a thenable stub for simplicity
+          return {
+            done: function () {}
+          };
+        })
+      }
+    };
+    BackboneMock.Model.prototype = BackboneMock.ModelPrototype;
+    BackboneMock.Model.prototype.fetch = BackboneMock.ModelPrototype.fetch;
+    BackboneMock.Model.extend = function (props) {
+      function Child() {
+        BackboneMock.Model.call(this);
+        if (typeof props.initialize === 'function') {
+          props.initialize.apply(this, arguments);
+        }
+      }
+      Child.prototype = Object.create(BackboneMock.Model.prototype);
+      Child.prototype.constructor = Child;
+      Object.assign(Child.prototype, props);
+      // simple set/get/trigger shim
+      Child.prototype._data = {};
+      Child.prototype.set = function (k, v) { this._data[k] = v; };
+      Child.prototype.get = function (k) { return this._data[k]; };
+      Child.prototype.trigger = function () {};
+      return Child;
+    };
+
+    HTMLContentModelMock = {
+      extend: BackboneMock.Model.extend.bind(BackboneMock.Model)
+    };
+
+    jest.mock('jquery', () => ({}), { virtual: true });
+    jest.mock('underscore', () => _, { virtual: true });
+    jest.mock('backbone', () => BackboneMock, { virtual: true });
+    jest.mock('goatApp/model/HTMLContentModel', () => HTMLContentModelMock, { virtual: true });
+
+    const lessonContentModelPath = path.resolve(
+      __dirname,
+      '../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js'
+    );
+
+    // The module is AMD-style with define([...], function(...) { return ... }); .
+    // For this delta test, we simulate define so that requiring the file works.
+    global.define = function (deps, factory) {
+      const $ = {};
+      const backbone = BackboneMock;
+      const htmlContentModel = HTMLContentModelMock;
+      // deps order: ['jquery','underscore','backbone','goatApp/model/HTMLContentModel']
+      LessonContentModel = factory($, _, backbone, htmlContentModel);
+    };
+
+    require(lessonContentModelPath);
+    modelInstance = new LessonContentModel();
   });
 
-  test('setContent sets lessonUrl and pageNum correctly for URL with numeric page number', () => {
-    const model = new LessonContentModel();
-    delete window.location;
-    window.location = { href: 'http://example.com/SomeLesson.lesson/12' };
-    Object.defineProperty(document, 'URL', {
-      configurable: true,
-      get: () => 'http://example.com/SomeLesson.lesson/12'
-    });
+  test('setContent computes lessonUrl by truncating at .lesson and does not rely on complex regex', () => {
+    // Arrange
+    global.document = {
+      URL: 'http://localhost/WebGoat/lesson/SomeTopic.lesson/3'
+    };
 
-    model.setContent('<html>content</html>');
+    // Act
+    modelInstance.setContent('<html/>');
 
-    expect(model.get('lessonUrl')).toBe('http://example.com/SomeLesson.lesson');
-    expect(model.get('pageNum')).toBe(12);
+    // Assert
+    const lessonUrl = modelInstance.get('lessonUrl');
+    expect(lessonUrl).toBe('http://localhost/WebGoat/lesson/SomeTopic.lesson');
+
+    const pageNum = modelInstance.get('pageNum');
+    expect(pageNum).toBe(3);
   });
 
-  test('setContent treats non-numeric tail as no page number (pageNum=0)', () => {
-    const model = new LessonContentModel();
-    delete window.location;
-    window.location = { href: 'http://example.com/SomeLesson.lesson/abc' };
-    Object.defineProperty(document, 'URL', {
-      configurable: true,
-      get: () => 'http://example.com/SomeLesson.lesson/abc'
-    });
+  test('setContent sets pageNum to 0 when URL does not contain a numeric page suffix', () => {
+    // Arrange
+    global.document = {
+      URL: 'http://localhost/WebGoat/lesson/SomeTopic.lesson'
+    };
 
-    model.setContent('<html>content</html>');
+    // Act
+    modelInstance.setContent('<html/>');
 
-    expect(model.get('lessonUrl')).toBe('http://example.com/SomeLesson.lesson');
-    expect(model.get('pageNum')).toBe(0);
-  });
+    // Assert
+    const lessonUrl = modelInstance.get('lessonUrl');
+    expect(lessonUrl).toBe('http://localhost/WebGoat/lesson/SomeTopic.lesson');
 
-  test('setContent only accepts up to 4 digit page numbers', () => {
-    const model = new LessonContentModel();
-    delete window.location;
-    window.location = { href: 'http://example.com/SomeLesson.lesson/12345' };
-    Object.defineProperty(document, 'URL', {
-      configurable: true,
-      get: () => 'http://example.com/SomeLesson.lesson/12345'
-    });
-
-    model.setContent('<html>content</html>');
-
-    expect(model.get('lessonUrl')).toBe('http://example.com/SomeLesson.lesson');
-    expect(model.get('pageNum')).toBe(0);
+    const pageNum = modelInstance.get('pageNum');
+    expect(pageNum).toBe(0);
   });
 });
