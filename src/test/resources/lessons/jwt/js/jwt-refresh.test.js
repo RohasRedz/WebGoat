@@ -1,64 +1,102 @@
-// File path assumption based on standard JS test layout:
+// Assuming a Node-compatible test environment; adjust path if project structure differs.
+// Test file location (derived by replacing "main" with "test"):
 // src/test/resources/lessons/jwt/js/jwt-refresh.test.js
 
-// NOTE: Adjust the relative path to jwt-refresh.js as needed in the actual project.
-// This delta test focuses only on the changed behavior:
-// - The login payload must not contain the old hardcoded password value.
-const path = require('path');
+// TODO: Adjust the relative path to jwt-refresh.js according to your actual test runner setup.
+jest.mock('jquery', () => {
+  const ajaxMock = jest.fn(() => ({
+    success: function (cb) {
+      // Immediately invoke success callback with a fake response
+      cb({ access_token: 'ACCESS', refresh_token: 'REFRESH' });
+      return this;
+    }
+  }));
+  return {
+    ajax: ajaxMock,
+    // Provide minimal jQuery interface needed by the module
+    ready: (fn) => fn()
+  };
+});
 
-// TODO: Adjust require path if test runner root differs.
-const jwtRefreshPath = path.resolve(__dirname, '../../../main/resources/lessons/jwt/js/jwt-refresh.js');
-
-// Jest does not execute jQuery/ajax in this isolated test; we will mock $.ajax
-// and evaluate the payload it was called with.
 describe('jwt-refresh.js delta tests', () => {
+  let originalWebgoat;
+  let originalWindowPassword;
+
   beforeEach(() => {
     jest.resetModules();
-    global.$ = {
-      ajax: jest.fn().mockReturnValue({
-        success: function (handler) {
-          // For this delta test we don't need to invoke the handler.
-          return this;
-        }
-      })
-    };
+    global.localStorage = (() => {
+      let store = {};
+      return {
+        getItem: (k) => store[k],
+        setItem: (k, v) => { store[k] = String(v); },
+        removeItem: (k) => { delete store[k]; },
+        clear: () => { store = {}; }
+      };
+    })();
+
+    // Preserve any existing global objects to restore later
+    originalWebgoat = global.webgoat;
+    originalWindowPassword = global.WEBGOAT_JWT_DEMO_PASSWORD;
     global.webgoat = { customjs: {} };
-    global.localStorage = {
-      store: {},
-      setItem(key, value) { this.store[key] = value; },
-      getItem(key) { return this.store[key]; }
-    };
   });
 
-  test('login payload must not contain the old hardcoded password literal', () => {
-    // Arrange
-    const OLD_PASSWORD = 'bm5nhSkxCXZkKRy4';
+  afterEach(() => {
+    global.localStorage.clear();
+    global.webgoat = originalWebgoat;
+    global.WEBGOAT_JWT_DEMO_PASSWORD = originalWindowPassword;
+  });
 
-    // Require the script, which will execute $(document).ready and call login('Jerry')
-    // with our mocked $ and document environment.
-    global.document = { readyState: 'complete' };
-    // Mock jQuery ready:
-    global.$.ready = (fn) => fn();
-    // Some jQuery builds use $(document).ready(fn), we simulate that through the mock:
-    global.$.fn = { ready: (fn) => fn() };
+  test('login uses getJwtDemoPassword and honors runtime-configured password', () => {
+    // Arrange
+    const configuredPassword = 'RUNTIME_CONFIG_PASSWORD';
+    global.WEBGOAT_JWT_DEMO_PASSWORD = configuredPassword;
+
+    // Require the module under test AFTER globals are set
+    // TODO: Update this path mapping to match your bundler/runtime
+    const jwtModule = require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+
+    const $ = require('jquery');
+    const ajaxMock = $.ajax;
 
     // Act
-    // This will call login('Jerry') and in turn invoke $.ajax with new payload.
-    require(jwtRefreshPath);
+    // Call login explicitly with a known user
+    jwtModule.login('Jerry');
 
     // Assert
-    expect(global.$.ajax).toHaveBeenCalledTimes(1);
-    const ajaxArg = global.$.ajax.mock.calls[0][0];
+    expect(ajaxMock).toHaveBeenCalledTimes(1);
+    const callConfig = ajaxMock.mock.calls[0][0];
 
-    // Ensure the JSON payload can be parsed
-    const payload = JSON.parse(ajaxArg.data);
-    expect(payload).toHaveProperty('password');
+    expect(callConfig.type).toBe('POST');
+    expect(callConfig.url).toBe('JWT/refresh/login');
 
-    // Verify that the value is not the old hardcoded secret
-    expect(payload.password).not.toBe(OLD_PASSWORD);
+    const sentBody = JSON.parse(callConfig.data);
+    expect(sentBody.user).toBe('Jerry');
+    // Critical delta assertion: password is sourced from runtime config, not a hard-coded literal.
+    expect(sentBody.password).toBe(configuredPassword);
+  });
 
-    // Additionally, ensure that a constant placeholder is used (non-empty, but clearly different)
-    expect(typeof payload.password).toBe('string');
-    expect(payload.password.length).toBeGreaterThan(0);
+  test('login falls back to non-sensitive placeholder when no runtime config is provided', () => {
+    // Arrange
+    delete global.WEBGOAT_JWT_DEMO_PASSWORD;
+
+    // Require fresh module to ensure it reads current global state
+    jest.resetModules();
+    const jwtModule = require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+
+    const $ = require('jquery');
+    const ajaxMock = $.ajax;
+
+    // Act
+    jwtModule.login('Jerry');
+
+    // Assert
+    const callConfig = ajaxMock.mock.calls[0][0];
+    const sentBody = JSON.parse(callConfig.data);
+
+    expect(sentBody.user).toBe('Jerry');
+    // Delta: ensure the original hard-coded secret value is not present anymore.
+    expect(sentBody.password).not.toBe('bm5nhSkxCXZkKRy4');
+    // And that the placeholder from getJwtDemoPassword is used instead.
+    expect(sentBody.password).toBe('CHANGE_ME_JWT_DEMO_PASSWORD');
   });
 });

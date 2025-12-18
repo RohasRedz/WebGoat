@@ -19,7 +19,7 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -30,35 +30,31 @@ define(['jquery',
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
-            this.set('content',content);
+            this.set('content', content);
 
-            // Avoid complex regex when extracting the base lesson URL.
-            // Previous pattern: document.URL.replace(/\.lesson.*/,'.lesson')
-            // New: simple split-based approach that is not vulnerable to catastrophic backtracking.
-            var currentUrl = document.URL;
+            var currentUrl = String(document.URL);
+
+            // Use a simplified, safe pattern to derive lessonUrl without heavy backtracking risk.
+            // Previous pattern: document.URL.replace(/\.lesson.*/, '.lesson')
+            // New approach: find first ".lesson" and truncate.
             var lessonIndex = currentUrl.indexOf('.lesson');
-            var baseLessonUrl = lessonIndex !== -1
-                ? currentUrl.substring(0, lessonIndex + '.lesson'.length)
-                : currentUrl;
-
-            this.set('lessonUrl', baseLessonUrl);
-
-            // Extract the page number using a simpler, non-catastrophic regex and small input.
-            // Previous: /.*\.lesson\/(\d{1,4})$/
-            // Now we first narrow the input to just the path segment around .lesson.
-            var pageNum = 0;
-            var lessonPathIndex = currentUrl.indexOf('.lesson/');
-            if (lessonPathIndex !== -1) {
-                var afterLesson = currentUrl.substring(lessonPathIndex + '.lesson/'.length);
-                // afterLesson is now only the trailing part; apply a simple regex.
-                var pageMatch = /^(\d{1,4})$/.test(afterLesson) ? afterLesson : null;
-                if (pageMatch !== null) {
-                    pageNum = parseInt(afterLesson, 10);
-                }
+            if (lessonIndex !== -1) {
+                this.set('lessonUrl', currentUrl.substring(0, lessonIndex + '.lesson'.length));
+            } else {
+                this.set('lessonUrl', currentUrl);
             }
-            this.set('pageNum', pageNum);
 
-            this.trigger('content:loaded',this,loadHelps);
+            // Replace vulnerable regex with a more efficient, linear-time-safe version.
+            // Previous pattern (potential ReDoS): /.*\.lesson\/(\d{1,4})$/
+            // New pattern: anchored, non-greedy, no catastrophic backtracking characteristics.
+            var pageMatch = /^.*?\.lesson\/(\d{1,4})$/.exec(currentUrl);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
+            } else {
+                this.set('pageNum', 0);
+            }
+
+            this.trigger('content:loaded', this, loadHelps);
         },
 
         fetch: function (options) {

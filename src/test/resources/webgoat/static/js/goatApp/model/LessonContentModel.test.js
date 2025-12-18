@@ -1,116 +1,105 @@
-// File path assumption based on standard JS test layout:
-// src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+const Backbone = require('backbone');
 
-// TODO: Adjust require path if test runner/project root differs.
-const path = require('path');
+// Minimal HTMLContentModel stub to satisfy the module's dependency.
+jest.mock('goatApp/model/HTMLContentModel', () => {
+  const Model = Backbone.Model.extend({});
+  return Model;
+});
 
-// Backbone/underscore/jquery will be stubbed for this delta test.
+// Mock AMD define to allow requiring the module under Node/Jest.
+function loadLessonContentModel() {
+  let exported;
+  global.define = function (deps, factory) {
+    // Resolve minimal dependency set: jquery, underscore, backbone, HTMLContentModel
+    const $ = require('jquery');
+    const _ = require('underscore');
+    const BackboneLocal = require('backbone');
+    const HTMLContentModel = require('goatApp/model/HTMLContentModel');
+    exported = factory($, _, BackboneLocal, HTMLContentModel);
+  };
+  // eslint-disable-next-line global-require
+  require('../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
+  delete global.define;
+  return exported;
+}
+
 describe('LessonContentModel.js delta tests', () => {
   let LessonContentModel;
-  let modelInstance;
-  let HTMLContentModelMock;
-  let BackboneMock;
-  let _;
+  let originalLocation;
 
   beforeEach(() => {
     jest.resetModules();
+    LessonContentModel = loadLessonContentModel();
 
-    // Minimal underscore mock
-    _ = {
-      escape: (s) => s
+    // Simulate browser-like location object
+    originalLocation = global.location;
+    global.location = { href: 'http://example.com' };
+
+    // Provide a minimal document.URL shim
+    global.document = {
+      URL: 'http://example.com'
     };
-
-    // Minimal Backbone mock with extend and Model.fetch
-    BackboneMock = {
-      Model: function () {},
-      ModelPrototype: {
-        fetch: jest.fn(function (options) {
-          // Return a thenable stub for simplicity
-          return {
-            done: function () {}
-          };
-        })
-      }
-    };
-    BackboneMock.Model.prototype = BackboneMock.ModelPrototype;
-    BackboneMock.Model.prototype.fetch = BackboneMock.ModelPrototype.fetch;
-    BackboneMock.Model.extend = function (props) {
-      function Child() {
-        BackboneMock.Model.call(this);
-        if (typeof props.initialize === 'function') {
-          props.initialize.apply(this, arguments);
-        }
-      }
-      Child.prototype = Object.create(BackboneMock.Model.prototype);
-      Child.prototype.constructor = Child;
-      Object.assign(Child.prototype, props);
-      // simple set/get/trigger shim
-      Child.prototype._data = {};
-      Child.prototype.set = function (k, v) { this._data[k] = v; };
-      Child.prototype.get = function (k) { return this._data[k]; };
-      Child.prototype.trigger = function () {};
-      return Child;
-    };
-
-    HTMLContentModelMock = {
-      extend: BackboneMock.Model.extend.bind(BackboneMock.Model)
-    };
-
-    jest.mock('jquery', () => ({}), { virtual: true });
-    jest.mock('underscore', () => _, { virtual: true });
-    jest.mock('backbone', () => BackboneMock, { virtual: true });
-    jest.mock('goatApp/model/HTMLContentModel', () => HTMLContentModelMock, { virtual: true });
-
-    const lessonContentModelPath = path.resolve(
-      __dirname,
-      '../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js'
-    );
-
-    // The module is AMD-style with define([...], function(...) { return ... }); .
-    // For this delta test, we simulate define so that requiring the file works.
-    global.define = function (deps, factory) {
-      const $ = {};
-      const backbone = BackboneMock;
-      const htmlContentModel = HTMLContentModelMock;
-      // deps order: ['jquery','underscore','backbone','goatApp/model/HTMLContentModel']
-      LessonContentModel = factory($, _, backbone, htmlContentModel);
-    };
-
-    require(lessonContentModelPath);
-    modelInstance = new LessonContentModel();
   });
 
-  test('setContent computes lessonUrl by truncating at .lesson and does not rely on complex regex', () => {
-    // Arrange
-    global.document = {
-      URL: 'http://localhost/WebGoat/lesson/SomeTopic.lesson/3'
-    };
-
-    // Act
-    modelInstance.setContent('<html/>');
-
-    // Assert
-    const lessonUrl = modelInstance.get('lessonUrl');
-    expect(lessonUrl).toBe('http://localhost/WebGoat/lesson/SomeTopic.lesson');
-
-    const pageNum = modelInstance.get('pageNum');
-    expect(pageNum).toBe(3);
+  afterEach(() => {
+    global.location = originalLocation;
+    delete global.document;
   });
 
-  test('setContent sets pageNum to 0 when URL does not contain a numeric page suffix', () => {
+  test('setContent derives lessonUrl and pageNum for basic .lesson URL without page number', () => {
     // Arrange
-    global.document = {
-      URL: 'http://localhost/WebGoat/lesson/SomeTopic.lesson'
-    };
+    const model = new LessonContentModel();
+    global.document.URL = 'http://example.com/lesson1.lesson';
 
     // Act
-    modelInstance.setContent('<html/>');
+    model.setContent('<html>content</html>');
 
     // Assert
-    const lessonUrl = modelInstance.get('lessonUrl');
-    expect(lessonUrl).toBe('http://localhost/WebGoat/lesson/SomeTopic.lesson');
+    expect(model.get('lessonUrl')).toBe('http://example.com/lesson1.lesson');
+    expect(model.get('pageNum')).toBe(0);
+  });
 
-    const pageNum = modelInstance.get('pageNum');
-    expect(pageNum).toBe(0);
+  test('setContent derives lessonUrl and pageNum for .lesson URL with page number', () => {
+    // Arrange
+    const model = new LessonContentModel();
+    global.document.URL = 'http://example.com/lesson1.lesson/12';
+
+    // Act
+    model.setContent('<html>content</html>');
+
+    // Assert
+    expect(model.get('lessonUrl')).toBe('http://example.com/lesson1.lesson');
+    expect(model.get('pageNum')).toBe('12'); // extracted from regex capture group
+  });
+
+  test('setContent returns pageNum 0 when URL does not match .lesson/<digits> pattern', () => {
+    // Arrange
+    const model = new LessonContentModel();
+    global.document.URL = 'http://example.com/otherpath';
+
+    // Act
+    model.setContent('<html>content</html>');
+
+    // Assert
+    expect(model.get('lessonUrl')).toBe('http://example.com/otherpath');
+    expect(model.get('pageNum')).toBe(0);
+  });
+
+  test('setContent handles longer complex URLs without catastrophic regex behavior', () => {
+    // Arrange
+    const model = new LessonContentModel();
+    // Long URL with many path segments to mimic potential ReDoS input
+    const longPath = '/a'.repeat(1000);
+    global.document.URL = `http://example.com/lesson1.lesson${longPath}`;
+
+    // Act
+    // This call should complete promptly and still derive a valid lessonUrl without hanging.
+    model.setContent('<html>content</html>');
+
+    // Assert
+    // The lessonUrl should stop at the first ".lesson"
+    expect(model.get('lessonUrl')).toBe('http://example.com/lesson1.lesson');
+    // No trailing page number pattern, so pageNum should remain 0
+    expect(model.get('pageNum')).toBe(0);
   });
 });
