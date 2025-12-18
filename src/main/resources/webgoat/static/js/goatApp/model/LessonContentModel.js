@@ -32,10 +32,16 @@ define(['jquery',
             }
             this.set('content',content);
 
-            var url = document.URL;
-            this.set('lessonUrl', url.replace(/\.lesson(?:\/.*)?$/, '.lesson'));
+            // Use a simpler, anchored pattern to strip any page suffix from the lesson URL
+            // Example: http://host/lesson/1234  ->  http://host/lesson
+            //          http://host/lesson      ->  http://host/lesson
+            this.set(
+                'lessonUrl',
+                document.URL.replace(/(\.lesson)(?:\/\d{1,4})?$/, '$1')
+            );
 
-            var pageMatch = \/\.lesson\/(\d{1,4})$\/.exec(url);
+            // Efficient, anchored pattern: capture a trailing 1–4 digit page number if present
+            var pageMatch = document.URL.match(/\.lesson\/(\d{1,4})$/);
             if (pageMatch) {
                 this.set('pageNum', pageMatch[1]);
             } else {
