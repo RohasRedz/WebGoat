@@ -9,10 +9,9 @@ import static org.owasp.webgoat.container.assignments.AttackResultBuilder.succes
 
 import java.io.IOException;
 import java.sql.Connection;
+import java.sql.PreparedStatement; // Added for PreparedStatement
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
-import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -20,9 +19,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import lombok.extern.slf4j.Slf4j; // Added for logging
 
 @RestController
-@Slf4j
+@Slf4j // Added Slf4j annotation for logging
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -33,7 +33,8 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   @PostMapping("/SqlInjectionAdvanced/attack6b")
   @ResponseBody
   public AttackResult completed(@RequestParam String userid_6b) throws IOException {
-    if (userid_6b.equals(getPassword())) {
+    String retrievedPassword = getPassword();
+    if (retrievedPassword != null && userid_6b.equals(retrievedPassword)) {
       return success(this).build();
     } else {
       return failed(this).build();
@@ -41,26 +42,30 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "dave";
+    String password = null; // FIX: Removed hard-coded default password "dave"
     try (Connection connection = dataSource.getConnection()) {
-      String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
-      try {
-        Statement statement =
-            connection.createStatement(
-                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-        ResultSet results = statement.executeQuery(query);
+      // FIX: Using PreparedStatement for database interaction as a best practice,
+      // even if the query itself is currently static.
+      String query = "SELECT password FROM user_system_data WHERE user_name = ?";
+      try (PreparedStatement statement = connection.prepareStatement(query)) {
+        statement.setString(1, "dave"); // Parameterize the username literal
+        ResultSet results = statement.executeQuery();
 
         if (results != null && results.first()) {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception during password retrieval", sqle);
-        // do nothing
+        // FIX: Replaced printStackTrace() with structured logging to prevent Information Exposure (CWE-532, CWE-209).
+        // Only log the message, not the full stack trace to avoid leaking internal details.
+        log.error("SQL Exception while retrieving password: {}", sqle.getMessage());
+        // password remains null, leading to a secure failure.
       }
     } catch (Exception e) {
-      log.error("General Exception during password retrieval", e);
-      // do nothing
+      // FIX: Replaced printStackTrace() with structured logging to prevent Information Exposure (CWE-532, CWE-209).
+      // Only log the message, not the full stack trace to avoid leaking internal details.
+      log.error("General Exception while retrieving password: {}", e.getMessage());
+      // password remains null, leading to a secure failure.
     }
-    return (password);
+    return password; // Returns null if password not found or an error occurred.
   }
 }

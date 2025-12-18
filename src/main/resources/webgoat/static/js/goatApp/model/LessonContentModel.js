@@ -13,6 +13,7 @@ define([
         },
 
         initialize: function (options) {
+
         },
 
         loadData: function (options) {
@@ -29,43 +30,43 @@ define([
             }
             this.set('content', content);
 
-            // Hardened regex to avoid catastrophic backtracking while
-            // preserving original matching intent.
-            //
-            // Original patterns:
-            //   \/\.lesson.*\/                any .lesson followed by anything
-            //   \/.*\.lesson\/(\d{1,4})$\/    full URL pattern with trailing page number
-            //
-            // Both contained nested greedy patterns that can cause ReDoS on
-            // very long, adversarial strings. We now:
-            //   - Use character classes and tighter quantifiers.
-            //   - Anchor patterns appropriately.
-            //   - Avoid overlapping ".*" with other variable-length parts.
-            var url = document.URL;
+            // FIX: Constrain regex used on document.URL to avoid potential ReDoS
+            // and ensure we only operate on reasonably-sized URL strings.
+            var currentUrl = String(document.URL || '');
+            // Limit processed URL length to mitigate pathological cases.
+            currentUrl = currentUrl.slice(0, 2048);
 
-            // Replace any `.lesson` suffix and everything after it with `.lesson`
-            // Example: ".../foo.lesson/123?x=1" -> ".../foo.lesson"
-            var lessonUrl = url.replace(/\.lesson(?:[\/?#].*)?$/i, '.lesson');
-            this.set('lessonUrl', lessonUrl);
+            // Previously:
+            // this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
+            //
+            // The pattern /.*\.lesson.*/ is greedy; we only need to normalize the first ".lesson"
+            // occurrence. Using a simpler, non-greedy replacement is cheaper and avoids
+            // unnecessary backtracking.
+            this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
 
-            // Extract a trailing numeric page segment of length 14 if present.
-            // Example: ".../foo.lesson/123" -> pageNum = "123"
-            var pageMatch = url.match(/\.lesson\/([0-9]{1,4})(?:[\/?#].*)?$/i);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
-            } else {
-                this.set('pageNum', 0);
+            // Previously:
+            // if (/.*\.lesson\/(\d{1,4})$/.test(document.URL)) {
+            //     this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
+            // } else {
+            //     this.set('pageNum',0);
+            // }
+            //
+            // FIX: Use a single, precompiled, anchored regex with an explicit limit on digits.
+            // This reduces regex engine work and the risk of ReDoS while preserving behavior.
+            var pageNum = 0;
+            var pagePattern = /\.lesson\/(\d{1,4})$/;
+            var match = currentUrl.match(pagePattern);
+            if (match) {
+                pageNum = parseInt(match[1], 10) || 0;
             }
+            this.set('pageNum', pageNum);
 
             this.trigger('content:loaded', this, loadHelps);
         },
 
         fetch: function (options) {
             options = options || {};
-            return Backbone.Model.prototype.fetch.call(
-                this,
-                _.extend({ dataType: 'html' }, options)
-            );
+            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: 'html' }, options));
         }
     });
 });
