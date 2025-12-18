@@ -1,85 +1,95 @@
-jest.mock('backbone', () => {
-  const Backbone = {
-    Model: class {
-      constructor(attrs) {
-        this.attributes = attrs || {};
-      }
-      set(key, value) {
-        this.attributes[key] = value;
-      }
-      get(key) {
-        return this.attributes[key];
-      }
-      trigger() {
-        // no-op for this delta test
-      }
-      fetch() {
-        // This will be overridden by the model under test;
-        // no behavior needed here for regex-focused tests.
-      }
-    }
-  };
-  Backbone.Model.prototype.fetch = function () {
-    return { done: (cb) => cb('<html/>') };
-  };
-  return Backbone;
-});
+const { JSDOM } = require('jsdom');
+const path = require('path');
+const fs = require('fs');
 
-jest.mock('underscore', () => ({
-  extend: (target, source) => Object.assign(target, source),
-}));
+function loadLessonContentModel(scriptUrl) {
+  const dom = new JSDOM(`<!DOCTYPE html><html><head></head><body></body></html>`, {
+    url: scriptUrl || 'http://localhost/lesson/Intro.lesson/3',
+    runScripts: 'dangerously',
+    resources: 'usable'
+  });
 
-jest.mock('jquery', () => ({}));
+  const { window } = dom;
+  global.window = window;
+  global.document = window.document;
 
-describe('LessonContentModel regex delta tests', () => {
-  let LessonContentModel;
+  // Minimal AMD/Backbone/Underscore environment
+  const modules = {};
+  function define(deps, factory) {
+    const resolvedDeps = deps.map((d) => {
+      if (d === 'jquery') return {};
+      if (d === 'underscore') return require('underscore');
+      if (d === 'backbone') return require('backbone');
+      if (d === 'goatApp/model/HTMLContentModel') {
+        // Simple Backbone.Model stub to allow extension
+        const Backbone = require('backbone');
+        return Backbone.Model.extend({});
+      }
+      // TODO: handle other dependencies if needed
+      return {};
+    });
+    const mod = factory.apply(null, resolvedDeps);
+    modules['LessonContentModel'] = mod;
+  }
+  window.define = define;
 
+  const scriptPath = path.resolve(__dirname, '../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
+  const scriptContent = fs.readFileSync(scriptPath, 'utf8');
+  const scriptEl = window.document.createElement('script');
+  scriptEl.textContent = scriptContent;
+  window.document.head.appendChild(scriptEl);
+
+  return { window, LessonContentModel: modules['LessonContentModel'] };
+}
+
+describe('LessonContentModel.js delta tests', () => {
   beforeEach(() => {
     jest.resetModules();
-    // Load the AMD-style module via its built artifact; we simulate a simple define wrapper.
-    // Since we cannot easily execute the original AMD define in Jest without a loader,
-    // we assume the build exposes the model as a CommonJS module at the given path.
-    LessonContentModel = require('../../../../../webgoat/static/js/goatApp/model/LessonContentModel.js'); // TODO: Adjust path if necessary
-
-    global.document = {
-      URL: 'http://localhost/WebGoat/lesson.lesson'
-    };
+    jest.clearAllMocks();
+    delete global.window;
+    delete global.document;
   });
 
-  test('setContent normalizes lessonUrl with new bounded regex', () => {
-    // Arrange
+  test('hardened regex normalizes lessonUrl and extracts pageNum as before', () => {
+    const url = 'http://example.com/path/Intro.lesson/123?foo=bar';
+    const { LessonContentModel } = loadLessonContentModel(url);
     const model = new LessonContentModel();
 
-    // Act
-    model.setContent('<html/>', true);
+    // Act: call setContent which applies the regex logic
+    model.setContent('<html>some content</html>');
 
-    // Assert: lessonUrl ends with ".lesson" and does not include page suffix
+    // Assert: lessonUrl ends with ".lesson" without extra path/query
     const lessonUrl = model.get('lessonUrl');
-    expect(lessonUrl.endsWith('.lesson')).toBe(true);
-    expect(lessonUrl).toBe('http://localhost/WebGoat/lesson.lesson');
+    expect(lessonUrl).toBe('http://example.com/path/Intro.lesson');
+
+    // Assert: pageNum is the trailing numeric segment
+    const pageNum = model.get('pageNum');
+    expect(pageNum).toBe('123');
   });
 
-  test('setContent extracts pageNum using new precompiled regex when present', () => {
-    // Arrange
+  test('hardened regex sets pageNum to 0 when no page suffix is present', () => {
+    const url = 'http://example.com/path/Intro.lesson';
+    const { LessonContentModel } = loadLessonContentModel(url);
     const model = new LessonContentModel();
-    document.URL = 'http://localhost/WebGoat/lesson.lesson/1234';
 
-    // Act
-    model.setContent('<html/>', true);
+    model.setContent('<html>some content</html>');
 
-    // Assert: pageNum matches last path segment of 1–4 digits
-    expect(model.get('pageNum')).toBe('1234');
-  });
-
-  test('setContent sets pageNum to 0 when URL does not match the lesson page pattern', () => {
-    // Arrange
-    const model = new LessonContentModel();
-    document.URL = 'http://localhost/WebGoat/lesson.lesson/not-a-page';
-
-    // Act
-    model.setContent('<html/>', true);
-
-    // Assert: non-matching URL results in pageNum 0
+    const lessonUrl = model.get('lessonUrl');
+    expect(lessonUrl).toBe('http://example.com/path/Intro.lesson');
     expect(model.get('pageNum')).toBe(0);
+  });
+
+  test('hardened regex handles long URLs without catastrophic backtracking', () => {
+    // Construct a very long URL to exercise the regex safely
+    const longPath = 'a'.repeat(5000);
+    const url = `http://example.com/${longPath}/Intro.lesson/99`;
+    const { LessonContentModel } = loadLessonContentModel(url);
+    const model = new LessonContentModel();
+
+    // If regex were still catastrophic, this could hang; Jest will time out.
+    model.setContent('<html>some content</html>');
+
+    expect(model.get('lessonUrl')).toBe(`http://example.com/${longPath}/Intro.lesson`);
+    expect(model.get('pageNum')).toBe('99');
   });
 });
