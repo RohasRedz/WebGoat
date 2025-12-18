@@ -1,80 +1,66 @@
-// Delta tests for jwt-refresh.js hard-coded password removal.
-// NOTE: Adjust the import path if your test runner uses a different base; this assumes
-// Jest is configured to load the original script in the test environment.
-// TODO: If module system differs (AMD/global), adapt the require/import accordingly.
+const $ = require('jquery');
 
-describe('jwt-refresh.js delta tests - hard-coded password removal', () => {
-  let originalWebGoat;
-  let originalWindowPassword;
+global.$ = $;
+
+describe('jwt-refresh delta tests', () => {
+  let ajaxSpy;
 
   beforeEach(() => {
-    // Preserve any existing globals we might touch
-    originalWebGoat = global.webgoat;
-    originalWindowPassword = global.WEBGOAT_JWT_PASSWORD;
+    document.body.innerHTML = '';
+    ajaxSpy = jest.spyOn($, 'ajax').mockImplementation(() => ({
+      success: function (cb) {
+        cb({ access_token: 'ACCESS', refresh_token: 'REFRESH' });
+        return this;
+      }
+    }));
+    localStorage.clear();
+    jest.resetModules();
 
-    global.webgoat = { customjs: {} };
-    global.WEBGOAT_JWT_PASSWORD = undefined;
-
-    // JSDOM provides window and document for Jest by default in jsdom environment.
-    // We need jQuery for the script; stub minimal jQuery with only ajax and ready.
-    global.$ = {
-      ajax: jest.fn()
-    };
-    $.ajax.mockReturnValue({ success: jest.fn().mockImplementation(cb => cb({})) });
-
-    // Load the script under test after globals are prepared.
-    // eslint-disable-next-line global-require
     require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
   });
 
   afterEach(() => {
-    jest.resetModules();
-    global.webgoat = originalWebGoat;
-    global.WEBGOAT_JWT_PASSWORD = originalWindowPassword;
-    delete global.$;
+    ajaxSpy.mockRestore();
   });
 
-  test('login should not send AJAX request when WEBGOAT_JWT_PASSWORD is not configured', () => {
-    // Arrange
-    // With WEBGOAT_JWT_PASSWORD undefined, getJwtPassword will return empty string
-    // causing login() to bail out and not call $.ajax.
-
-    // Act
-    // login is defined globally by the required script
-    // eslint-disable-next-line no-undef
-    login('Jerry');
-
-    // Assert
-    expect($.ajax).not.toHaveBeenCalled();
+  test('login aborts when #jwt-password field is not present (no AJAX call)', () => {
+    expect(typeof global.login).toBe('function');
+    global.login('Jerry');
+    expect(ajaxSpy).not.toHaveBeenCalled();
   });
 
-  test('login should send AJAX request using configuration-driven password, not a hard-coded literal', () => {
-    // Arrange
-    jest.resetModules();
-    global.$ = {
-      ajax: jest.fn()
-    };
-    $.ajax.mockReturnValue({ success: jest.fn().mockImplementation(cb => cb({})) });
+  test('login uses value from #jwt-password field and not a hard-coded password', () => {
+    const input = document.createElement('input');
+    input.id = 'jwt-password';
+    input.value = 'UserSuppliedSecret';
+    document.body.appendChild(input);
 
-    global.webgoat = { customjs: {} };
-    global.WEBGOAT_JWT_PASSWORD = 'CONFIG_SECRET';
+    global.login('Jerry');
 
-    // eslint-disable-next-line global-require
-    require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+    expect(ajaxSpy).toHaveBeenCalledTimes(1);
+    const callArgs = ajaxSpy.mock.calls[0][0];
 
-    // Act
-    // eslint-disable-next-line no-undef
-    login('Jerry');
-
-    // Assert
-    expect($.ajax).toHaveBeenCalledTimes(1);
-    const callArgs = $.ajax.mock.calls[0][0];
     expect(callArgs.type).toBe('POST');
     expect(callArgs.url).toBe('JWT/refresh/login');
-    // Verify that the data contains the configured secret and not the old hard-coded value.
-    const payload = JSON.parse(callArgs.data);
-    expect(payload.user).toBe('Jerry');
-    expect(payload.password).toBe('CONFIG_SECRET');
-    expect(payload.password).not.toBe('bm5nhSkxCXZkKRy4');
+    expect(callArgs.contentType).toBe('application/json');
+
+    const body = JSON.parse(callArgs.data);
+    expect(body.user).toBe('Jerry');
+    expect(body.password).toBe('UserSuppliedSecret');
+    expect(body.password).not.toBe('bm5nhSkxCXZkKRy4');
+
+    expect(localStorage.getItem('access_token')).toBe('ACCESS');
+    expect(localStorage.getItem('refresh_token')).toBe('REFRESH');
+  });
+
+  test('getUserPassword enforces basic length limit (password longer than 128 chars is rejected)', () => {
+    const input = document.createElement('input');
+    input.id = 'jwt-password';
+    input.value = 'a'.repeat(129);
+    document.body.appendChild(input);
+
+    global.login('Jerry');
+
+    expect(ajaxSpy).not.toHaveBeenCalled();
   });
 });

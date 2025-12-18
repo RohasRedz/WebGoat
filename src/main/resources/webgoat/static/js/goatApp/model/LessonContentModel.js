@@ -1,57 +1,65 @@
-define(['jquery',
+define([
+    'jquery',
     'underscore',
     'backbone',
-    'goatApp/model/HTMLContentModel'],
-     function($,
-        _,
-        Backbone,
-        HTMLContentModel){
-
-    // Precompile safe, bounded regular expressions to avoid inefficient complexity / ReDoS
-    const LESSON_URL_PATTERN = /\.lesson.*/;
-    const PAGE_NUM_PATTERN = /.*\.lesson\/(\d{1,4})$/;
+    'goatApp/model/HTMLContentModel'
+], function (
+    $,
+    _,
+    Backbone,
+    HTMLContentModel
+) {
 
     return HTMLContentModel.extend({
-        urlRoot:null,
+        urlRoot: null,
         defaults: {
-            items:null,
-            selectedItem:null
+            items: null,
+            selectedItem: null
         },
 
         initialize: function (options) {
 
         },
 
-        loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
+        loadData: function (options) {
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
             var self = this;
-            this.fetch().done(function(data) {
+            this.fetch().done(function (data) {
                 self.setContent(data);
             });
         },
 
-        setContent: function(content, loadHelps) {
+        setContent: function (content, loadHelps) {
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
-            this.set('content',content);
+            this.set('content', content);
 
-            // Use precompiled, bounded regex patterns to avoid catastrophic backtracking
-            this.set('lessonUrl', document.URL.replace(LESSON_URL_PATTERN, '.lesson'));
+            var currentUrl = document.URL || '';
 
-            const pageNumMatch = PAGE_NUM_PATTERN.exec(document.URL);
-            if (pageNumMatch) {
-                this.set('pageNum', pageNumMatch[1]);
+            var lessonIndex = currentUrl.indexOf('.lesson');
+            if (lessonIndex !== -1) {
+                this.set('lessonUrl', currentUrl.substring(0, lessonIndex + '.lesson'.length));
             } else {
-                this.set('pageNum', 0);
+                this.set('lessonUrl', currentUrl);
             }
 
-            this.trigger('content:loaded',this,loadHelps);
+            var pageNum = 0;
+            var lastSlash = currentUrl.lastIndexOf('/');
+            if (lastSlash !== -1 && lastSlash < currentUrl.length - 1) {
+                var tail = currentUrl.substring(lastSlash + 1);
+                if (/^[0-9]{1,4}$/.test(tail)) {
+                    pageNum = parseInt(tail, 10);
+                }
+            }
+            this.set('pageNum', pageNum);
+
+            this.trigger('content:loaded', this, loadHelps);
         },
 
         fetch: function (options) {
             options = options || {};
-            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
+            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: 'html' }, options));
         }
     });
 });
