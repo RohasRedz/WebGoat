@@ -1,78 +1,110 @@
+// Batch 1 - Derived test path: src/test/java/org/owasp/webgoat/lessons/challenges/challenge5/Assignment5Test.java
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 
-import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
+import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 
+/**
+ * Delta tests for Assignment5 focusing on the secure SQL usage and authentication
+ * behavior introduced by the fix:
+ * - Uses parameterized queries instead of string concatenation.
+ * - Correctly authenticates valid user "Larry" with valid password.
+ * - Rejects invalid credentials.
+ */
 public class Assignment5Test {
 
-    @Test
-    @DisplayName("login uses parameterized PreparedStatement and returns success when row exists")
-    void login_usesParameterizedQuery_successWhenResultExists() throws Exception {
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Connection connection = mock(Connection.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        ResultSet resultSet = mock(ResultSet.class);
-        Flags flags = mock(Flags.class);
+    private LessonDataSource dataSource;
+    private Flags flags;
+    private Assignment5 assignment5;
+
+    // Mocks for JDBC
+    private Connection connection;
+    private PreparedStatement preparedStatement;
+    private ResultSet resultSet;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        dataSource = mock(LessonDataSource.class);
+        flags = mock(Flags.class);
+        assignment5 = new Assignment5(dataSource, flags);
+
+        connection = mock(Connection.class);
+        preparedStatement = mock(PreparedStatement.class);
+        resultSet = mock(ResultSet.class);
 
         when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(
-                "select password from challenge_users where userid = ? and password = ?"))
-            .thenReturn(preparedStatement);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        when(resultSet.next()).thenReturn(true);
-        when(flags.getFlag(5)).thenReturn("flag-5");
-
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
-
-        AttackResult result = assignment5.login("Larry", "secret");
-
-        Mockito.verify(preparedStatement).setString(1, "Larry");
-        Mockito.verify(preparedStatement).setString(2, "secret");
-        Mockito.verify(preparedStatement).executeQuery();
-
-        assertTrue(result.getLessonCompleted(), "Expected challenge to be solved when a row exists");
-        assertEquals("flag-5", result.getFeedbackArgs().get(0),
-                "Expected flag from Flags bean to be used in success feedback");
+        when(flags.getFlag(5)).thenReturn("FLAG-5");
     }
 
     @Test
-    @DisplayName("login still fails correctly when no matching row exists (logic preserved)")
-    void login_usesParameterizedQuery_failureWhenNoRow() throws Exception {
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Connection connection = mock(Connection.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        ResultSet resultSet = mock(ResultSet.class);
-        Flags flags = mock(Flags.class);
+    void login_usesParameterizedQueryAndAuthenticatesLarry() throws Exception {
+        // Arrange
+        when(resultSet.next()).thenReturn(true);
 
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(
-                "select password from challenge_users where userid = ? and password = ?"))
-            .thenReturn(preparedStatement);
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+
+        // Act
+        AttackResult result = assignment5.login("Larry", "secret");
+
+        // Assert: authentication succeeds
+        assertTrue(result.isLessonCompleted(), "Expected challenge to be solved for valid Larry login");
+
+        // Assert: SQL uses parameter placeholders instead of concatenated user input
+        verify(connection).prepareStatement(sqlCaptor.capture());
+        String usedSql = sqlCaptor.getValue();
+        assertEquals(
+                "select password from challenge_users where userid = ? and password = ?",
+                usedSql,
+                "SQL must use parameter placeholders to prevent SQL injection"
+        );
+
+        // Assert: parameters are bound via setString
+        verify(preparedStatement).setString(1, "Larry");
+        verify(preparedStatement).setString(2, "secret");
+    }
+
+    @Test
+    void login_rejectsInvalidCredentials() throws Exception {
+        // Arrange
         when(resultSet.next()).thenReturn(false);
 
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
-
+        // Act
         AttackResult result = assignment5.login("Larry", "wrong");
 
-        Mockito.verify(preparedStatement).setString(1, "Larry");
-        Mockito.verify(preparedStatement).setString(2, "wrong");
-        Mockito.verify(preparedStatement).executeQuery();
+        // Assert: authentication fails
+        assertTrue(result.isFailed(), "Expected login to fail for invalid password");
 
-        assertFalse(result.getLessonCompleted(), "Expected challenge not to be solved when no row exists");
+        // Still ensure parameters are bound correctly for invalid credentials
+        verify(preparedStatement).setString(1, "Larry");
+        verify(preparedStatement).setString(2, "wrong");
+    }
+
+    @Test
+    void login_rejectsNonLarryUserBeforeQueryExecution() throws Exception {
+        // Arrange
+        // No DB interaction should be required for non-Larry
+
+        // Act
+        AttackResult result = assignment5.login("Bob", "anything");
+
+        // Assert
+        assertTrue(result.isFailed(), "Non-Larry users should be rejected");
+        // Ensure the DB is never called for non-Larry
+        verifyNoInteractions(connection);
     }
 }
