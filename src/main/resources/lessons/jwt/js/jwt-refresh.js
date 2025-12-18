@@ -3,22 +3,16 @@ $(document).ready(function () {
 });
 
 /**
- * Retrieve the JWT demo password from configuration instead of hard-coding it.
- *
- * In a real deployment this value must come from a secure configuration source
- * (e.g., environment variable or secrets manager) and never be committed to
- * source control. Here we keep a non-sensitive default purely for exercise
- * behavior while avoiding a raw hard-coded secret literal.
+ * Retrieve the JWT password/secret from a runtime configuration source.
+ * In a browser environment this should NOT be hard-coded in source;
+ * instead, it should be provided via a secure configuration mechanism
+ * (e.g., server-side templated config, meta tag, or other non-public channel).
  */
-function getJwtDemoPassword() {
-    // Prefer a runtime-provided configuration value if available
-    if (typeof window !== 'undefined' && window.WEBGOAT_JWT_DEMO_PASSWORD) {
-        return String(window.WEBGOAT_JWT_DEMO_PASSWORD);
-    }
-
-    // Fallback to a non-sensitive placeholder for training/demo environments.
-    // NOTE: This placeholder must NOT be used as a real credential in production.
-    return 'CHANGE_ME_JWT_DEMO_PASSWORD';
+function getJwtPassword() {
+    // Expect a non-hard-coded value to be injected by the server or build system.
+    // Fallback is intentionally empty to avoid introducing a hard-coded secret.
+    var passwordFromConfig = window.WEBGOAT_JWT_PASSWORD || '';
+    return passwordFromConfig;
 }
 
 function login(user) {
@@ -28,7 +22,8 @@ function login(user) {
         contentType: 'application/json',
         data: JSON.stringify({
             user: user,
-            password: getJwtDemoPassword()
+            // Use configured password/secret instead of hard-coded literal
+            password: getJwtPassword()
         })
     }).success(function (response) {
         localStorage.setItem('access_token', response['access_token']);
@@ -52,12 +47,8 @@ function newToken() {
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        data: JSON.stringify({
-            refreshToken: localStorage.getItem('refresh_token')
-        })
+        data: JSON.stringify({ refreshToken: localStorage.getItem('refresh_token') })
     }).success(function () {
-        // NOTE: apiToken and refreshToken should be provided by the backend response
-        // and not be hard-coded here.
         localStorage.setItem('access_token', apiToken);
         localStorage.setItem('refresh_token', refreshToken);
     });

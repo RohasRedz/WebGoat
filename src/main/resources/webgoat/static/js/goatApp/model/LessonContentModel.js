@@ -1,55 +1,44 @@
-define(['jquery',
+define([
+    'jquery',
     'underscore',
     'backbone',
-    'goatApp/model/HTMLContentModel'],
-     function($,
-        _,
-        Backbone,
-        HTMLContentModel){
+    'goatApp/model/HTMLContentModel'
+], function ($, _, Backbone, HTMLContentModel) {
 
     return HTMLContentModel.extend({
-        urlRoot:null,
+        urlRoot: null,
         defaults: {
-            items:null,
-            selectedItem:null
+            items: null,
+            selectedItem: null
         },
 
         initialize: function (options) {
 
         },
 
-        loadData: function(options) {
+        loadData: function (options) {
             this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
             var self = this;
-            this.fetch().done(function(data) {
+            this.fetch().done(function (data) {
                 self.setContent(data);
             });
         },
 
-        setContent: function(content, loadHelps) {
+        setContent: function (content, loadHelps) {
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
             this.set('content', content);
 
-            var currentUrl = String(document.URL);
+            var currentUrl = document.URL;
 
-            // Use a simplified, safe pattern to derive lessonUrl without heavy backtracking risk.
-            // Previous pattern: document.URL.replace(/\.lesson.*/, '.lesson')
-            // New approach: find first ".lesson" and truncate.
-            var lessonIndex = currentUrl.indexOf('.lesson');
-            if (lessonIndex !== -1) {
-                this.set('lessonUrl', currentUrl.substring(0, lessonIndex + '.lesson'.length));
-            } else {
-                this.set('lessonUrl', currentUrl);
-            }
+            this.set('lessonUrl', currentUrl.replace(/\.lesson(?:\/.+)?$/, '.lesson'));
 
-            // Replace vulnerable regex with a more efficient, linear-time-safe version.
-            // Previous pattern (potential ReDoS): /.*\.lesson\/(\d{1,4})$/
-            // New pattern: anchored, non-greedy, no catastrophic backtracking characteristics.
-            var pageMatch = /^.*?\.lesson\/(\d{1,4})$/.exec(currentUrl);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
+            var pagePattern = /.*\.lesson\/(\d{1,4})$/;
+            var match = pagePattern.exec(currentUrl);
+
+            if (match) {
+                this.set('pageNum', match[1]);
             } else {
                 this.set('pageNum', 0);
             }
@@ -59,7 +48,10 @@ define(['jquery',
 
         fetch: function (options) {
             options = options || {};
-            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
+            return Backbone.Model.prototype.fetch.call(
+                this,
+                _.extend({ dataType: 'html' }, options)
+            );
         }
     });
 });
