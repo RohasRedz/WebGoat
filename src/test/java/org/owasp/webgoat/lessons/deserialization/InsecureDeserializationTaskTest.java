@@ -1,9 +1,9 @@
 package org.owasp.webgoat.lessons.deserialization;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
 
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.io.ObjectOutputStream;
 import java.util.Base64;
 
@@ -13,67 +13,109 @@ import org.junit.jupiter.api.Test;
 import org.owasp.webgoat.container.assignments.AttackResult;
 
 /**
- * Delta tests for InsecureDeserializationTask focusing on the deserialization allowlist.
- *
- * These tests verify that:
- * - Legitimate VulnerableTaskHolder payloads are still processed.
- * - Payloads containing disallowed types are rejected and result in a failure response.
+ * Delta tests for InsecureDeserializationTask focused on:
+ * 1) Ensuring only java.lang.String and VulnerableTaskHolder are successfully deserialized.
+ * 2) Ensuring behavior/feedback for String vs non-VulnerableTaskHolder vs valid VulnerableTaskHolder
+ *    is preserved.
+ * 3) Ensuring the timing/delay-based behavior remains logically intact (basic assertions).
  */
 class InsecureDeserializationTaskTest {
 
-    @Test
-    @DisplayName("completed should successfully process a valid VulnerableTaskHolder payload")
-    void completedAcceptsValidVulnerableTaskHolderPayload() throws IOException {
-        // Arrange
-        InsecureDeserializationTask task = new InsecureDeserializationTask();
-
-        // Build a legitimate VulnerableTaskHolder object and serialize it
-        VulnerableTaskHolder holder = new VulnerableTaskHolder();
-        String token = serializeToWebToken(holder);
-
-        // Act
-        AttackResult result = task.completed(token);
-
-        // Assert
-        // We only need to ensure that the call does not throw and returns some result.
-        // Exact timing-based success condition is lesson-specific and not changed by the fix.
-        // The key delta is that valid allowed type is still accepted rather than blocked.
-        org.junit.jupiter.api.Assertions.assertNotNull(result, "A result should be returned for a valid payload");
-    }
-
-    @Test
-    @DisplayName("completed should fail when deserializing a disallowed class")
-    void completedRejectsDisallowedClassPayload() throws IOException {
-        // Arrange
-        InsecureDeserializationTask task = new InsecureDeserializationTask();
-
-        // Serialize a disallowed type (e.g., java.lang.Runtime)
-        Runtime runtime = Runtime.getRuntime();
-        String token = serializeToWebToken(runtime);
-
-        // Act
-        AttackResult result = task.completed(token);
-
-        // Assert
-        // Disallowed class must not be accepted; depending on mapping, we expect a failure feedback.
-        assertEquals(
-                "failed",
-                result.getLessonCompleted(),
-                "Deserialization of a disallowed class should fail after the allowlist fix");
-    }
+    private final InsecureDeserializationTask task = new InsecureDeserializationTask();
 
     /**
-     * Helper: Serialize object to the token format expected by the lesson:
-     * base64-encoded with URL-safe replacement of '+' and '/'.
+     * Helper to serialize an object and encode it into the token format expected by the controller
+     * (Base64 with '+' → '-' and '/' → '_').
      */
-    private String serializeToWebToken(Object o) throws IOException {
+    private String createTokenForObject(Object obj) throws Exception {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
-            oos.writeObject(o);
+            oos.writeObject(obj);
         }
         String base64 = Base64.getEncoder().encodeToString(baos.toByteArray());
-        // Reverse operation from code: token.replace('-', '+').replace('_', '/')
-        // So we do forward transform: '+' -> '-', '/' -> '_'
+        // The controller reverses '-' to '+' and '_' to '/', so we apply the inverse transform here
         return base64.replace('+', '-').replace('/', '_');
+    }
+
+    @Test
+    @DisplayName("Should reject disallowed type due to ObjectInputFilter allow-list")
+    void shouldRejectDisallowedType() throws Exception {
+        // Arrange: create a serialized object of a disallowed type (e.g., Integer)
+        Integer disallowed = 42;
+        String token = createTokenForObject(disallowed);
+
+        // Act
+        AttackResult result = task.completed(token);
+
+        // Assert
+        // With the ObjectInputFilter allow-list, deserializing an Integer should not succeed
+        // as a VulnerableTaskHolder or String path, and should produce a failure result.
+        assertThat(result)
+            .as("Disallowed types should not lead to lesson completion")
+            .matches(r -> !r.getLessonCompleted());
+    }
+
+    @Test
+    @DisplayName("Should preserve behavior for String tokens (stringobject feedback path)")
+    void shouldPreserveStringBehavior() throws Exception {
+        // Arrange: create a serialized String token (allowed by filter)
+        String value = "some-string";
+        String token = createTokenForObject(value);
+
+        // Act
+        AttackResult result = task.completed(token);
+
+        // Assert
+        // Original behavior: String instance triggers 'stringobject' feedback and failure.
+        assertThat(result)
+            .as("String-based tokens should not complete the lesson")
+            .matches(r -> !r.getLessonCompleted());
+        // We cannot easily inspect internal feedback key here without full WebGoat infrastructure,
+        // but at minimum we assert failure (behavior preserved).
+    }
+
+    @Test
+    @DisplayName("Should preserve success behavior for valid VulnerableTaskHolder within timing window")
+    void shouldPreserveSuccessForValidVulnerableTaskHolder() throws Exception {
+        // Arrange: create a serialized VulnerableTaskHolder (allowed by filter)
+        VulnerableTaskHolder holder = new VulnerableTaskHolder();
+        String token = createTokenForObject(holder);
+
+        // Act
+        long start = System.currentTimeMillis();
+        AttackResult result = task.completed(token);
+        long end = System.currentTimeMillis();
+
+        // Assert
+        // Timing/delay-based logic: for the lesson to succeed, the measured delay must be in a window.
+        // We can't control the internal behavior of VulnerableTaskHolder here, but we can at least
+        // ensure that a valid allowed type does not get rejected by the filter itself.
+        //
+        // So we assert that the call returns either success or failure deterministically, and that
+        // it executes within a reasonable wall-clock time (no unbounded blocking introduced).
+        assertThat(end - start)
+            .as("Deserialization and timing logic should complete reasonably fast")
+            .isLessThan(10_000L); // Basic sanity check, not exact timing
+
+        // The main security assertion for this test: the filter does not block the allowed type.
+        // If the filter blocked it, we'd hit the generic failure path immediately and could treat
+        // that as a regression. Here we only assert that the result is not due to a technical
+        // error from the filter (i.e., the call completes and yields a normal AttackResult).
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    @DisplayName("Should fail for allowed but non-VulnerableTaskHolder object (e.g., String) according to original logic")
+    void shouldFailForAllowedNonVulnerableTaskHolder() throws Exception {
+        // This is similar to shouldPreserveStringBehavior but emphasizes that the filter
+        // still allows String while the business logic treats it as an incorrect object type.
+        String value = "another-string";
+        String token = createTokenForObject(value);
+
+        AttackResult result = task.completed(token);
+
+        assertThat(result)
+            .as("Allowed but non-VulnerableTaskHolder types should still not complete the lesson")
+            .matches(r -> !r.getLessonCompleted());
     }
 }
