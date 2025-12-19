@@ -11,6 +11,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
+import java.io.ObjectStreamClass; // Added import
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -40,7 +41,8 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
     b64token = token.replace('-', '+').replace('_', '/');
 
     try (ObjectInputStream ois =
-        new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
+        new ValidatingObjectInputStream( // FIX: Use custom validating ObjectInputStream
+            new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
@@ -54,6 +56,8 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       return failed(this).feedback("insecure-deserialization.invalidversion").build();
     } catch (IllegalArgumentException e) {
       return failed(this).feedback("insecure-deserialization.expired").build();
+    } catch (ClassNotFoundException e) { // Added catch for ClassNotFoundException
+      return failed(this).feedback("insecure-deserialization.invalidclass").build();
     } catch (Exception e) {
       return failed(this).feedback("insecure-deserialization.invalidversion").build();
     }
@@ -66,5 +70,27 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       return failed(this).build();
     }
     return success(this).build();
+  }
+
+  // FIX: Custom ObjectInputStream to whitelist allowed classes during deserialization
+  private static class ValidatingObjectInputStream extends ObjectInputStream {
+    public ValidatingObjectInputStream(ByteArrayInputStream in) throws IOException {
+      super(in);
+    }
+
+    @Override
+    protected Class<?> resolveClass(ObjectStreamClass desc) throws IOException, ClassNotFoundException {
+      // Allow only specific classes to be deserialized
+      if (!desc.getName().equals(VulnerableTaskHolder.class.getName()) &&
+          !desc.getName().equals(String.class.getName()) &&
+          !desc.getName().equals(Long.class.getName()) &&
+          !desc.getName().equals(Integer.class.getName()) &&
+          !desc.getName().equals(Boolean.class.getName()) &&
+          !desc.getName().startsWith("[L") && // Allow arrays of allowed types
+          !desc.getName().startsWith("java.lang.")) { // Allow basic Java types
+        throw new InvalidClassException("Unauthorized deserialization attempt", desc.getName());
+      }
+      return super.resolveClass(desc);
+    }
   }
 }

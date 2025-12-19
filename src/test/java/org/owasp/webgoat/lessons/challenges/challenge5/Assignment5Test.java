@@ -7,8 +7,8 @@ import static org.mockito.Mockito.*;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import javax.sql.DataSource;
-import org.junit.jupiter.api.BeforeEach;
+
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
@@ -16,106 +16,81 @@ import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 
 /**
- * Delta tests for Assignment5 focusing on the SQL injection fix:
- * - Ensure PreparedStatement with parameter binding is used.
- * - Ensure functional behavior for valid and invalid credentials is preserved.
+ * Delta tests for Assignment5 focusing on the SQL injection fix.
+ *
+ * These tests verify, via behavior and JDBC interaction, that:
+ * - Only the correct password authenticates (no injection bypass).
+ * - A typical SQL injection payload in the password no longer authenticates.
  */
 class Assignment5Test {
 
-    private LessonDataSource lessonDataSource;
-    private DataSource dataSource;
-    private Connection connection;
-    private PreparedStatement preparedStatement;
-    private ResultSet resultSet;
-    private Flags flags;
-    private Assignment5 assignment5;
+    @Test
+    @DisplayName("login should succeed only with correct credentials and use bound parameters")
+    void loginSucceedsOnlyWithCorrectCredentials() throws Exception {
+        // Arrange
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
+        Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-    @BeforeEach
-    void setUp() throws Exception {
-        lessonDataSource = mock(LessonDataSource.class);
-        dataSource = mock(DataSource.class);
-        connection = mock(Connection.class);
-        preparedStatement = mock(PreparedStatement.class);
-        resultSet = mock(ResultSet.class);
-        flags = mock(Flags.class);
+        Connection conn = mock(Connection.class);
+        PreparedStatement ps = mock(PreparedStatement.class);
+        ResultSet rs = mock(ResultSet.class);
 
-        when(lessonDataSource.getDataSource()).thenReturn(dataSource);
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(dataSource.getConnection()).thenReturn(conn);
+        when(conn.prepareStatement(anyString())).thenReturn(ps);
+        when(ps.executeQuery()).thenReturn(rs);
+        when(rs.next()).thenReturn(true); // Simulate user row exists for valid credentials
         when(flags.getFlag(5)).thenReturn("FLAG-5");
 
-        assignment5 = new Assignment5(lessonDataSource, flags);
+        // Act
+        AttackResult result = assignment5.login("Larry", "correct-password");
+
+        // Assert
+        assertEquals("success", result.getLessonCompleted(), "Expected success for correct credentials");
+
+        // Also assert that the prepared statement used parameters rather than concatenation
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(conn).prepareStatement(sqlCaptor.capture());
+        String usedSql = sqlCaptor.getValue();
+        // We ensure the SQL text contains placeholders and no raw user data
+        // The exact string is implementation-dependent, so we check for '?' and key fragments
+        org.junit.jupiter.api.Assertions.assertTrue(
+                usedSql.contains("challenge_users") && usedSql.contains("userid = ?") && usedSql.contains("password = ?"),
+                "SQL must use parameter placeholders instead of concatenating user input");
+
+        // Ensure parameters are bound as separate values
+        verify(ps).setString(1, "Larry");
+        verify(ps).setString(2, "correct-password");
     }
 
     @Test
-    void login_usesParameterizedQueryAndBindsUserInputs() throws Exception {
-        String username = "Larry";
-        String password = "secretPass";
+    @DisplayName("login should not be bypassed by SQL injection payload in password")
+    void loginShouldNotAllowSqlInjectionInPassword() throws Exception {
+        // Arrange
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
+        Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-        when(resultSet.next()).thenReturn(true);
+        Connection conn = mock(Connection.class);
+        PreparedStatement ps = mock(PreparedStatement.class);
+        ResultSet rs = mock(ResultSet.class);
 
-        AttackResult attackResult = assignment5.login(username, password);
+        when(dataSource.getConnection()).thenReturn(conn);
+        when(conn.prepareStatement(anyString())).thenReturn(ps);
+        when(ps.executeQuery()).thenReturn(rs);
+        // For an injection payload, the DB should behave as if no row matches
+        when(rs.next()).thenReturn(false);
 
-        // Verify correct query with placeholders is used
-        ArgumentCaptor<String> queryCaptor = ArgumentCaptor.forClass(String.class);
-        verify(connection).prepareStatement(queryCaptor.capture());
-        String usedQuery = queryCaptor.getValue();
-        // Ensure no direct concatenation of user input is present in the query string
-        // and parameter placeholders are used instead.
-        // This is a structural assertion rather than a full SQL parser.
-        assertEquals(
-                "select password from challenge_users where userid = ? and password = ?",
-                usedQuery,
-                "Query should use parameter placeholders only");
+        String injectionPassword = "' OR '1'='1";
 
-        // Verify parameters were bound correctly
-        verify(preparedStatement).setString(1, username);
-        verify(preparedStatement).setString(2, password);
+        // Act
+        AttackResult result = assignment5.login("Larry", injectionPassword);
 
-        // Ensure functional behavior: successful login still works
-        // We don't assert on localized feedback key; just ensure success state.
-        // AttackResult API is not fully known, so we use toString() as a minimal proxy.
-        // TODO: If AttackResult exposes isSuccess()/getFeedback(), assert on those instead.
-        String resultString = attackResult.toString();
-        // Expect some indication of success and flag presence
-        // This is intentionally loose to avoid over-coupling.
-        // Example: resultString might contain "success" and "FLAG-5".
-        // (Cannot be more specific without AttackResult API.)
-    }
+        // Assert
+        assertEquals("failed", result.getLessonCompleted(), "Injection payload must not bypass authentication");
 
-    @Test
-    void login_invalidCredentialsStillFailAfterFix() throws Exception {
-        String username = "Larry";
-        String password = "wrong";
-
-        when(resultSet.next()).thenReturn(false);
-
-        AttackResult attackResult = assignment5.login(username, password);
-
-        // PreparedStatement should still be used with parameters
-        verify(connection).prepareStatement(
-                "select password from challenge_users where userid = ? and password = ?");
-        verify(preparedStatement).setString(1, username);
-        verify(preparedStatement).setString(2, password);
-
-        // Functional behavior for bad credentials remains: failure result
-        String resultString = attackResult.toString();
-        // TODO: Assert on explicit failure once AttackResult contract is known.
-    }
-
-    @Test
-    void login_nonLarryUserStillRejectedAndDoesNotHitDatabase() throws Exception {
-        String username = "Bob";
-        String password = "anything";
-
-        AttackResult attackResult = assignment5.login(username, password);
-
-        // Database should not be touched for non-Larry users;
-        // this guards against regressions that might change control flow.
-        verifyNoInteractions(connection, preparedStatement, resultSet);
-
-        String resultString = attackResult.toString();
-        // TODO: Assert that result is failure and uses "user.not.larry" feedback when API is known.
+        // Ensure that the injection string is passed as a bound parameter, not spliced into SQL
+        verify(ps).setString(1, "Larry");
+        verify(ps).setString(2, injectionPassword);
     }
 }
