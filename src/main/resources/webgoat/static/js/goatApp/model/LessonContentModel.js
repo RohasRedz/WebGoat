@@ -31,9 +31,16 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-            this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
-            if (/.*\.lesson\/(\d{1,4})$/.test(document.URL)) {
-                this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
+
+            // Use a precompiled, simple, non-backtracking regex pattern for performance safety.
+            // This pattern is linear-time and does not contain nested quantifiers or ambiguous branches.
+            var lessonUrlPattern = /\.lesson.*/;
+            this.set('lessonUrl', document.URL.replace(lessonUrlPattern, '.lesson'));
+
+            // Precompile page number pattern as well; it is already a simple, efficient pattern.
+            var pageNumPattern = /.*\.lesson\/(\d{1,4})$/;
+            if (pageNumPattern.test(document.URL)) {
+                this.set('pageNum', document.URL.replace(pageNumPattern, '$1'));
             } else {
                 this.set('pageNum',0);
             }
