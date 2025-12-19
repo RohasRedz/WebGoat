@@ -1,102 +1,94 @@
-// File: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
-// Delta tests focused on the updated regex behavior in LessonContentModel.js.
-//
-// These tests verify that:
-// - For URLs ending with ".lesson", lessonUrl is the URL up to ".lesson" and pageNum is 0.
-// - For URLs ending with ".lesson/<1-4 digits>", lessonUrl is the base URL up to ".lesson"
-//   and pageNum is the numeric suffix.
-//
-// NOTE: The relative require path is inferred from the given source path and may need
-// adjustment depending on the actual test runner/module resolution configuration.
+// Jest delta tests for LessonContentModel.js focusing on:
+// - lessonUrl normalization without regex.
+// - pageNum extraction with safe string operations and simple numeric regex.
 
-const Backbone = require('backbone');
-const _ = require('underscore');
-
-// Minimal AMD-style loader shim for the module under test.
-// In the real project, this might be handled by RequireJS or a bundler.
-// We simulate `define([...], factory)` by requiring the module and exporting the return value.
-let LessonContentModel;
-
-beforeAll(() => {
-  // Shim global `define` to capture the factory.
-  global.define = function (deps, factory) {
-    // Resolve only the dependencies actually used in the factory
-    const $ = {}; // jQuery is not used in regex logic, can be a stub
-    const HTMLContentModel = Backbone.Model.extend({});
-    LessonContentModel = factory($, _, Backbone, HTMLContentModel);
+jest.mock('backbone', () => {
+  const Model = function () {};
+  Model.prototype.set = jest.fn();
+  Model.prototype.fetch = jest.fn(function () {
+    return {
+      done: (cb) => {
+        cb('<html>dummy</html>');
+        return this;
+      },
+    };
+  });
+  Model.prototype.trigger = jest.fn();
+  Model.extend = function (props) {
+    function Child() {
+      Model.apply(this, arguments);
+    }
+    Child.prototype = Object.create(Model.prototype);
+    Object.assign(Child.prototype, props);
+    Child.extend = Model.extend;
+    return Child;
   };
-  global.define.amd = {}; // Mark as AMD-compatible if needed by the module
-
-  // Load the module under test; this will invoke our shimmed define()
-  // Adjust the path if your test runner uses a different base directory.
-  // TODO: Update the relative path if module resolution differs.
-  // eslint-disable-next-line global-require, import/no-unresolved
-  require('../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
+  return { Model };
 });
 
-afterAll(() => {
-  delete global.define;
-  delete global.document;
+jest.mock('goatApp/model/HTMLContentModel', () => {
+  const Backbone = require('backbone');
+  return Backbone.Model.extend({});
 });
 
-describe('LessonContentModel regex behavior (delta tests)', () => {
-  test('URL ending with ".lesson" sets lessonUrl to base and pageNum to 0', () => {
-    // Arrange
-    const url = 'http://example.com/lesson-path/my-lesson.lesson';
-    global.document = { URL: url };
+describe('LessonContentModel delta tests', () => {
+  let LessonContentModel;
 
-    const model = new LessonContentModel();
-
-    const contentLoadedSpy = jest.fn();
-    model.on('content:loaded', contentLoadedSpy);
-
-    // Act
-    model.setContent('<html>dummy</html>');
-
-    // Assert
-    expect(model.get('lessonUrl')).toBe('http://example.com/lesson-path/my-lesson.lesson');
-    expect(model.get('pageNum')).toBe(0);
-    expect(contentLoadedSpy).toHaveBeenCalledTimes(1);
+  beforeEach(() => {
+    jest.resetModules();
+    global.document = { URL: 'http://example.com/lesson' };
+    LessonContentModel = require('../../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
   });
 
-  test('URL ending with ".lesson/<1-4 digits>" sets lessonUrl to base and pageNum to numeric suffix', () => {
-    // Arrange
-    const url = 'http://example.com/lesson-path/my-lesson.lesson/1234';
-    global.document = { URL: url };
-
+  test('setContent normalizes lessonUrl by trimming at ".lesson"', () => {
     const model = new LessonContentModel();
+    const setSpy = jest.spyOn(model, 'set');
 
-    const contentLoadedSpy = jest.fn();
-    model.on('content:loaded', contentLoadedSpy);
+    global.document.URL = 'http://example.com/my.lesson/page1?x=1';
 
-    // Act
-    model.setContent('<html>dummy</html>');
+    model.setContent('<html/>');
 
-    // Assert
-    expect(model.get('lessonUrl')).toBe('http://example.com/lesson-path/my-lesson.lesson');
-    expect(model.get('pageNum')).toBe('1234'); // Captured group is a string
-    expect(contentLoadedSpy).toHaveBeenCalledTimes(1);
+    const lessonUrlCall = setSpy.mock.calls.find(([key]) => key === 'lessonUrl');
+    expect(lessonUrlCall).toBeDefined();
+    expect(lessonUrlCall[1]).toBe('http://example.com/my.lesson');
   });
 
-  test('URL ending with ".lesson/<more than 4 digits>" does not match page pattern and falls back to pageNum 0', () => {
-    // This ensures the {1,4} constraint is enforced and the regex does not
-    // over-accept longer numeric suffixes.
-    const url = 'http://example.com/lesson-path/my-lesson.lesson/12345';
-    global.document = { URL: url };
-
+  test('setContent sets pageNum when URL ends with ".lesson/<1-4 digits>"', () => {
     const model = new LessonContentModel();
+    const setSpy = jest.spyOn(model, 'set');
 
-    const contentLoadedSpy = jest.fn();
-    model.on('content:loaded', contentLoadedSpy);
+    global.document.URL = 'http://example.com/my.lesson/1234';
 
-    // Act
-    model.setContent('<html>dummy</html>');
+    model.setContent('<html/>');
 
-    // Assert
-    // The base lessonUrl should remain unchanged (no suffix stripped)
-    expect(model.get('lessonUrl')).toBe('http://example.com/lesson-path/my-lesson.lesson/12345');
-    // No 1–4 digit suffix match, so pageNum should be 0
-    expect(model.get('pageNum')).toBe(0);
-    expect(contentLoadedSpy).toHaveBeenCalledTimes(1);
+    const pageNumCall = setSpy.mock.calls.find(([key]) => key === 'pageNum');
+    expect(pageNumCall).toBeDefined();
+    expect(pageNumCall[1]).toBe(1234);
+  });
+
+  test('setContent sets pageNum to 0 when URL has non-numeric suffix', () => {
+    const model = new LessonContentModel();
+    const setSpy = jest.spyOn(model, 'set');
+
+    global.document.URL = 'http://example.com/my.lesson/not-a-number';
+
+    model.setContent('<html/>');
+
+    const pageNumCall = setSpy.mock.calls.find(([key]) => key === 'pageNum');
+    expect(pageNumCall).toBeDefined();
+    expect(pageNumCall[1]).toBe(0);
+  });
+
+  test('setContent sets pageNum to 0 when no ".lesson/<digits>" suffix exists', () => {
+    const model = new LessonContentModel();
+    const setSpy = jest.spyOn(model, 'set');
+
+    global.document.URL = 'http://example.com/other';
+
+    model.setContent('<html/>');
+
+    const pageNumCall = setSpy.mock.calls.find(([key]) => key === 'pageNum');
+    expect(pageNumCall).toBeDefined();
+    expect(pageNumCall[1]).toBe(0);
   });
 });

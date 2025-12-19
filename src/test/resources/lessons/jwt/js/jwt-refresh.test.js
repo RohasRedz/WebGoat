@@ -1,72 +1,93 @@
-// Batch 2 - Derived test path (assumed): src/test/resources/lessons/jwt/js/jwt-refresh.test.js
-// TODO: Adjust test path/module resolution to match the actual project structure if needed.
+// Jest delta tests for jwt-refresh.js focusing on:
+// - Removal of hard-coded password.
+// - getJwtPassword() preferring runtime configuration.
+// - login() using getJwtPassword() value.
 
-const $ = require('jquery');
-
-// Jest automatically hoists jest.mock, but we need to control $.ajax behavior.
 jest.mock('jquery', () => {
-  const ajaxMock = jest.fn();
-  return {
-    ajax: ajaxMock,
-    fn: {},
-    // Minimal stub for document.ready used in the file; we'll ignore its behavior in tests.
-    ready: jest.fn(),
-  };
+  const ajaxMock = jest.fn(() => ({
+    success: (cb) => {
+      cb({ access_token: 'access', refresh_token: 'refresh' });
+      return { success: jest.fn() };
+    },
+  }));
+  const readyMock = jest.fn((cb) => cb());
+  const $ = jest.fn(() => ({ ready: readyMock }));
+  $.ajax = ajaxMock;
+  $.ready = readyMock;
+  return $;
 });
 
-// To load the module after mocks are set
-function loadModule() {
-  // Clear require cache so each test gets a fresh copy
-  jest.resetModules();
-  return require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js'); // TODO: Adjust relative path as per actual project
-}
+describe('jwt-refresh delta tests', () => {
+  let originalWebgoatConfig;
+  let originalJwtPassword;
 
-describe('jwt-refresh.js delta tests', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    // Ensure global window/webgoat can be controlled in each test
-    global.window = {};
-    global.webgoat = {}; // Some code may expect global webgoat
+    jest.resetModules();
+    originalWebgoatConfig = global.window?.webgoatConfig;
+    originalJwtPassword = global.window?.JWT_PASSWORD;
+    global.window = global.window || {};
+    delete global.window.webgoatConfig;
+    delete global.window.JWT_PASSWORD;
+    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
   });
 
-  test('login fails closed when password configuration is missing', () => {
-    // Arrange
-    const module = loadModule(); // eslint-disable-line no-unused-vars
-    // window.webgoat.config.jwtPassword is intentionally undefined
-
-    // Act
-    // login is a global function defined in the module
-    global.login('Jerry');
-
-    // Assert
-    expect($.ajax).not.toHaveBeenCalled();
+  afterEach(() => {
+    if (originalWebgoatConfig !== undefined) {
+      global.window.webgoatConfig = originalWebgoatConfig;
+    } else {
+      delete global.window.webgoatConfig;
+    }
+    if (originalJwtPassword !== undefined) {
+      global.window.JWT_PASSWORD = originalJwtPassword;
+    } else {
+      delete global.window.JWT_PASSWORD;
+    }
+    jest.resetModules();
   });
 
-  test('login reads password from configuration and uses it in AJAX request', () => {
-    // Arrange
-    global.window.webgoat = {
-      config: {
-        jwtPassword: 'CONFIG_PASSWORD',
-      },
-    };
-    const module = loadModule(); // eslint-disable-line no-unused-vars
+  test('getJwtPassword uses window.webgoatConfig.jwtPassword when available', () => {
+    const passwordValue = 'runtimeSecret';
+    global.window.webgoatConfig = { jwtPassword: passwordValue };
 
-    // Act
-    global.login('Jerry');
+    const { getJwtPassword } = require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
 
-    // Assert
-    expect($.ajax).toHaveBeenCalledTimes(1);
-    const ajaxConfig = $.ajax.mock.calls[0][0];
+    expect(getJwtPassword()).toBe(passwordValue);
+  });
 
-    expect(ajaxConfig.type).toBe('POST');
-    expect(ajaxConfig.url).toBe('JWT/refresh/login');
-    expect(ajaxConfig.contentType).toBe('application/json');
+  test('getJwtPassword falls back to window.JWT_PASSWORD when config is absent', () => {
+    const passwordValue = 'envSecret';
+    delete global.window.webgoatConfig;
+    global.window.JWT_PASSWORD = passwordValue;
 
-    const body = JSON.parse(ajaxConfig.data);
+    const { getJwtPassword } = require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+
+    expect(getJwtPassword()).toBe(passwordValue);
+  });
+
+  test('getJwtPassword uses placeholder when no runtime sources are available', () => {
+    delete global.window.webgoatConfig;
+    delete global.window.JWT_PASSWORD;
+
+    const { getJwtPassword } = require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+
+    expect(getJwtPassword()).toBe('CHANGE_ME_SECURELY_AT_RUNTIME');
+  });
+
+  test('login uses password returned by getJwtPassword instead of hard-coded literal', () => {
+    const $ = require('jquery');
+    const ajaxMock = $.ajax;
+
+    global.window.webgoatConfig = { jwtPassword: 'runtimeSecret' };
+    const { login } = require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+
+    ajaxMock.mockClear();
+    login('Jerry');
+
+    expect(ajaxMock).toHaveBeenCalledTimes(1);
+    const callArgs = ajaxMock.mock.calls[0][0];
+    const body = JSON.parse(callArgs.data);
     expect(body.user).toBe('Jerry');
-    expect(body.password).toBe('CONFIG_PASSWORD');
-
-    // Ensure no hard-coded password is present in request data
-    expect(ajaxConfig.data).not.toContain('bm5nhSkxCXZkKRy4');
+    expect(body.password).toBe('runtimeSecret');
+    expect(body.password).not.toBe('bm5nhSkxCXZkKRy4');
   });
 });

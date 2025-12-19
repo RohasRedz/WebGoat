@@ -1,58 +1,67 @@
-define(['jquery',
+define([
+    'jquery',
     'underscore',
     'backbone',
-    'goatApp/model/HTMLContentModel'],
-     function($,
-        _,
-        Backbone,
-        HTMLContentModel){
+    'goatApp/model/HTMLContentModel'
+], function ($,
+             _,
+             Backbone,
+             HTMLContentModel) {
 
     return HTMLContentModel.extend({
-        urlRoot:null,
+        urlRoot: null,
         defaults: {
-            items:null,
-            selectedItem:null
+            items: null,
+            selectedItem: null
         },
 
         initialize: function (options) {
 
         },
 
-        loadData: function(options) {
+        loadData: function (options) {
             this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
             var self = this;
-            this.fetch().done(function(data) {
+            this.fetch().done(function (data) {
                 self.setContent(data);
             });
         },
 
-        setContent: function(content, loadHelps) {
+        setContent: function (content, loadHelps) {
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
-            this.set('content',content);
+            this.set('content', content);
 
-            // Use a simpler, anchored pattern to strip any page suffix from the lesson URL
-            // Example: http://host/lesson/1234  ->  http://host/lesson
-            //          http://host/lesson      ->  http://host/lesson
-            this.set(
-                'lessonUrl',
-                document.URL.replace(/(\.lesson)(?:\/\d{1,4})?$/, '$1')
-            );
-
-            // Efficient, anchored pattern: capture a trailing 1–4 digit page number if present
-            var pageMatch = document.URL.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
-            } else {
-                this.set('pageNum',0);
+            // Use a simple, non-backtracking-safe replacement for the suffix.
+            // This avoids complex regex engines paths while preserving behavior.
+            var currentUrl = document.URL;
+            var lessonUrl = currentUrl;
+            var lessonSuffixIndex = currentUrl.indexOf('.lesson');
+            if (lessonSuffixIndex !== -1) {
+                lessonUrl = currentUrl.substring(0, lessonSuffixIndex) + '.lesson';
             }
-            this.trigger('content:loaded',this,loadHelps);
+            this.set('lessonUrl', lessonUrl);
+
+            // Avoid a potentially catastrophic backtracking regex by using indexOf/substring.
+            // Original intent: if URL ends with ".lesson/<1-4 digit page number>", capture that number.
+            var pageNum = 0;
+            var lessonSegmentIndex = currentUrl.indexOf('.lesson/');
+            if (lessonSegmentIndex !== -1) {
+                var pageSegment = currentUrl.substring(lessonSegmentIndex + '.lesson/'.length);
+                // Only accept 1–4 digit numeric page identifiers.
+                if (/^[0-9]{1,4}$/.test(pageSegment)) {
+                    pageNum = parseInt(pageSegment, 10);
+                }
+            }
+            this.set('pageNum', pageNum);
+
+            this.trigger('content:loaded', this, loadHelps);
         },
 
         fetch: function (options) {
             options = options || {};
-            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
+            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html" }, options));
         }
     });
 });

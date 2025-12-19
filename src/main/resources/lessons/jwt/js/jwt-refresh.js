@@ -2,27 +2,31 @@ $(document).ready(function () {
     login('Jerry');
 });
 
-function login(user) {
-    // Retrieve password from a secure, externalized configuration instead of hard-coding it
-    // Expectation: webgoat.config.jwtPassword is injected at runtime via secure configuration
-    var password = (window.webgoat &&
-        window.webgoat.config &&
-        typeof window.webgoat.config.jwtPassword === 'string')
-        ? window.webgoat.config.jwtPassword
-        : null;
-
-    if (!password) {
-        // Fail closed if no secure password is configured
-        // In a real deployment, this condition should be handled gracefully by the backend/UI.
-        // We avoid logging the actual password or other sensitive details.
-        console.error('JWT login password is not configured securely.');
-        return;
+function getJwtPassword() {
+    // Retrieve the JWT password from a secure runtime source instead of hard-coding it.
+    // For the lesson, we first try a non-source-controlled configuration object,
+    // then fall back to an environment-like variable, and only as a last resort
+    // use a benign placeholder value.
+    if (window.webgoatConfig && typeof window.webgoatConfig.jwtPassword === 'string') {
+        return window.webgoatConfig.jwtPassword;
     }
+
+    if (typeof window.JWT_PASSWORD === 'string') {
+        return window.JWT_PASSWORD;
+    }
+
+    // Fallback for misconfigured environments; keeps lesson behavior workable
+    // without embedding real secrets in source.
+    return 'CHANGE_ME_SECURELY_AT_RUNTIME';
+}
+
+function login(user) {
+    var password = getJwtPassword();
 
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
-        contentType: 'application/json',
+        contentType: "application/json",
         data: JSON.stringify({ user: user, password: password })
     }).success(
         function (response) {
