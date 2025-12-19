@@ -1,88 +1,144 @@
-// Assumed package based on source file path; adjust if actual package differs.
 package org.owasp.webgoat.container;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CsrfToken;
 
-import static org.junit.jupiter.api.Assertions.*;
+import jakarta.servlet.FilterChain;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 /**
- * Delta tests for WebSecurityConfig focusing only on the security‑related changes:
- * - Use of BCryptPasswordEncoder instead of NoOpPasswordEncoder.
- * - CSRF is no longer explicitly disabled (i.e., left enabled by default).
+ * Delta unit tests for WebSecurityConfig focusing only on the security-related changes:
+ * 1) PasswordEncoder now uses BCryptPasswordEncoder.
+ * 2) CSRF is not explicitly disabled (default CSRF protection is active).
+ * 3) Security headers are configured instead of being globally disabled.
  */
 class WebSecurityConfigTest {
 
     @Test
-    @DisplayName("passwordEncoder bean must be a BCryptPasswordEncoder")
+    @DisplayName("passwordEncoder bean should return BCryptPasswordEncoder")
     void passwordEncoderShouldUseBCrypt() {
         // Arrange
-        UserService userService = mock(UserService.class);
-        WebSecurityConfig config = new WebSecurityConfig(userService);
+        WebSecurityConfig config = new WebSecurityConfig(null); // userDetailsService not needed here
 
         // Act
         PasswordEncoder encoder = config.passwordEncoder();
 
         // Assert
-        assertNotNull(encoder, "PasswordEncoder bean must not be null");
-        assertTrue(encoder instanceof BCryptPasswordEncoder,
-                "PasswordEncoder must be an instance of BCryptPasswordEncoder to avoid plain-text encoding");
-        // Basic behavior sanity check to ensure it actually encodes and matches
-        String raw = "secret";
+        assertThat(encoder)
+            .as("PasswordEncoder should be an instance of BCryptPasswordEncoder")
+            .isInstanceOf(BCryptPasswordEncoder.class);
+
+        // Additionally verify that encoding changes the raw value (not NoOp)
+        String raw = "test-password";
         String encoded = encoder.encode(raw);
-        assertNotEquals(raw, encoded, "Encoded password must not equal the raw password");
-        assertTrue(encoder.matches(raw, encoded), "PasswordEncoder must validate the encoded password correctly");
+        assertThat(encoded)
+            .as("Encoded password should not equal raw password")
+            .isNotEqualTo(raw);
+        assertThat(encoder.matches(raw, encoded))
+            .as("BCryptPasswordEncoder should correctly verify the encoded password")
+            .isTrue();
     }
 
     @Test
-    @DisplayName("filterChain must build successfully with CSRF not explicitly disabled")
-    void filterChainShouldBuildAndNotDisableCsrf() throws Exception {
+    @DisplayName("SecurityFilterChain should not disable CSRF and should issue a CSRF token for unsafe methods")
+    void csrfShouldBeEnabledByDefault() throws Exception {
         // Arrange
-        UserService userService = mock(UserService.class);
-        WebSecurityConfig config = new WebSecurityConfig(userService);
-        HttpSecurity http = mock(HttpSecurity.class, RETURNS_DEEP_STUBS);
+        WebSecurityConfig config = new WebSecurityConfig(null);
+        HttpSecurityBuilderFactory builderFactory = new HttpSecurityBuilderFactory();
+        SecurityFilterChain chain = config.filterChain(builderFactory.create());
 
-        // We want to ensure that the configuration does NOT call csrf(csrf -> csrf.disable()) anymore.
-        // To do this in a delta test, we verify that the csrf() method is never invoked at all
-        // during filterChain setup, which reflects the new behavior of relying on Spring defaults.
-        when(http.authorizeHttpRequests(any()))
-                .thenReturn(http);
-        when(http.formLogin(any()))
-                .thenReturn(http);
-        when(http.oauth2Login(any()))
-                .thenReturn(http);
-        when(http.logout(any()))
-                .thenReturn(http);
-        when(http.headers(any()))
-                .thenReturn(http);
-        when(http.exceptionHandling(any()))
-                .thenReturn(http);
-        when(http.build())
-                .thenReturn(mock(SecurityFilterChain.class));
+        // Act: perform a POST request which, with CSRF enabled, should result
+        // in a CSRF token being generated and attached to the response.
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/some/protected/url");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain servletChain = mock(FilterChain.class);
 
-        // Act
-        SecurityFilterChain chain = config.filterChain(http);
+        chain.doFilter(request, response, servletChain);
 
         // Assert
-        assertNotNull(chain, "SecurityFilterChain must be created successfully");
-
-        // Verify that csrf() was never called; in the previous vulnerable version, csf.disable() was explicitly configured.
-        verify(http, never()).csrf(any());
+        CsrfToken csrfToken = (CsrfToken) request.getAttribute(CsrfToken.class.getName());
+        assertThat(csrfToken)
+            .as("CSRF token should be present when CSRF protection is enabled")
+            .isNotNull();
+        assertThat(csrfToken.getToken())
+            .as("CSRF token value should not be empty")
+            .isNotBlank();
     }
 
     @Test
-    @DisplayName("Configuration class must be annotated with @EnableWebSecurity")
-    void configShouldBeWebSecurityEnabled() {
-        // This test ensures that the security configuration class is still active
-        // and Spring Security infrastructure remains enabled after the changes.
-        EnableWebSecurity annotation = WebSecurityConfig.class.getAnnotation(EnableWebSecurity.class);
-        assertNotNull(annotation, "@EnableWebSecurity must be present on WebSecurityConfig");
+    @DisplayName("Security headers should be set: X-Frame-Options, X-Content-Type-Options, HSTS, Referrer-Policy, CSP")
+    void securityHeadersShouldBeConfigured() throws Exception {
+        // Arrange
+        WebSecurityConfig config = new WebSecurityConfig(null);
+        HttpSecurityBuilderFactory builderFactory = new HttpSecurityBuilderFactory();
+        SecurityFilterChain chain = config.filterChain(builderFactory.create());
+
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/some/protected/url");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain servletChain = mock(FilterChain.class);
+
+        // Act
+        chain.doFilter(request, response, servletChain);
+
+        // Assert: verify key security headers that were configured in the fix
+        assertThat(response.getHeader("X-Frame-Options"))
+            .as("X-Frame-Options should be DENY")
+            .isEqualTo("DENY");
+
+        assertThat(response.getHeader("X-Content-Type-Options"))
+            .as("X-Content-Type-Options should be nosniff")
+            .isEqualToIgnoringCase("nosniff");
+
+        String hsts = response.getHeader("Strict-Transport-Security");
+        assertThat(hsts)
+            .as("HSTS should be configured with includeSubDomains and a max-age")
+            .isNotNull()
+            .containsIgnoringCase("max-age=")
+            .containsIgnoringCase("includeSubDomains");
+
+        String referrerPolicy = response.getHeader("Referrer-Policy");
+        assertThat(referrerPolicy)
+            .as("Referrer-Policy should be STRICT_ORIGIN_WHEN_CROSS_ORIGIN")
+            .isEqualToIgnoringCase("strict-origin-when-cross-origin");
+
+        String csp = response.getHeader("Content-Security-Policy");
+        assertThat(csp)
+            .as("Content-Security-Policy should be configured as in WebSecurityConfig")
+            .contains("default-src 'self'")
+            .contains("script-src 'self' 'unsafe-inline'")
+            .contains("style-src 'self' 'unsafe-inline'");
+    }
+
+    /**
+     * Small helper to create an HttpSecurity instance without wiring the entire Spring context.
+     *
+     * This class isolates boilerplate needed to construct an HttpSecurity for testing the
+     * SecurityFilterChain produced by WebSecurityConfig.
+     */
+    private static final class HttpSecurityBuilderFactory {
+
+        SecurityFilterChain create() throws Exception {
+            // We create a minimal HttpSecurity using a mocked AuthenticationConfiguration.
+            AuthenticationConfiguration authConfig = mock(AuthenticationConfiguration.class);
+            // We don't rely on the real AuthenticationManager in these tests.
+            when(authConfig.getAuthenticationManager()).thenReturn(mock(org.springframework.security.authentication.AuthenticationManager.class));
+
+            org.springframework.security.config.annotation.web.builders.HttpSecurity http =
+                new org.springframework.security.config.annotation.web.builders.HttpSecurity(
+                    null, null, java.util.Collections.emptyMap());
+
+            // Build the filter chain via the provided WebSecurityConfig.filterChain method
+            WebSecurityConfig config = new WebSecurityConfig(null);
+            return config.filterChain(http);
+        }
     }
 }
