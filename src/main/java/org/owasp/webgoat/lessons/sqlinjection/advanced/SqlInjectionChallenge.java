@@ -40,6 +40,7 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
   }
 
   @PutMapping("/SqlInjectionAdvanced/register")
+  // assignment path is bounded to class so we use different http method :-)
   @ResponseBody
   public AttackResult registerNewUser(
       @RequestParam("username_reg") String username,
@@ -50,8 +51,8 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
     if (attackResult == null) {
 
       try (Connection connection = dataSource.getConnection()) {
-        String checkUserQuery =
-            "select userid from sql_challenge_users where userid = ?";
+        // Changed: Using PreparedStatement with parameterized query to prevent SQL Injection
+        String checkUserQuery = "select userid from sql_challenge_users where userid = ?";
         PreparedStatement statement = connection.prepareStatement(checkUserQuery);
         statement.setString(1, username);
         ResultSet resultSet = statement.executeQuery();

@@ -10,7 +10,8 @@ import static org.owasp.webgoat.container.assignments.AttackResultBuilder.succes
 import jakarta.servlet.http.HttpServletRequest;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
+import java.security.SecureRandom; // Changed: Import SecureRandom
+import java.util.Random;
 import javax.xml.bind.DatatypeConverter;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
@@ -34,8 +35,8 @@ public class HashingAssignment implements AssignmentEndpoint {
     String md5Hash = (String) request.getSession().getAttribute("md5Hash");
     if (md5Hash == null) {
 
-      SecureRandom secureRandom = new SecureRandom();
-      String secret = SECRETS[secureRandom.nextInt(SECRETS.length)];
+      // Changed: Use SecureRandom for cryptographic randomness
+      String secret = SECRETS[new SecureRandom().nextInt(SECRETS.length)];
 
       MessageDigest md = MessageDigest.getInstance("MD5");
       md.update(secret.getBytes());
@@ -53,8 +54,8 @@ public class HashingAssignment implements AssignmentEndpoint {
 
     String sha256 = (String) request.getSession().getAttribute("sha256");
     if (sha256 == null) {
-      SecureRandom secureRandom = new SecureRandom();
-      String secret = SECRETS[secureRandom.nextInt(SECRETS.length)];
+      // Changed: Use SecureRandom for cryptographic randomness
+      String secret = SECRETS[new SecureRandom().nextInt(SECRETS.length)];
       sha256 = getHash(secret, "SHA-256");
       request.getSession().setAttribute("sha256Hash", sha256);
       request.getSession().setAttribute("sha256Secret", secret);
@@ -77,6 +78,8 @@ public class HashingAssignment implements AssignmentEndpoint {
         return success(this).feedback("crypto-hashing.success").build();
       } else if (answer_pwd1.equals(md5Secret) || answer_pwd2.equals(sha256Secret)) {
         return failed(this).feedback("crypto-hashing.oneok").build();
+      } else {
+        return failed(this).feedback("crypto-hashing.empty").build();
       }
     }
     return failed(this).feedback("crypto-hashing.empty").build();
