@@ -11,7 +11,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
-import java.io.ObjectInputFilter; // Added import for ObjectInputFilter
+import java.io.ObjectInputFilter;
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
@@ -42,13 +42,8 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
 
     try (ObjectInputStream ois =
         new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
-      // FIX: Apply ObjectInputFilter to restrict deserializable classes, preventing gadget chain exploitation
-      ObjectInputFilter filter = ObjectInputFilter.Config.createWhiteListFilter(
-          "java.lang.String", // Allow String objects, as checked in the original logic
-          "org.dummy.insecure.framework.VulnerableTaskHolder" // Allow the expected task holder object
-      );
-      ois.setObjectInputFilter(filter);
-
+      ois.setObjectInputFilter(ObjectInputFilter.Config.createFilter(
+          "org.dummy.insecure.framework.VulnerableTaskHolder;java.lang.String;!*"));
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {
@@ -59,12 +54,10 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
       }
       after = System.currentTimeMillis();
     } catch (InvalidClassException e) {
-      // This exception can now also be thrown by the ObjectInputFilter if an unauthorized class is encountered
       return failed(this).feedback("insecure-deserialization.invalidversion").build();
     } catch (IllegalArgumentException e) {
       return failed(this).feedback("insecure-deserialization.expired").build();
     } catch (Exception e) {
-      // Catch-all for other deserialization-related exceptions, including those from filter
       return failed(this).feedback("insecure-deserialization.invalidversion").build();
     }
 

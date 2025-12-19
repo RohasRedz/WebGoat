@@ -40,7 +40,6 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
   }
 
   @PutMapping("/SqlInjectionAdvanced/register")
-  // assignment path is bounded to class so we use different http method :-)
   @ResponseBody
   public AttackResult registerNewUser(
       @RequestParam("username_reg") String username,
@@ -51,25 +50,23 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
     if (attackResult == null) {
 
       try (Connection connection = dataSource.getConnection()) {
-        // FIX: Replaced string concatenation with a parameterized query for checkUserQuery
-        String checkUserQuery = "select userid from sql_challenge_users where userid = ?";
-        try (PreparedStatement statement = connection.prepareStatement(checkUserQuery)) {
-          statement.setString(1, username);
-          try (ResultSet resultSet = statement.executeQuery()) {
+        String checkUserQuery =
+            "select userid from sql_challenge_users where userid = ?";
+        PreparedStatement statement = connection.prepareStatement(checkUserQuery);
+        statement.setString(1, username);
+        ResultSet resultSet = statement.executeQuery();
 
-            if (resultSet.next()) {
-              attackResult = failed(this).feedback("user.exists").feedbackArgs(username).build();
-            } else {
-              PreparedStatement preparedStatement =
-                  connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)");
-              preparedStatement.setString(1, username);
-              preparedStatement.setString(2, email);
-              preparedStatement.setString(3, password);
-              preparedStatement.execute();
-              attackResult =
-                  informationMessage(this).feedback("user.created").feedbackArgs(username).build();
-            }
-          }
+        if (resultSet.next()) {
+          attackResult = failed(this).feedback("user.exists").feedbackArgs(username).build();
+        } else {
+          PreparedStatement preparedStatement =
+              connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)");
+          preparedStatement.setString(1, username);
+          preparedStatement.setString(2, email);
+          preparedStatement.setString(3, password);
+          preparedStatement.execute();
+          attackResult =
+              informationMessage(this).feedback("user.created").feedbackArgs(username).build();
         }
       } catch (SQLException e) {
         attackResult = failed(this).output("Something went wrong").build();

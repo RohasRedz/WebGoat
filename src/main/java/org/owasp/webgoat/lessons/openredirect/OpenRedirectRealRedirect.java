@@ -4,6 +4,8 @@
  */
 package org.owasp.webgoat.lessons.openredirect;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -15,15 +17,22 @@ import org.springframework.web.servlet.ModelAndView;
 @Controller
 public class OpenRedirectRealRedirect {
 
+  private static final String DEFAULT_SAFE_REDIRECT = "/welcome.mvc";
+
   @GetMapping("/OpenRedirect/realRedirect")
   public ModelAndView real(@RequestParam("url") String url) {
-    // FIX: Validate redirect URL to prevent Open Redirect vulnerability
-    if (url != null && url.startsWith("/")) {
-      // If the URL starts with '/', it's considered an internal path
-      return new ModelAndView("redirect:" + url);
-    } else {
-      // For external or invalid URLs, redirect to a safe default page
-      return new ModelAndView("redirect:/welcome.mvc"); // Redirect to a safe default
+    try {
+      URI uri = new URI(url);
+
+      if (uri.isAbsolute()) {
+        return new ModelAndView("redirect:" + DEFAULT_SAFE_REDIRECT);
+      } else if (url.startsWith("/")) {
+        return new ModelAndView("redirect:" + url);
+      } else {
+        return new ModelAndView("redirect:" + DEFAULT_SAFE_REDIRECT);
+      }
+    } catch (URISyntaxException e) {
+      return new ModelAndView("redirect:" + DEFAULT_SAFE_REDIRECT);
     }
   }
 }

@@ -48,7 +48,17 @@ public class ProfileUploadBase implements AssignmentEndpoint {
     File uploadDirectory = cleanupAndCreateDirectoryForUser(username);
 
     try {
-      var uploadedFile = new File(uploadDirectory, fullName);
+      String sanitizedFileName = FilenameUtils.getName(fullName);
+      if (sanitizedFileName == null || sanitizedFileName.isEmpty()) {
+          sanitizedFileName = "default_profile_pic.png";
+      }
+
+      var uploadedFile = new File(uploadDirectory, sanitizedFileName);
+
+      if (!uploadedFile.getCanonicalPath().startsWith(uploadDirectory.getCanonicalPath())) {
+          return failed(this).feedback("path-traversal-attempt-detected").build();
+      }
+
       uploadedFile.createNewFile();
       FileCopyUtils.copy(file.getBytes(), uploadedFile);
 

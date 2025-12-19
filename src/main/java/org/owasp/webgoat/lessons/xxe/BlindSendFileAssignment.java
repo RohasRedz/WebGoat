@@ -14,6 +14,7 @@ import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
@@ -53,14 +54,31 @@ public class BlindSendFileAssignment implements AssignmentEndpoint, Initializabl
   private void createSecretFileWithRandomContents(WebGoatUser user) {
     var fileContents = "WebGoat 8.0 rocks... (" + randomAlphabetic(10) + ")";
     userToFileContents.put(user, fileContents);
-    File targetDirectory = new File(webGoatHomeDirectory, "/XXE/" + user.getUsername());
+
+    String sanitizedUsername = user.getUsername().replaceAll("[^a-zA-Z0-9._-]", "");
+    if (sanitizedUsername.isEmpty()) {
+        sanitizedUsername = "defaultUser";
+    }
+
+    File targetDirectory = Paths.get(webGoatHomeDirectory, "XXE", sanitizedUsername).toFile();
+    try {
+        targetDirectory = targetDirectory.getCanonicalFile();
+    } catch (IOException e) {
+        log.error("Error canonicalizing target directory path for user '{}'", sanitizedUsername, e);
+        targetDirectory = Paths.get(webGoatHomeDirectory, "XXE", "fallbackUser").toFile();
+    }
+
     if (!targetDirectory.exists()) {
       targetDirectory.mkdirs();
     }
     try {
-      Files.writeString(new File(targetDirectory, "secret.txt").toPath(), fileContents, UTF_8);
+      File secretFile = new File(targetDirectory, "secret.txt");
+      if (!secretFile.getCanonicalPath().startsWith(targetDirectory.getCanonicalPath())) {
+          throw new IOException("Attempted path traversal with secret.txt");
+      }
+      Files.writeString(secretFile.toPath(), fileContents, UTF_8);
     } catch (IOException e) {
-      log.error("Unable to write 'secret.txt' to '{}", targetDirectory);
+      log.error("Unable to write 'secret.txt' to '{}'", targetDirectory, e);
     }
   }
 
@@ -70,7 +88,6 @@ public class BlindSendFileAssignment implements AssignmentEndpoint, Initializabl
       @RequestBody String commentStr, @AuthenticationPrincipal WebGoatUser user) {
     var fileContentsForUser = userToFileContents.getOrDefault(user, "");
 
-    // Solution is posted by the user as a separate comment
     if (commentStr.contains(fileContentsForUser)) {
       return success(this).build();
     }

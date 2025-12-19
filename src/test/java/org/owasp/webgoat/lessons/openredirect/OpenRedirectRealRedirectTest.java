@@ -1,61 +1,39 @@
 package org.owasp.webgoat.lessons.openredirect;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 
-import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.ModelAndView;
 
-/**
- * Delta tests for OpenRedirectRealRedirect focusing on redirect validation.
- *
- * These tests verify that:
- * - Internal paths are still honored.
- * - External URLs are no longer allowed and redirect to a safe default.
- */
-class OpenRedirectRealRedirectTest {
+public class OpenRedirectRealRedirectTest {
+
+    private final OpenRedirectRealRedirect controller = new OpenRedirectRealRedirect();
 
     @Test
-    @DisplayName("real should redirect to internal path when URL starts with slash")
-    void realShouldRedirectToInternalPath() {
-        // Arrange
-        OpenRedirectRealRedirect controller = new OpenRedirectRealRedirect();
+    void real_withInternalPathShouldRedirectToThatPath() {
+        String internal = "/internal/page";
 
-        // Act
-        ModelAndView mav = controller.real("/home");
+        ModelAndView mv = controller.real(internal);
 
-        // Assert
-        assertEquals("redirect:/home", mav.getViewName(), "Internal path must remain directly redirectable");
+        assertThat(mv.getViewName()).isEqualTo("redirect:" + internal);
     }
 
     @Test
-    @DisplayName("real should redirect to safe default for external URLs")
-    void realShouldRedirectToSafeDefaultForExternalUrl() {
-        // Arrange
-        OpenRedirectRealRedirect controller = new OpenRedirectRealRedirect();
+    void real_withExternalAbsoluteUrlShouldRedirectToSafeDefault() {
+        String external = "http://evil.com";
 
-        // Act
-        ModelAndView mav = controller.real("http://evil.com");
+        ModelAndView mv = controller.real(external);
 
-        // Assert
-        assertEquals("redirect:/welcome.mvc", mav.getViewName(),
-                "External URL must not be used directly and should redirect to a safe default");
+        assertThat(mv.getViewName()).isNotEqualTo("redirect:" + external);
+        assertThat(mv.getViewName()).isEqualTo("redirect:/welcome.mvc");
     }
 
     @Test
-    @DisplayName("real should redirect to safe default for null or empty URL")
-    void realShouldRedirectToSafeDefaultForNullOrEmpty() {
-        // Arrange
-        OpenRedirectRealRedirect controller = new OpenRedirectRealRedirect();
+    void real_withMalformedUrlShouldRedirectToSafeDefault() {
+        String malformed = "://not-a-valid-uri";
 
-        // Act
-        ModelAndView mavNull = controller.real(null);
-        ModelAndView mavEmpty = controller.real("");
+        ModelAndView mv = controller.real(malformed);
 
-        // Assert
-        assertEquals("redirect:/welcome.mvc", mavNull.getViewName(),
-                "Null URL should redirect to safe default");
-        assertEquals("redirect:/welcome.mvc", mavEmpty.getViewName(),
-                "Empty URL should redirect to safe default");
+        assertThat(mv.getViewName()).isEqualTo("redirect:/welcome.mvc");
     }
 }
