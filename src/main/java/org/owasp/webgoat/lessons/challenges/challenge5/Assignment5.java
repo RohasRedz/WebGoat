@@ -40,7 +40,7 @@ public class Assignment5 implements AssignmentEndpoint {
       return failed(this).feedback("user.not.larry").feedbackArgs(username_login).build();
     }
     try (var connection = dataSource.getConnection()) {
-      // FIX: Replaced string concatenation with a parameterized query to prevent SQL Injection
+      // FIX: Replaced string concatenation with PreparedStatement and bind parameters to prevent SQL Injection
       PreparedStatement statement =
           connection.prepareStatement(
               "select password from challenge_users where userid = ? and password = ?");
