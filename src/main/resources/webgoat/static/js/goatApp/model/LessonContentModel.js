@@ -7,35 +7,10 @@ define(['jquery',
         Backbone,
         HTMLContentModel){
 
-    /**
-     * Extract the page number from a lesson URL using a safe, bounded approach
-     * to avoid inefficient regular expression backtracking.
-     *
-     * @param {string} url
-     * @returns {number}
-     */
-    function extractPageNum(url) {
-        if (typeof url !== 'string' || url.length > 2048) {
-            // Defensive limit to avoid processing extremely long inputs
-            return 0;
-        }
-
-        // Normalize to a predictable suffix `.lesson/<digits>`
-        var lessonSuffixIndex = url.indexOf('.lesson/');
-        if (lessonSuffixIndex === -1) {
-            return 0;
-        }
-
-        var suffix = url.substring(lessonSuffixIndex + '.lesson/'.length);
-
-        // Accept only up to 4 digits to match original intent and avoid ReDoS
-        var pageMatch = /^(\d{1,4})$/.exec(suffix);
-        if (pageMatch) {
-            return parseInt(pageMatch[1], 10);
-        }
-
-        return 0;
-    }
+    // Precompile safe, bounded regular expressions to avoid repeated creation
+    // and ensure they do not allow catastrophic backtracking.
+    var LESSON_URL_REPLACE_REGEX = /\.lesson.*/;
+    var LESSON_PAGE_NUM_REGEX = /\.lesson\/(\d{1,4})$/;
 
     return HTMLContentModel.extend({
         urlRoot:null,
@@ -62,18 +37,15 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a simpler, deterministic replacement instead of a complex regex
-            var currentUrl = document.URL;
-            var lessonIndex = currentUrl.indexOf('.lesson');
-            if (lessonIndex !== -1) {
-                this.set('lessonUrl', currentUrl.substring(0, lessonIndex + '.lesson'.length));
+            // Use precompiled, simple regex without nested quantifiers to avoid ReDoS.
+            var currentUrl = String(document.URL || '');
+            this.set('lessonUrl', currentUrl.replace(LESSON_URL_REPLACE_REGEX, '.lesson'));
+
+            if (LESSON_PAGE_NUM_REGEX.test(currentUrl)) {
+                this.set('pageNum', currentUrl.replace(LESSON_PAGE_NUM_REGEX, '$1'));
             } else {
-                this.set('lessonUrl', currentUrl);
+                this.set('pageNum',0);
             }
-
-            // Use safe helper to extract page number and avoid inefficient regex complexity
-            this.set('pageNum', extractPageNum(currentUrl));
-
             this.trigger('content:loaded',this,loadHelps);
         },
 

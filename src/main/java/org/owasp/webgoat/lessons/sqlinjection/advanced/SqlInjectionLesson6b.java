@@ -12,7 +12,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import lombok.extern.slf4j.Slf4j; // Added import for Slf4j
+import lombok.extern.slf4j.Slf4j; // Added for logging
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@Slf4j // Added Slf4j annotation for logging
+@Slf4j // Added for logging
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -33,9 +33,7 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   @PostMapping("/SqlInjectionAdvanced/attack6b")
   @ResponseBody
   public AttackResult completed(@RequestParam String userid_6b) throws IOException {
-    String storedPassword = getPassword(); // Get password from secure method
-    // FIX: Handle potential null return from getPassword() to avoid NPE and ensure secure comparison
-    if (storedPassword != null && userid_6b.equals(storedPassword)) {
+    if (userid_6b.equals(getPassword())) {
       return success(this).build();
     } else {
       return failed(this).build();
@@ -43,28 +41,26 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = null; // FIX: Removed hardcoded default password
+    String password = null; // Changed from "dave" to null to avoid hardcoded default exposure
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
-      try {
-        Statement statement =
-            connection.createStatement(
-                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-        ResultSet results = statement.executeQuery(query);
+      try (
+          Statement statement =
+              connection.createStatement(
+                  ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
+          ResultSet results = statement.executeQuery(query)) {
 
         if (results != null && results.first()) {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        // FIX: Replaced printStackTrace with structured logging to prevent information exposure
-        log.error("SQL Exception in getPassword method", sqle);
+        log.error("SQL error retrieving password for 'dave'", sqle); // Replaced printStackTrace with log.error
         // do nothing
       }
     } catch (Exception e) {
-      // FIX: Replaced printStackTrace with structured logging to prevent information exposure
-      log.error("General Exception in getPassword method", e);
+      log.error("Error retrieving password for 'dave'", e); // Replaced printStackTrace with log.error
       // do nothing
     }
-    return (password);
+    return password;
   }
 }

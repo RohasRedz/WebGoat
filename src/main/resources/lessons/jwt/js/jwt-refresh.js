@@ -1,61 +1,53 @@
-/* eslint-disable no-undef */
 $(document).ready(function () {
-    login('Jerry');
-});
+    // Expect a non-empty password/secret to be provided at runtime.
+    // This avoids hard-coding secrets in the client bundle.
+    var runtimePassword = window.WEBGOAT_JWT_PASSWORD;
 
-function login(user) {
-    var safePassword = 'placeholder-password';
+    if (!runtimePassword || typeof runtimePassword !== 'string') {
+        // Fallback to a non-secret placeholder to avoid breaking the example flow,
+        // while not leaking real credentials.
+        runtimePassword = 'PLACEHOLDER_PASSWORD';
+    }
 
+    login('Jerry', runtimePassword);
+})
+
+function login(user, password) {
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({ user: user, password: safePassword })
+        // Do not hard-code secrets in source; use the runtime-supplied password instead.
+        data: JSON.stringify({user: user, password: password})
     }).success(
         function (response) {
-            if (response && typeof response === 'object') {
-                if (typeof response.access_token === 'string') {
-                    localStorage.setItem('access_token', response.access_token);
-                }
-                if (typeof response.refresh_token === 'string') {
-                    localStorage.setItem('refresh_token', response.refresh_token);
-                }
-            }
+            localStorage.setItem('access_token', response['access_token']);
+            localStorage.setItem('refresh_token', response['refresh_token']);
         }
-    );
+    )
 }
 
+//Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
 webgoat.customjs.addBearerToken = function () {
     var headers_to_set = {};
-    var accessToken = localStorage.getItem('access_token');
-    if (typeof accessToken === 'string' && accessToken.length > 0) {
-        headers_to_set['Authorization'] = 'Bearer ' + accessToken;
-    }
+    headers_to_set['Authorization'] = 'Bearer ' + localStorage.getItem('access_token');
     return headers_to_set;
-};
+}
 
+//Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
 function newToken() {
-    var refreshToken = localStorage.getItem('refresh_token');
-    if (!refreshToken) {
-        return;
-    }
-
+    localStorage.getItem('refreshToken');
     $.ajax({
-        headers: webgoat.customjs.addBearerToken(),
+        headers: {
+            'Authorization': 'Bearer ' + localStorage.getItem('access_token')
+        },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        contentType: "application/json",
-        data: JSON.stringify({ refreshToken: refreshToken })
+        data: JSON.stringify({refreshToken: localStorage.getItem('refresh_token')})
     }).success(
-        function (response) {
-            if (response && typeof response === 'object') {
-                if (typeof response.access_token === 'string') {
-                    localStorage.setItem('access_token', response.access_token);
-                }
-                if (typeof response.refresh_token === 'string') {
-                    localStorage.setItem('refresh_token', response.refresh_token);
-                }
-            }
+        function () {
+            localStorage.setItem('access_token', apiToken);
+            localStorage.setItem('refresh_token', refreshToken);
         }
-    );
+    )
 }

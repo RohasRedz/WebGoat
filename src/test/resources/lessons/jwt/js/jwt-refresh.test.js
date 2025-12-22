@@ -1,110 +1,118 @@
-describe('jwt-refresh.js - delta tests for hard-coded password removal', () => {
-  let login;
+// src/test/resources/lessons/jwt/js/jwt-refresh.test.js
+// TODO: Adjust module loading (e.g., require/import) to match the real project bundler/test setup.
+
+describe('jwt-refresh.js delta tests (hard-coded password removal)', () => {
+  let originalAjax;
+  let originalWebgoat;
+  let originalWindow;
 
   beforeEach(() => {
-    // Simulate a minimal environment for the updated jwt-refresh.js logic
+    // Mock jQuery ajax
+    originalAjax = global.$ && global.$.ajax;
     global.$ = {
-      ajax: jest.fn(() => ({
+      ajax: jest.fn().mockReturnValue({
         success: function (cb) {
-          cb({ access_token: 'at', refresh_token: 'rt' });
+          // For these tests we don't need to execute the success callback
           return this;
-        }
-      }))
+        },
+      }),
     };
 
-    global.localStorage = (function () {
-      let store = {};
-      return {
-        getItem: (k) => store[k] || null,
-        setItem: (k, v) => {
-          store[k] = String(v);
-        },
-        clear: () => {
-          store = {};
-        }
-      };
-    })();
-
+    // Mock webgoat namespace used in the file
+    originalWebgoat = global.webgoat;
     global.webgoat = { customjs: {} };
 
-    // Inline the updated module code in a test-friendly way.
-    // NOTE: This replicates only the logic we need to assert the delta behavior.
-    // The hard-coded password string MUST NOT appear here; tests assert its absence.
-    // eslint-disable-next-line no-undef
-    const JWT_REFRESH_PASSWORD = null; // as in updated code
-
-    login = function (user) {
-      if (!JWT_REFRESH_PASSWORD) {
-        return;
-      }
-      $.ajax({
-        type: 'POST',
-        url: 'JWT/refresh/login',
-        contentType: 'application/json',
-        data: JSON.stringify({ user: user, password: JWT_REFRESH_PASSWORD })
-      }).success(function (response) {
-        localStorage.setItem('access_token', response.access_token);
-        localStorage.setItem('refresh_token', response.refresh_token);
-      });
-    };
+    // Preserve and mock window for WEBGOAT_JWT_PASSWORD access
+    originalWindow = global.window;
+    global.window = global.window || {};
   });
 
   afterEach(() => {
-    jest.resetAllMocks();
-    delete global.$;
-    delete global.localStorage;
-    delete global.webgoat;
+    if (originalAjax) {
+      global.$.ajax = originalAjax;
+    } else {
+      delete global.$;
+    }
+    global.webgoat = originalWebgoat;
+    global.window = originalWindow;
+    jest.resetModules();
   });
 
-  test('login should not issue AJAX request when JWT_REFRESH_PASSWORD is not configured', () => {
-    // Act
-    login('Jerry');
+  function loadModule() {
+    // Require the module under test; path may need to be adjusted in real project
+    require('../../../main/resources/lessons/jwt/js/jwt-refresh.js'); // TODO: adjust path according to test runner
+  }
 
-    // Assert: with JWT_REFRESH_PASSWORD === null, no AJAX call is made
-    expect($.ajax).not.toHaveBeenCalled();
-  });
+  test('login uses the provided password parameter in the AJAX payload', () => {
+    // Arrange
+    loadModule(); // defines global login function
 
-  test('login should send runtime-supplied password instead of hard-coded literal', () => {
-    // Arrange: re-create login with a non-null runtime password
-    jest.resetAllMocks();
-    global.$.ajax = jest.fn(() => ({
-      success: function (cb) {
-        cb({ access_token: 'at', refresh_token: 'rt' });
-        return this;
-      }
-    }));
-
-    const RUNTIME_PASSWORD = 'RuntimeSecurePassword!';
-
-    const loginWithRuntimePassword = function (user) {
-      const JWT_REFRESH_PASSWORD = RUNTIME_PASSWORD; // simulate secure runtime configuration
-      if (!JWT_REFRESH_PASSWORD) {
-        return;
-      }
-      $.ajax({
-        type: 'POST',
-        url: 'JWT/refresh/login',
-        contentType: 'application/json',
-        data: JSON.stringify({ user: user, password: JWT_REFRESH_PASSWORD })
-      }).success(function (response) {
-        localStorage.setItem('access_token', response.access_token);
-        localStorage.setItem('refresh_token', response.refresh_token);
-      });
-    };
+    const expectedUser = 'Alice';
+    const expectedPassword = 'runtime-secret';
 
     // Act
-    loginWithRuntimePassword('Jerry');
+    global.login(expectedUser, expectedPassword);
 
     // Assert
-    expect($.ajax).toHaveBeenCalledTimes(1);
-    const ajaxArg = $.ajax.mock.calls[0][0];
-    expect(ajaxArg.url).toBe('JWT/refresh/login');
+    expect(global.$.ajax).toHaveBeenCalledTimes(1);
+    const callArgs = global.$.ajax.mock.calls[0][0];
+    const payload = JSON.parse(callArgs.data);
 
-    const body = JSON.parse(ajaxArg.data);
-    expect(body.user).toBe('Jerry');
-    expect(body.password).toBe(RUNTIME_PASSWORD);
+    expect(callArgs.url).toBe('JWT/refresh/login');
+    expect(payload.user).toBe(expectedUser);
+    expect(payload.password).toBe(expectedPassword);
+  });
 
-    // Ensure that the previous hard-coded literal is not used
-    expect(body.password).not.toBe('bm5nhSkxCXZkKRy4');
+  test('document.ready uses window.WEBGOAT_JWT_PASSWORD when provided', () => {
+    // Arrange
+    global.window.WEBGOAT_JWT_PASSWORD = 'CONFIGURED_SECRET';
+
+    // Jest does not auto-fire document.ready for us; simulate by executing the module,
+    // which binds a jQuery ready callback that runs immediately in this simplified test.
+    // We simulate jQuery ready as (fn) => fn().
+    const readyMock = jest.fn((fn) => fn());
+    global.$.ready = readyMock;
+    global.$ = Object.assign(function () {}, global.$); // allow $(...).ready in module
+    global.$.fn = { ready: readyMock };
+
+    // Re-mock ajax to capture the call from ready/login
+    global.$.ajax = jest.fn().mockReturnValue({
+      success: function (cb) {
+        return this;
+      },
+    });
+
+    // Act
+    loadModule();
+
+    // Assert: ajax was called with password taken from window.WEBGOAT_JWT_PASSWORD
+    expect(global.$.ajax).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(global.$.ajax.mock.calls[0][0].data);
+    expect(payload.password).toBe('CONFIGURED_SECRET');
+  });
+
+  test('document.ready falls back to placeholder password when WEBGOAT_JWT_PASSWORD is missing', () => {
+    // Arrange
+    delete global.window.WEBGOAT_JWT_PASSWORD;
+
+    const readyMock = jest.fn((fn) => fn());
+    global.$.ready = readyMock;
+    global.$ = Object.assign(function () {}, global.$);
+    global.$.fn = { ready: readyMock };
+
+    global.$.ajax = jest.fn().mockReturnValue({
+      success: function (cb) {
+        return this;
+      },
+    });
+
+    // Act
+    loadModule();
+
+    // Assert: placeholder password should be used, not a real hard-coded secret
+    const payload = JSON.parse(global.$.ajax.mock.calls[0][0].data);
+    expect(payload.password).toBe('PLACEHOLDER_PASSWORD');
+    // Ensure the old hard-coded value is not present
+    expect(payload.password).not.toBe('bm5nhSkxCXZkKRy4');
   });
 });
