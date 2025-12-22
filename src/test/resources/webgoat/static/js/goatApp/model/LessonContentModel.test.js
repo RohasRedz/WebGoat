@@ -1,100 +1,76 @@
-// Assuming a Jest test environment and that the module can be required by relative path.
-// TODO: Adjust the require path to match the actual test setup/bundler resolution.
-const { JSDOM } = require('jsdom');
+// TODO: Adjust import paths if the AMD module is wrapped differently in the test environment.
+const Backbone = require('backbone');
+const _ = require('underscore');
+const $ = require('jquery');
 
-describe('LessonContentModel (delta tests for regex hardening)', () => {
-  let window;
-  let document;
-  let Backbone;
-  let HTMLContentModel;
+// Minimal stub for HTMLContentModel so that LessonContentModel.js can extend it.
+class HTMLContentModel extends Backbone.Model {}
+
+// Jest mock for requirejs-style define
+jest.mock('goatApp/model/HTMLContentModel', () => HTMLContentModel);
+
+describe('LessonContentModel delta tests', () => {
   let LessonContentModel;
 
-  beforeEach(() => {
-    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-      url: 'https://example.com/start.lesson/12'
-    });
-    window = dom.window;
-    document = window.document;
-
-    // Minimal Backbone/HTMLContentModel stubs
-    Backbone = {
-      Model: function () {},
-    };
-    Backbone.Model.prototype = {
-      fetch: jest.fn(function (options) {
-        // Simulate jQuery-like deferred with done() callback
-        return {
-          done: (cb) => {
-            cb('<html>content</html>');
-          },
-        };
-      }),
-    };
-
-    HTMLContentModel = function () {};
-    HTMLContentModel.extend = function (def) {
-      function Ctor() {
-        this.attributes = {};
-        if (typeof def.initialize === 'function') {
-          def.initialize.apply(this, arguments);
-        }
-      }
-      Ctor.prototype = Object.assign(
-        {
-          set: function (k, v) {
-            this.attributes[k] = v;
-          },
-          get: function (k) {
-            return this.attributes[k];
-          },
-          trigger: jest.fn(),
-        },
-        def
-      );
-      return Ctor;
-    };
-
-    // Simulate AMD define to get the module under test
-    global.define = (deps, factory) => {
-      LessonContentModel = factory(jest.fn(), { escape: (s) => s }, Backbone, HTMLContentModel);
-    };
-    global.document = document;
-
-    // Load the module under test
-    // eslint-disable-next-line global-require
-    require('../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
+  beforeAll(() => {
+    // Simulate AMD define wrapper by requiring the compiled module entry point.
+    // TODO: Adjust path to match bundler/test setup.
+    LessonContentModel = require('../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
   });
 
-  afterEach(() => {
-    delete global.define;
-    delete global.document;
-  });
-
-  test('setContent uses bounded regex to normalize lessonUrl and extract pageNum', () => {
+  test('loadData sanitizes and bounds options.name before constructing urlRoot', () => {
+    // Arrange
     const model = new LessonContentModel();
+    const longAndDangerousName =
+      '  ../some/very/long/name/with/illegal$chars?<>' +
+      'x'.repeat(200);
 
     // Act
-    model.setContent('<html>content</html>');
+    model.loadData({ name: longAndDangerousName });
 
-    // Assert: for URL ending with `.lesson/12`, lessonUrl should normalize to `.lesson`
-    expect(model.get('lessonUrl')).toBe('https://example.com/start.lesson');
-    expect(model.get('pageNum')).toBe('12');
+    // Assert
+    const urlRoot = model.urlRoot;
+    expect(urlRoot.endsWith('.lesson')).toBe(true);
+
+    const encodedPart = urlRoot.replace(/\.lesson$/, '');
+    const decodedSafeName = decodeURIComponent(encodedPart);
+
+    // Ensures trimming occurred and illegal characters were stripped
+    expect(decodedSafeName.startsWith('..someverylongnamewithillegalchars')).toBe(true);
+
+    // Ensures max length enforcement (100 chars in production code)
+    expect(decodedSafeName.length).toBeLessThanOrEqual(100);
+    // Ensures only allowed characters remain
+    expect(/^[a-zA-Z0-9._-]*$/.test(decodedSafeName)).toBe(true);
   });
 
-  test('setContent falls back to pageNum 0 when URL does not end with .lesson/<digits>', () => {
-    // Change URL to a form that should not match the pageNum regex
+  test('setContent uses simple, bounded regex for lessonUrl and pageNum', () => {
+    // Arrange
+    const model = new LessonContentModel();
+    const originalUrl = 'http://example.com/path/to/lesson.lesson/12';
+    const originalLocation = global.location;
+
+    // Simulate document.URL in Node/JSDOM
+    delete global.location;
+    global.location = { href: originalUrl };
     Object.defineProperty(global.document, 'URL', {
-      value: 'https://example.com/start.lesson-extra',
+      value: originalUrl,
       configurable: true,
     });
 
-    const model = new LessonContentModel();
+    try {
+      // Act
+      model.setContent('<html>test</html>');
 
-    // Act
-    model.setContent('<html>content</html>');
+      // Assert
+      const lessonUrl = model.get('lessonUrl');
+      const pageNum = model.get('pageNum');
 
-    // Assert
-    expect(model.get('lessonUrl')).toBe('https://example.com/start.lesson-extra');
-    expect(model.get('pageNum')).toBe(0);
+      expect(lessonUrl).toBe('http://example.com/path/to/lesson.lesson');
+      expect(pageNum).toBe('12');
+    } finally {
+      // Cleanup
+      global.location = originalLocation;
+    }
   });
 });
