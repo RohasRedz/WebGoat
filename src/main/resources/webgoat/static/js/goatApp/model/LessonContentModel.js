@@ -32,17 +32,19 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a precompiled, simple regex to avoid catastrophic backtracking
-            var pageNumPattern = /.*\.lesson\/(\d{1,4})$/;
-            var currentUrl = String(document.URL || '');
-
+            // Use a precompiled, anchored, and simple RegExp to avoid any risk of inefficient backtracking
+            var currentUrl = document.URL;
+            // Replace any suffix starting with ".lesson" with ".lesson" (normalized variant)
             this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
 
-            if (pageNumPattern.test(currentUrl)) {
-                this.set('pageNum', currentUrl.replace(pageNumPattern, '$1'));
+            // Efficient, anchored pattern to extract a 1-4 digit page number at the end of the URL
+            var pageNumMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageNumMatch) {
+                this.set('pageNum', pageNumMatch[1]);
             } else {
-                this.set('pageNum',0);
+                this.set('pageNum', 0);
             }
+
             this.trigger('content:loaded',this,loadHelps);
         },
 

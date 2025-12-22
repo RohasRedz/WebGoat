@@ -12,7 +12,6 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import lombok.extern.slf4j.Slf4j; // Added import
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -20,9 +19,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import lombok.extern.slf4j.Slf4j;
 
 @RestController
-@Slf4j // Added annotation
+@Slf4j
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -41,7 +41,7 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "dave";
+    String password = null; // Changed from "dave" to null to avoid hardcoded credential
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -54,11 +54,11 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception occurred while retrieving password: {}", sqle.getMessage()); // Replaced printStackTrace
+        log.error("Database error during password retrieval", sqle); // Replaced printStackTrace
         // do nothing
       }
     } catch (Exception e) {
-      log.error("General Exception occurred while retrieving password: {}", e.getMessage()); // Replaced printStackTrace
+      log.error("Unexpected error during password retrieval", e); // Replaced printStackTrace
       // do nothing
     }
     return (password);

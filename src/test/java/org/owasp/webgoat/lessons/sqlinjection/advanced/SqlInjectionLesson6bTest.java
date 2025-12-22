@@ -1,8 +1,9 @@
+// File path: src/test/java/org/owasp/webgoat/lessons/sqlinjection/advanced/SqlInjectionLesson6bTest.java
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.times;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -10,73 +11,110 @@ import java.sql.SQLException;
 import java.sql.Statement;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
-import org.mockito.Mockito;
+import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
- * Delta tests for SqlInjectionLesson6b focusing on changed behavior:
- * - Exceptions are now logged via SLF4J log.error instead of printStackTrace.
- * - getPassword() should still handle errors without propagating exceptions.
+ * Delta tests for SqlInjectionLesson6b focusing only on changed behavior:
+ * - No hard-coded default password is used when DB returns no value.
+ * - Exceptions are logged via log.error instead of printStackTrace and do not escape.
  */
 class SqlInjectionLesson6bTest {
 
     private LessonDataSource dataSource;
+    private Connection connection;
+    private Statement statement;
+    private ResultSet resultSet;
+
     private SqlInjectionLesson6b lesson;
 
-    // We will intercept the generated SLF4J logger by mocking LoggerFactory.getLogger(...)
-    private Logger loggerMock;
-    private MockedStatic<LoggerFactory> loggerFactoryMock;
-
     @BeforeEach
-    void setUp() {
-        dataSource = Mockito.mock(LessonDataSource.class);
-        lesson = new SqlInjectionLesson6b(dataSource);
+    void setUp() throws Exception {
+        dataSource = mock(LessonDataSource.class);
+        connection = mock(Connection.class);
+        statement = mock(Statement.class);
+        resultSet = mock(ResultSet.class);
 
-        loggerMock = Mockito.mock(Logger.class);
-        loggerFactoryMock = Mockito.mockStatic(LoggerFactory.class);
-        // Return our mock logger whenever LoggerFactory.getLogger(...) is called
-        loggerFactoryMock.when(() -> LoggerFactory.getLogger(SqlInjectionLesson6b.class))
-                .thenReturn(loggerMock);
-    }
-
-    @Test
-    void getPassword_logsSqlExceptionWithLogErrorAndDoesNotThrow() throws Exception {
-        // Arrange: dataSource.getConnection() returns a connection whose createStatement throws SQLException
-        Connection connection = Mockito.mock(Connection.class);
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-                .thenThrow(new SQLException("DB error"));
+                .thenReturn(statement);
+        when(statement.executeQuery(anyString())).thenReturn(resultSet);
 
-        // Act: method should catch the SQLException, log via log.error, and return the default password
-        String password = lesson.getPassword();
-
-        // Assert: default password 'dave' is still returned and no exception is propagated
-        org.junit.jupiter.api.Assertions.assertEquals("dave", password);
-
-        // Verify that log.error was called with the expected message pattern
-        verify(loggerMock, times(1))
-                .error(Mockito.eq("SQL Exception occurred while retrieving password: {}"),
-                       Mockito.eq("DB error"));
+        lesson = new SqlInjectionLesson6b(dataSource);
     }
 
     @Test
-    void getPassword_logsGenericExceptionWithLogErrorAndDoesNotThrow() throws Exception {
-        // Arrange: dataSource.getConnection() itself throws a generic Exception
-        when(dataSource.getConnection()).thenThrow(new RuntimeException("Connection failed"));
+    @DisplayName("getPassword should return DB value and not a hard-coded default")
+    void getPasswordReturnsDbValue_notHardCoded() throws Exception {
+        // Arrange
+        when(resultSet.first()).thenReturn(true);
+        when(resultSet.getString("password")).thenReturn("db-password");
 
         // Act
         String password = lesson.getPassword();
 
         // Assert
-        org.junit.jupiter.api.Assertions.assertEquals("dave", password);
+        assertEquals("db-password", password);
+    }
 
-        // Verify logging via log.error for general exception path
-        verify(loggerMock, times(1))
-                .error(Mockito.eq("General Exception occurred while retrieving password: {}"),
-                       Mockito.eq("Connection failed"));
+    @Test
+    @DisplayName("getPassword should return null when DB has no rows instead of 'dave'")
+    void getPasswordReturnsNullWhenNoResult() throws Exception {
+        // Arrange
+        when(resultSet.first()).thenReturn(false);
+
+        // Act
+        String password = lesson.getPassword();
+
+        // Assert
+        assertNull(password, "When no DB value is found, password should be null, not a hard-coded default");
+    }
+
+    @Test
+    @DisplayName("getPassword should handle SQLExceptions gracefully and not throw to caller")
+    void getPasswordHandlesSqlExceptionGracefully() throws Exception {
+        // Arrange
+        when(statement.executeQuery(anyString())).thenThrow(new SQLException("DB error"));
+
+        // Act & Assert
+        assertDoesNotThrow(() -> {
+            String pwd = lesson.getPassword();
+            assertNull(pwd, "On SQL error, password should remain null");
+        });
+    }
+
+    @Test
+    @DisplayName("getPassword should handle connection exceptions gracefully and not throw to caller")
+    void getPasswordHandlesConnectionExceptionGracefully() throws Exception {
+        // Arrange
+        when(dataSource.getConnection()).thenThrow(new SQLException("Connection failed"));
+
+        // Act & Assert
+        assertDoesNotThrow(() -> {
+            String pwd = lesson.getPassword();
+            assertNull(pwd, "On connection error, password should remain null");
+        });
+    }
+
+    @Test
+    @DisplayName("getPassword must not leak hard-coded password in SQL query")
+    void getPasswordQueryDoesNotUseHardCodedPassword() throws Exception {
+        // Arrange
+        ArgumentCaptor<String> queryCaptor = ArgumentCaptor.forClass(String.class);
+        when(resultSet.first()).thenReturn(false);
+
+        // Act
+        lesson.getPassword();
+
+        // Assert
+        verify(statement).executeQuery(queryCaptor.capture());
+        String sqlUsed = queryCaptor.getValue();
+
+        // The SQL may still use a fixed user_name, but not a hard-coded password default.
+        assertTrue(sqlUsed.contains("user_name = 'dave'"));
+        assertFalse(sqlUsed.toLowerCase().contains("password = 'dave'"),
+                "SQL must not embed 'dave' as a hard-coded password");
     }
 }

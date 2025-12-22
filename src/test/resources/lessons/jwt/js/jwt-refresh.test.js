@@ -1,104 +1,169 @@
-/**
- * Delta tests for jwt-refresh.js focusing on changed behavior:
- * - login() must abort when no password is configured via #jwt-login-config data attribute.
- * - login() must proceed (issue AJAX request) when the password is properly configured.
- */
+// File path: src/test/resources/lessons/jwt/js/jwt-refresh.test.js
+// Jest delta tests for jwt-refresh.js focusing on:
+// - login(user, password) using the provided password (no hard-coded value).
+// - DOM-based password retrieval in $(document).ready handler.
+// - Correct token storage based on mocked AJAX response.
 
-describe('jwt-refresh (delta tests)', () => {
-  let $ajaxMock;
-  let $;
+jest.mock('jquery', () => {
+  const successMock = jest.fn(function (cb) {
+    // Allow chaining: cb will be invoked by the calling test when appropriate
+    this._successCallback = cb;
+    return this;
+  });
 
+  const ajaxMock = jest.fn((options) => {
+    const wrapper = {
+      options,
+      success: successMock
+    };
+    return wrapper;
+  });
+
+  const readyMock = jest.fn((cb) => {
+    // Immediately invoke the ready callback to simulate DOM ready.
+    cb();
+  });
+
+  return {
+    ajax: ajaxMock,
+    fn: {},
+    ready: readyMock,
+    // For compatibility with "$(document).ready"
+    __esModule: true,
+    default: {
+      ajax: ajaxMock,
+      fn: {},
+      ready: readyMock
+    }
+  };
+});
+
+const $ = require('jquery');
+const ajaxMock = $.ajax;
+
+// Ensure webgoat.customjs exists for the script under test
+global.webgoat = { customjs: {} };
+
+// Mock localStorage
+const localStorageMock = (() => {
+  let store = {};
+  return {
+    getItem: jest.fn((key) => store[key]),
+    setItem: jest.fn((key, value) => {
+      store[key] = String(value);
+    }),
+    clear: jest.fn(() => {
+      store = {};
+    })
+  };
+})();
+
+Object.defineProperty(global, 'localStorage', {
+  value: localStorageMock,
+  configurable: true
+});
+
+// Provide a minimal document implementation with querySelector support
+let dataPasswordValue = null;
+global.document = {
+  querySelector: jest.fn((selector) => {
+    if (selector === '[data-jwt-password]' && dataPasswordValue !== null) {
+      return {
+        getAttribute: () => dataPasswordValue
+      };
+    }
+    return null;
+  }),
+  URL: 'http://localhost'
+};
+
+// Load the script under test after mocks are in place
+require('../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+
+describe('jwt-refresh.js (delta tests)', () => {
   beforeEach(() => {
-    jest.resetModules();
     jest.clearAllMocks();
-
-    // Mock jQuery with minimal features: ready, ajax, and a simple selector
-    $ajaxMock = jest.fn().mockReturnValue({ success: (cb) => cb({ access_token: 'AT', refresh_token: 'RT' }) });
-
-    $ = function (selector) {
-      if (selector === '#jwt-login-config') {
-        return {
-          data: (key) => {
-            if (key === 'jwtPassword') {
-              return $.mockPassword;
-            }
-            return undefined;
-          }
-        };
-      }
-      // document.ready handler
-      if (typeof selector === 'function') {
-        selector();
-      }
-      return {};
-    };
-    $.ajax = $ajaxMock;
-    $.mockPassword = undefined;
-
-    global.$ = $;
-    global.jQuery = $;
-
-    // Mock localStorage for tokens (focus is on behavior, not persistence)
-    global.localStorage = {
-      store: {},
-      setItem(key, value) {
-        this.store[key] = value;
-      },
-      getItem(key) {
-        return this.store[key];
-      }
-    };
-
-    // Mock console.error to assert secure failure behavior
-    jest.spyOn(console, 'error').mockImplementation(() => {});
+    localStorage.clear();
+    dataPasswordValue = null;
   });
 
-  afterEach(() => {
-    delete global.$;
-    delete global.jQuery;
-    delete global.localStorage;
-    jest.restoreAllMocks();
+  test('$(document).ready retrieves password from data attribute and passes it to login', () => {
+    // Arrange
+    dataPasswordValue = 'runtime-secret';
+
+    // Re-require to re-trigger ready handler with current dataPasswordValue
+    jest.isolateModules(() => {
+      require('../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+    });
+
+    // Assert
+    expect(ajaxMock).toHaveBeenCalledTimes(1);
+    const call = ajaxMock.mock.calls[0][0];
+
+    // Body should contain the password from the data attribute, not a hard-coded literal
+    const payload = JSON.parse(call.data);
+    expect(payload.user).toBe('Jerry');
+    expect(payload.password).toBe('runtime-secret');
   });
 
-  function loadModule() {
-    // Require the module after globals are set so it picks up our mocks
-    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
-  }
+  test('$(document).ready falls back to empty password when data attribute missing', () => {
+    // Arrange
+    dataPasswordValue = null; // no data-jwt-password element present
 
-  test('login aborts and does not call AJAX when password is not configured', () => {
-    // Arrange: no password configured
-    $.mockPassword = undefined;
+    jest.isolateModules(() => {
+      require('../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+    });
 
-    loadModule();
+    expect(ajaxMock).toHaveBeenCalledTimes(1);
+    const call = ajaxMock.mock.calls[0][0];
+    const payload = JSON.parse(call.data);
+    expect(payload.password).toBe('');
+  });
 
-    // The module calls login('Jerry') on document ready; with no password,
-    // it should log an error and not call $.ajax.
-    expect($ajaxMock).not.toHaveBeenCalled();
-    expect(console.error).toHaveBeenCalledWith(
-      'JWT login password is not configured. Aborting login call.'
+  test('login(user, password) uses provided password and stores tokens from success callback', () => {
+    // Arrange
+    const user = 'Jerry';
+    const password = 'provided-password';
+
+    // Find login in the loaded script. It should be defined in the global scope.
+    const login = global.login;
+    expect(typeof login).toBe('function');
+
+    // Act
+    login(user, password);
+
+    // Assert: password passed into AJAX call body
+    expect(ajaxMock).toHaveBeenCalledTimes(1);
+    const options = ajaxMock.mock.calls[0][0];
+    const payload = JSON.parse(options.data);
+    expect(payload.user).toBe(user);
+    expect(payload.password).toBe(password);
+
+    // Simulate server response via the stored success callback
+    const wrapper = ajaxMock.mock.results[0].value;
+    const successCallback = wrapper._successCallback;
+    const response = {
+      access_token: 'access123',
+      refresh_token: 'refresh456'
+    };
+    successCallback(response);
+
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      'access_token', 'access123'
+    );
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      'refresh_token', 'refresh456'
     );
   });
 
-  test('login proceeds and calls AJAX when password is configured', () => {
-    // Arrange: configure password via data attribute
-    $.mockPassword = 'configured-secret';
+  test('addBearerToken returns Authorization header with token from localStorage', () => {
+    // Arrange
+    localStorage.setItem('access_token', 'tokenXYZ');
 
-    loadModule();
+    // Act
+    const headers = webgoat.customjs.addBearerToken();
 
-    // The module should have called $.ajax with the password read from configuration
-    expect($ajaxMock).toHaveBeenCalledTimes(1);
-    const callArgs = $ajaxMock.mock.calls[0][0];
-
-    expect(callArgs.type).toBe('POST');
-    expect(callArgs.url).toBe('JWT/refresh/login');
-    expect(callArgs.contentType).toBe('application/json');
-
-    const payload = JSON.parse(callArgs.data);
-    expect(payload.user).toBe('Jerry');
-    expect(payload.password).toBe('configured-secret');
-
-    // Ensure tokens are still set as side effect of success callback
-    expect(global.localStorage.getItem('access_token')).toBe('AT');
-    expect(global.localStorage.getItem('refresh_token')).toBe('RT');
+    // Assert
+    expect(headers.Authorization).toBe('Bearer tokenXYZ');
   });
 });
