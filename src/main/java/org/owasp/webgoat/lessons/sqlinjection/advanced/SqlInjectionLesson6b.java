@@ -12,7 +12,6 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import lombok.extern.slf4j.Slf4j; // Added for logging
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -20,10 +19,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestController
-@Slf4j // Added for logging
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
+  private static final Logger log = LoggerFactory.getLogger(SqlInjectionLesson6b.class);
   private final LessonDataSource dataSource;
 
   public SqlInjectionLesson6b(LessonDataSource dataSource) {
@@ -41,26 +42,26 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = null; // Changed from "dave" to null to avoid hardcoded default exposure
+    String password = "dave";
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
-      try (
-          Statement statement =
-              connection.createStatement(
-                  ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-          ResultSet results = statement.executeQuery(query)) {
+      try {
+        Statement statement =
+            connection.createStatement(
+                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
+        ResultSet results = statement.executeQuery(query);
 
         if (results != null && results.first()) {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL error retrieving password for 'dave'", sqle); // Replaced printStackTrace with log.error
+        log.error("SQL Exception in getPassword method", sqle);
         // do nothing
       }
     } catch (Exception e) {
-      log.error("Error retrieving password for 'dave'", e); // Replaced printStackTrace with log.error
+      log.error("General Exception in getPassword method", e);
       // do nothing
     }
-    return password;
+    return (password);
   }
 }

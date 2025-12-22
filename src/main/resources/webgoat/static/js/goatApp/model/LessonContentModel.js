@@ -7,11 +7,6 @@ define(['jquery',
         Backbone,
         HTMLContentModel){
 
-    // Precompile safe, bounded regular expressions to avoid repeated creation
-    // and ensure they do not allow catastrophic backtracking.
-    var LESSON_URL_REPLACE_REGEX = /\.lesson.*/;
-    var LESSON_PAGE_NUM_REGEX = /\.lesson\/(\d{1,4})$/;
-
     return HTMLContentModel.extend({
         urlRoot:null,
         defaults: {
@@ -24,7 +19,12 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
+            // Ensure only expected lesson names are accepted and avoid creating ambiguous encoded patterns
+            var rawName = typeof options.name === 'string' ? options.name : '';
+            // Basic allowlist: only letters, numbers, underscore, dash and dot
+            var safeName = rawName.replace(/[^A-Za-z0-9._-]/g, '');
+            this.urlRoot = encodeURIComponent(safeName) + '.lesson';
+
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -37,15 +37,20 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use precompiled, simple regex without nested quantifiers to avoid ReDoS.
-            var currentUrl = String(document.URL || '');
-            this.set('lessonUrl', currentUrl.replace(LESSON_URL_REPLACE_REGEX, '.lesson'));
+            // Ensure we do not introduce unnecessary backtracking in regexes
+            var currentUrl = String(document.URL);
 
-            if (LESSON_PAGE_NUM_REGEX.test(currentUrl)) {
-                this.set('pageNum', currentUrl.replace(LESSON_PAGE_NUM_REGEX, '$1'));
+            // Use an anchored, simple pattern to extract the base lesson URL
+            this.set('lessonUrl', currentUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson'));
+
+            // Use a bounded, non-backtracking-friendly pattern for page numbers
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
             } else {
-                this.set('pageNum',0);
+                this.set('pageNum', 0);
             }
+
             this.trigger('content:loaded',this,loadHelps);
         },
 

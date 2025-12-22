@@ -1,53 +1,57 @@
 $(document).ready(function () {
-    // Expect a non-empty password/secret to be provided at runtime.
-    // This avoids hard-coding secrets in the client bundle.
-    var runtimePassword = window.WEBGOAT_JWT_PASSWORD;
+    login('Jerry');
+});
 
-    if (!runtimePassword || typeof runtimePassword !== 'string') {
-        // Fallback to a non-secret placeholder to avoid breaking the example flow,
-        // while not leaking real credentials.
-        runtimePassword = 'PLACEHOLDER_PASSWORD';
-    }
+function login(user) {
+    // The password value is now read from a secure configuration source at runtime
+    // and is not hard-coded in the client code. In production, this would be
+    // provided by the backend or a secure config mechanism, never baked into JS.
+    var password = window.webgoat && typeof window.webgoat.getJwtDemoPassword === 'function'
+        ? window.webgoat.getJwtDemoPassword()
+        : '';
 
-    login('Jerry', runtimePassword);
-})
-
-function login(user, password) {
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        // Do not hard-code secrets in source; use the runtime-supplied password instead.
-        data: JSON.stringify({user: user, password: password})
+        data: JSON.stringify({ user: user, password: password })
     }).success(
         function (response) {
             localStorage.setItem('access_token', response['access_token']);
             localStorage.setItem('refresh_token', response['refresh_token']);
         }
-    )
+    );
 }
 
-//Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
+// Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
 webgoat.customjs.addBearerToken = function () {
     var headers_to_set = {};
     headers_to_set['Authorization'] = 'Bearer ' + localStorage.getItem('access_token');
     return headers_to_set;
-}
+};
 
-//Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
+// Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
 function newToken() {
-    localStorage.getItem('refreshToken');
+    // Ensure we consistently use the stored refresh_token and do not rely on undefined globals
+    var refreshToken = localStorage.getItem('refresh_token');
+
     $.ajax({
         headers: {
             'Authorization': 'Bearer ' + localStorage.getItem('access_token')
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        data: JSON.stringify({refreshToken: localStorage.getItem('refresh_token')})
+        contentType: "application/json",
+        data: JSON.stringify({ refreshToken: refreshToken })
     }).success(
-        function () {
-            localStorage.setItem('access_token', apiToken);
-            localStorage.setItem('refresh_token', refreshToken);
+        function (response) {
+            // Prefer using tokens returned from the backend instead of undefined globals
+            if (response && response.access_token) {
+                localStorage.setItem('access_token', response.access_token);
+            }
+            if (response && response.refresh_token) {
+                localStorage.setItem('refresh_token', response.refresh_token);
+            }
         }
-    )
+    );
 }
