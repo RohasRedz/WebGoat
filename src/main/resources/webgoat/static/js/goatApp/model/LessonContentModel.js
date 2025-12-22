@@ -19,7 +19,11 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            this.urlRoot = encodeURIComponent(options.name) + '.lesson'
+            // Ensure name is treated as a safe, bounded string before use
+            var name = typeof options.name === 'string' ? options.name : '';
+            name = name.substring(0, 255); // enforce a sane maximum length
+
+            this.urlRoot = _.escape(encodeURIComponent(name)) + '.lesson';
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -31,11 +35,25 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-            this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
-            if (/.*\.lesson\/(\d{1,4})$/.test(document.URL)) {
-                this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
+
+            var currentUrl = document.URL;
+
+            // Use a safer and simpler pattern with explicit anchors and no nested quantifiers
+            var lessonUrlMatch = currentUrl.match(/\.lesson(\/\d{1,4})?$/);
+            if (lessonUrlMatch) {
+                // Replace only the ending ".lesson" (optionally followed by /<page>) with ".lesson"
+                this.set('lessonUrl', currentUrl.replace(/\.lesson(\/\d{1,4})?$/, '.lesson'));
             } else {
-                this.set('pageNum',0);
+                // Fallback: basic normalization without complex regex
+                this.set('lessonUrl', currentUrl.split('?')[0]);
+            }
+
+            // Extract page number with a bounded, non-backtracking-heavy regex
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
+            } else {
+                this.set('pageNum', 0);
             }
             this.trigger('content:loaded',this,loadHelps);
         },
