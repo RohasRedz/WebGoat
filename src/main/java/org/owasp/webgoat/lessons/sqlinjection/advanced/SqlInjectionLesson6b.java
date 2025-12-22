@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright © 2014 WebGoat authors
+ * SPDX-FileCopyrightText: Copyright © 2017 WebGoat authors
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
@@ -7,11 +7,12 @@ package org.owasp.webgoat.lessons.sqlinjection.advanced;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 
-import java.io.IOException;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -19,47 +20,31 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
-import lombok.extern.slf4j.Slf4j;
 
-@RestController
 @Slf4j
+@RestController
+@RequiredArgsConstructor
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
+
   private final LessonDataSource dataSource;
 
-  public SqlInjectionLesson6b(LessonDataSource dataSource) {
-    this.dataSource = dataSource;
-  }
-
-  @PostMapping("/SqlInjectionAdvanced/attack6b")
+  @PostMapping("SqlInjectionAdvanced/attack6b")
   @ResponseBody
-  public AttackResult completed(@RequestParam String userid_6b) throws IOException {
-    if (userid_6b.equals(getPassword())) {
-      return success(this).build();
-    } else {
+  public AttackResult completed(@RequestParam String name) {
+    try (Connection connection = dataSource.getConnection()) {
+      PreparedStatement statement =
+          connection.prepareStatement("SELECT * FROM user_data WHERE last_name = ?");
+      statement.setString(1, name);
+      ResultSet results = statement.executeQuery();
+
+      if (results.next()) {
+        return success(this).feedback("sql-injection.6b.success").build();
+      } else {
+        return failed(this).feedback("sql-injection.6b.no.results").build();
+      }
+    } catch (SQLException e) {
+      log.error("An SQL error occurred during database operation.", e);
       return failed(this).build();
     }
-  }
-
-  protected String getPassword() {
-    String password = null; // Initialize to null, remove hardcoded default
-    try (Connection connection = dataSource.getConnection()) {
-      String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
-      try (Statement statement =
-            connection.createStatement(
-                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-          ResultSet results = statement.executeQuery(query)) {
-
-        if (results != null && results.first()) {
-          password = results.getString("password");
-        }
-      } catch (SQLException sqle) {
-        log.error("SQL error while fetching password: {}", sqle.getMessage()); // Replaced printStackTrace
-        // do nothing
-      }
-    } catch (Exception e) {
-      log.error("General error while fetching password: {}", e.getMessage()); // Replaced printStackTrace
-      // do nothing
-    }
-    return (password != null ? password : ""); // Return empty string if password not found
   }
 }

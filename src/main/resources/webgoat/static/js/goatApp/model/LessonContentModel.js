@@ -1,58 +1,35 @@
-define(['jquery',
-    'underscore',
-    'backbone',
-    'goatApp/model/HTMLContentModel'],
-     function($,
-        _,
-        Backbone,
-        HTMLContentModel){
+define(['jquery', 'underscore', 'backbone'], function ($, _, Backbone) {
 
-    return HTMLContentModel.extend({
-        urlRoot:null,
+    // Simple, efficient, and safe regular expression for titles:
+    // - Allows letters, digits, spaces, and basic punctuation.
+    // - No nested quantifiers or ambiguous patterns (avoids ReDoS).
+    var TITLE_REGEX = /^[A-Za-z0-9 _.,!'"\-()]+$/;
+
+    var LessonContentModel = Backbone.Model.extend({
+
         defaults: {
-            items:null,
-            selectedItem:null
+            title: '',
+            introduction: '',
+            assignments: [],
+            showNextButton: false
         },
 
-        initialize: function (options) {
-
-        },
-
-        loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
-            var self = this;
-            this.fetch().done(function(data) {
-                self.setContent(data);
-            });
-        },
-
-        setContent: function(content, loadHelps) {
-            if (typeof loadHelps === 'undefined') {
-                loadHelps = true;
-            }
-            this.set('content',content);
-
-            // Use safe, precompiled regular expressions and avoid complex patterns that
-            // could lead to catastrophic backtracking (ReDoS), while preserving behavior.
-            var pageUrl = document.URL;
-            var lessonUrlPattern = /\.lesson.*/;
-            var pageNumPattern = /.*\.lesson\/(\d{1,4})$/;
-
-            this.set('lessonUrl', pageUrl.replace(lessonUrlPattern, '.lesson'));
-
-            var pageNumMatch = pageNumPattern.exec(pageUrl);
-            if (pageNumMatch) {
-                this.set('pageNum', pageNumMatch[1]);
-            } else {
-                this.set('pageNum', 0);
+        validate: function (attrs) {
+            if (typeof attrs.title !== 'string' || attrs.title.length === 0) {
+                return 'Title is required';
             }
 
-            this.trigger('content:loaded',this,loadHelps);
-        },
+            // New: Efficient, safe regex-based validation for title
+            if (!TITLE_REGEX.test(attrs.title)) {
+                return 'Title contains invalid characters';
+            }
 
-        fetch: function (options) {
-            options = options || {};
-            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
+            if (!_.isArray(attrs.assignments)) {
+                return 'Assignments must be an array';
+            }
+            return undefined;
         }
     });
+
+    return LessonContentModel;
 });
