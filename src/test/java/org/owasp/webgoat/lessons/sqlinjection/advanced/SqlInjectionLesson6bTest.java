@@ -1,93 +1,97 @@
-// Assuming the same package as the class under test; adjust if the actual package differs.
+// Assuming standard package based on resolved_file_path from the workflow.
+// If actual package differs, adjust accordingly.
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-
-import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.owasp.webgoat.container.LessonDataSource;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
- * Delta tests focusing on the logging change in SqlInjectionLesson6b.getPassword.
- *
- * The vulnerability fix replaced printStackTrace() calls with structured logging
- * via an SLF4J Logger to avoid direct stack trace exposure.
- *
- * These tests verify that:
- *  - printStackTrace() is no longer used when SQL or general exceptions occur.
- *  - SLF4J logger's error method is invoked instead.
+ * Delta tests for SqlInjectionLesson6b focusing only on the changed behavior:
+ * - stack traces must no longer be printed to logs via printStackTrace().
  */
 public class SqlInjectionLesson6bTest {
 
-    @Test
-    @DisplayName("getPassword logs SQL exceptions via SLF4J logger instead of using printStackTrace")
-    void getPassword_logsSqlExceptionWithLogger() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Connection connection = mock(Connection.class);
-        Statement statement = mock(Statement.class);
+  private LessonDataSource lessonDataSource;
+  private SqlInjectionLesson6b lesson6b;
 
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-                .thenReturn(statement);
+  private Connection connection;
+  private Statement statement;
+  private ResultSet resultSet;
 
-        SQLException sqlException = new SQLException("Simulated SQL error");
-        when(statement.executeQuery(anyString())).thenThrow(sqlException);
+  @BeforeEach
+  void setUp() throws Exception {
+    lessonDataSource = mock(LessonDataSource.class);
+    connection = mock(Connection.class);
+    statement = mock(Statement.class);
+    resultSet = mock(ResultSet.class);
 
-        // Spy the class to intercept logger usage indirectly if needed
-        SqlInjectionLesson6b endpoint = new SqlInjectionLesson6b(dataSource);
+    org.mockito.Mockito.when(lessonDataSource.getConnection()).thenReturn(connection);
+    org.mockito.Mockito.when(
+            connection.createStatement(
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt()))
+        .thenReturn(statement);
+    org.mockito.Mockito.when(statement.executeQuery(org.mockito.ArgumentMatchers.anyString()))
+        .thenReturn(resultSet);
 
-        // Create a spy logger to ensure error() is called.
-        Logger spyLogger = spy(LoggerFactory.getLogger(SqlInjectionLesson6b.class));
+    lesson6b = new SqlInjectionLesson6b(lessonDataSource);
+  }
 
-        // Use reflection to inject the spy logger into the static final field.
-        // This is purely for delta testing the logging behavior.
-        java.lang.reflect.Field logField = SqlInjectionLesson6b.class.getDeclaredField("log");
-        logField.setAccessible(true);
-        logField.set(null, spyLogger);
+  @Test
+  void getPassword_doesNotPrintStackTraceOnSqlException() throws Exception {
+    // Arrange: make createStatement throw SQLException
+    SQLException sqlException = new SQLException("DB error");
+    org.mockito.Mockito.when(
+            connection.createStatement(
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt()))
+        .thenThrow(sqlException);
 
-        // Act
-        String password = endpoint.getPassword();
+    // Spy on the exception object to ensure printStackTrace is never invoked.
+    SQLException spyException = org.mockito.Mockito.spy(sqlException);
 
-        // Assert
-        // Even on failure, method should return a non-null string (default "dave")
-        org.junit.jupiter.api.Assertions.assertNotNull(password);
+    // We need connection to throw our spy instead of the original.
+    org.mockito.Mockito.when(
+            connection.createStatement(
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt()))
+        .thenThrow(spyException);
 
-        // Verify that logger.error(...) is invoked with the SQL exception
-        verify(spyLogger, atLeastOnce()).error(eq("SQL Exception in getPassword method"), eq(sqlException));
-    }
+    // Act
+    String password = lesson6b.getPassword();
 
-    @Test
-    @DisplayName("getPassword logs general exceptions via SLF4J logger instead of using printStackTrace")
-    void getPassword_logsGeneralExceptionWithLogger() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
+    // Assert: default password is still returned, but no stack trace printing occurs
+    assertEquals("dave", password, "Default password should be returned on error");
 
-        // Simulate a general exception thrown when obtaining a connection
-        RuntimeException generalException = new RuntimeException("Connection failure");
-        when(dataSource.getConnection()).thenThrow(generalException);
+    // Ensure printStackTrace was never called on the thrown SQLException
+    verify(spyException, never()).printStackTrace();
+  }
 
-        SqlInjectionLesson6b endpoint = new SqlInjectionLesson6b(dataSource);
+  @Test
+  void getPassword_doesNotPrintStackTraceOnGenericException() throws Exception {
+    // Arrange: make getConnection throw a generic Exception
+    Exception generic = new Exception("generic");
+    Exception spyGeneric = org.mockito.Mockito.spy(generic);
+    org.mockito.Mockito.when(lessonDataSource.getConnection()).thenThrow(spyGeneric);
 
-        Logger spyLogger = spy(LoggerFactory.getLogger(SqlInjectionLesson6b.class));
+    // Act
+    String password = lesson6b.getPassword();
 
-        java.lang.reflect.Field logField = SqlInjectionLesson6b.class.getDeclaredField("log");
-        logField.setAccessible(true);
-        logField.set(null, spyLogger);
+    // Assert: default password is still returned, but no stack trace printing occurs
+    assertEquals("dave", password, "Default password should be returned on generic error");
 
-        // Act
-        String password = endpoint.getPassword();
-
-        // Assert
-        org.junit.jupiter.api.Assertions.assertNotNull(password);
-
-        verify(spyLogger, atLeastOnce()).error(eq("General Exception in getPassword method"), eq(generalException));
-    }
+    // Ensure printStackTrace was never called on the thrown Exception
+    verify(spyGeneric, never()).printStackTrace();
+  }
 }
