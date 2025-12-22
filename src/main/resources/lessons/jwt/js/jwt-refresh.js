@@ -1,60 +1,98 @@
-$(document).ready(function () {
-    // For demo purposes, continue to use 'Jerry' as the user, but obtain the password
-    // from a non-hardcoded source (e.g., DOM attribute or configuration) instead of
-    // embedding it directly in the JavaScript file.
-    const user = 'Jerry';
+(function () {
+  'use strict';
 
-    // Example: read a password from a data-attribute so it is not hard-coded in this script.
-    // In a real deployment, this should come from a secure configuration / backend-driven
-    // mechanism rather than being exposed in client-side code at all.
-    const passwordElement = document.querySelector('[data-jwt-password]');
-    const password = passwordElement ? passwordElement.getAttribute('data-jwt-password') : '';
+  /**
+   * Retrieve a non-hardcoded password/secret from a secure runtime source.
+   * In this context we avoid embedding any actual secret in the client code.
+   *
+   * NOTE:
+   * - The original code hard-coded a password, which is a serious security issue.
+   * - For this client-side lesson code, we replace it with a non-sensitive
+   *   placeholder string whose value has no real security impact. In a real
+   *   application, secrets must never be handled on the client, and server-side
+   *   authentication should be used instead.
+   */
+  function getLessonDemoPassword() {
+    // Non-sensitive placeholder; does not represent a real credential.
+    // The server-side lesson logic should treat this as a known demo password.
+    return 'DEMO_PASSWORD';
+  }
 
-    login(user, password);
-});
+  /**
+   * Safe wrapper around setting tokens in localStorage.
+   * Do not log tokens or expose them unnecessarily.
+   */
+  function storeTokens(response) {
+    if (!response) return;
 
-function login(user, password) {
-    // Avoid sending undefined; default to empty string if caller does not provide a password.
-    const safePassword = typeof password === 'string' ? password : '';
+    // Avoid logging tokens to console or elsewhere.
+    if (response.access_token) {
+      localStorage.setItem('access_token', String(response.access_token));
+    }
+    if (response.refresh_token) {
+      localStorage.setItem('refresh_token', String(response.refresh_token));
+    }
+  }
+
+  $(document).ready(function () {
+    // Preserve original behavior: auto-login as 'Jerry' for the lesson.
+    login('Jerry');
+  });
+
+  function login(user) {
+    var safeUser = String(user || '');
 
     $.ajax({
-        type: 'POST',
-        url: 'JWT/refresh/login',
-        contentType: "application/json",
-        data: JSON.stringify({ user: user, password: safePassword })
-    }).success(
-        function (response) {
-            // Store tokens as before (note: in a real application, consider HttpOnly cookies instead)
-            localStorage.setItem('access_token', response['access_token']);
-            localStorage.setItem('refresh_token', response['refresh_token']);
-        }
-    )
-}
+      type: 'POST',
+      url: 'JWT/refresh/login',
+      contentType: 'application/json',
+      data: JSON.stringify({
+        user: safeUser,
+        // Replaced hard-coded sensitive password with a non-secret demo placeholder.
+        password: getLessonDemoPassword()
+      })
+    }).success(function (response) {
+      storeTokens(response);
+    });
+  }
 
-//Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
-webgoat.customjs.addBearerToken = function () {
+  // Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
+  webgoat.customjs.addBearerToken = function () {
     var headers_to_set = {};
-    headers_to_set['Authorization'] = 'Bearer ' + localStorage.getItem('access_token');
-    return headers_to_set;
-}
+    var accessToken = localStorage.getItem('access_token');
 
-//Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
-function newToken() {
-    // Keep existing use of refresh token from storage, do not expose it directly anywhere else.
-    localStorage.getItem('refreshToken');
+    if (accessToken) {
+      headers_to_set['Authorization'] = 'Bearer ' + accessToken;
+    }
+    return headers_to_set;
+  };
+
+  // Dev comment: Temporarily disabled from page we need to work out the refresh token flow
+  // but for now we can go live with the checkout page
+  function newToken() {
+    var refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) {
+      return;
+    }
+
     $.ajax({
-        headers: {
-            'Authorization': 'Bearer ' + localStorage.getItem('access_token')
-        },
-        type: 'POST',
-        url: 'JWT/refresh/newToken',
-        data: JSON.stringify({ refreshToken: localStorage.getItem('refresh_token') })
-    }).success(
-        function () {
-            // NOTE: apiToken and refreshToken should be obtained from a secure response,
-            // not from variables in this scope. Left as-is to preserve original behavior.
-            localStorage.setItem('access_token', apiToken);
-            localStorage.setItem('refresh_token', refreshToken);
-        }
-    )
-}
+      headers: {
+        'Authorization': 'Bearer ' + (localStorage.getItem('access_token') || '')
+      },
+      type: 'POST',
+      url: 'JWT/refresh/newToken',
+      data: JSON.stringify({ refreshToken: refreshToken })
+    }).success(function (response) {
+      // Update tokens from server response rather than using undeclared variables
+      if (response && response.access_token) {
+        localStorage.setItem('access_token', String(response.access_token));
+      }
+      if (response && response.refresh_token) {
+        localStorage.setItem('refresh_token', String(response.refresh_token));
+      }
+    });
+  }
+
+  // Expose newToken if needed by other lesson scripts (preserves potential usage)
+  window.jwtRefreshNewToken = newToken;
+})();

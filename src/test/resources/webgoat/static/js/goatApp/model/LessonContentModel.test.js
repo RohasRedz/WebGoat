@@ -1,96 +1,76 @@
-// File path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
-// NOTE: This test assumes a Jest environment with JSDOM and that the AMD module can be required
-// via a relative path. Adjust the import mechanism as appropriate for your project setup.
+// TODO: Adjust the module path if the actual AMD loader resolution differs from this assumption.
+define([
+  'jquery',
+  'underscore',
+  'backbone',
+  'goatApp/model/HTMLContentModel',
+  // We load the model under test as an AMD module.
+  'goatApp/model/LessonContentModel'
+], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
+  'use strict';
 
-const LessonContentModelFactory = require('../../../../../webgoat/static/js/goatApp/model/LessonContentModel.js');
+  /**
+   * Delta tests for LessonContentModel focusing ONLY on the changed URL/regex behavior
+   * that fixed the "Inefficient Regular Expression Complexity" vulnerability.
+   *
+   * The fix:
+   *  - Replaced greedy regexes on document.URL with anchored, constrained patterns.
+   *  - Introduced getSafeDocumentUrl() and safer setContent() logic.
+   *
+   * These tests assert:
+   *  - lessonUrl is derived correctly from window.location.href using the new regex.
+   *  - pageNum is parsed correctly from URLs that match the `.lesson/<digits>` pattern.
+   *  - pageNum defaults to 0 when the pattern does not match.
+   */
 
-describe('LessonContentModel (delta tests for regex and URL handling)', () => {
-  let LessonContentModel;
-  let model;
+  describe('LessonContentModel (delta tests for regex and URL handling)', function () {
+    let originalLocation;
 
-  beforeAll(() => {
-    // The AMD define in the source returns the extended model when invoked;
-    // here we obtain the model constructor from the factory-style module export.
-    // If your bundler exports differently, adapt this accordingly.
-    LessonContentModel = LessonContentModelFactory;
-  });
-
-  beforeEach(() => {
-    model = new LessonContentModel();
-    // Stub Backbone.Model.prototype.fetch to avoid real network calls while still
-    // allowing setContent behavior to be tested in isolation.
-    jest.spyOn(LessonContentModel.prototype, 'fetch').mockImplementation(function (options) {
-      const dfd = {
-        done: (cb) => {
-          cb('<html></html>');
-          return dfd;
-        }
-      };
-      return dfd;
-    });
-  });
-
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  test('setContent normalizes lessonUrl and extracts pageNum from URL with page number', () => {
-    // Arrange
-    const originalUrl =
-      'http://localhost/WebGoat/lesson/SQLInjection.lesson/12';
-    Object.defineProperty(window, 'document', {
-      value: { URL: originalUrl },
-      configurable: true
+    beforeAll(function () {
+      originalLocation = window.location;
+      // Jest-like approach for jsdom; ensure we have a configurable location.
+      delete window.location;
+      window.location = { href: 'http://example.com' };
     });
 
-    // Act
-    model.setContent('<html></html>');
-
-    // Assert
-    expect(model.get('lessonUrl')).toBe(
-      'http://localhost/WebGoat/lesson/SQLInjection.lesson'
-    );
-    expect(model.get('pageNum')).toBe('12');
-  });
-
-  test('setContent sets pageNum to 0 when URL has no page number suffix', () => {
-    // Arrange
-    const originalUrl =
-      'http://localhost/WebGoat/lesson/SQLInjection.lesson';
-    Object.defineProperty(window, 'document', {
-      value: { URL: originalUrl },
-      configurable: true
+    afterAll(function () {
+      window.location = originalLocation;
     });
 
-    // Act
-    model.setContent('<html></html>');
+    function createModel() {
+      // Instantiate the Backbone model under test
+      return new LessonContentModel();
+    }
 
-    // Assert
-    expect(model.get('lessonUrl')).toBe(
-      'http://localhost/WebGoat/lesson/SQLInjection.lesson'
-    );
-    expect(model.get('pageNum')).toBe(0);
-  });
+    it('should derive lessonUrl by replacing .lesson suffix using safe anchored regex', function () {
+      const model = createModel();
+      window.location.href = 'https://test.local/lesson/intro.lesson/extra/path';
 
-  test('setContent emits content:loaded event after parsing URL', () => {
-    // Arrange
-    const originalUrl =
-      'http://localhost/WebGoat/lesson/SQLInjection.lesson/3';
-    Object.defineProperty(window, 'document', {
-      value: { URL: originalUrl },
-      configurable: true
+      model.setContent('<html>dummy</html>');
+
+      const lessonUrl = model.get('lessonUrl');
+      // The new logic uses /\\.lesson(?:\\/.*)?$/ to produce a clean .lesson URL.
+      expect(lessonUrl).toBe('https://test.local/lesson/intro.lesson');
     });
 
-    const listener = jest.fn();
-    model.on('content:loaded', listener);
+    it('should set pageNum from URLs ending with .lesson/<1-4 digits>', function () {
+      const model = createModel();
+      window.location.href = 'https://test.local/lesson/intro.lesson/123';
 
-    // Act
-    model.setContent('<html></html>', true);
+      model.setContent('<html>dummy</html>');
 
-    // Assert
-    expect(listener).toHaveBeenCalledTimes(1);
-    const [selfArg, loadHelpsArg] = listener.mock.calls[0];
-    expect(selfArg).toBe(model);
-    expect(loadHelpsArg).toBe(true);
+      const pageNum = model.get('pageNum');
+      expect(pageNum).toBe(123);
+    });
+
+    it('should default pageNum to 0 when URL does not match .lesson/<digits> pattern', function () {
+      const model = createModel();
+      window.location.href = 'https://test.local/lesson/intro.lesson';
+
+      model.setContent('<html>dummy</html>');
+
+      const pageNum = model.get('pageNum');
+      expect(pageNum).toBe(0);
+    });
   });
 });
