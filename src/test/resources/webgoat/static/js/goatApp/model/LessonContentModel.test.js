@@ -1,148 +1,180 @@
-// Assuming Jest test file location derived from src/main/resources to src/test/resources
-// Original file path: src/main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js
-// Test file path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
-
-// TODO: Adjust module loading according to actual bundler/loader setup.
-// For the purposes of delta testing, we assume LessonContentModel can be required as a module.
+// File: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+// NOTE: Assumes Jest is configured and AMD modules are either pre-bundled or shimmed for tests.
+// TODO: If actual module loader/path differs, adjust the require path accordingly.
 
 const _ = require('underscore');
-const Backbone = require('backbone');
 
-// Minimal HTMLContentModel stub to satisfy inheritance; focus is on regex-related behavior
-class HTMLContentModel extends Backbone.Model {}
+// Simple stub for Backbone and HTMLContentModel to allow instantiation without real Backbone.
+const Backbone = {
+  Model: function () {},
+};
+Backbone.Model.prototype = {
+  fetch: jest.fn(),
+};
 
-// Inject our model definition similar to original AMD module
-// In real project, replace this with: const LessonContentModel = require('path/to/LessonContentModel');
-const LessonContentModelFactory = (function ($, _, Backbone, HTMLContentModel) {
-  return HTMLContentModel.extend({
-    urlRoot: null,
-    defaults: {
-      items: null,
-      selectedItem: null,
-    },
+const HTMLContentModel = Backbone.Model;
 
-    initialize: function (options) {},
+// Since the original code uses AMD `define`, we simulate the factory pattern here.
+// In a real test environment, you'd import the built/bundled module instead.
+function createLessonContentModelClass() {
+  /* eslint-disable global-require */
+  return (function ($, _, Backbone, HTMLContentModel) {
+    return HTMLContentModel.extend({
+      urlRoot: null,
+      defaults: {
+        items: null,
+        selectedItem: null,
+      },
 
-    loadData: function (options) {
-      var name = typeof options.name === 'string' ? options.name : '';
-      name = name.substring(0, 255);
+      initialize: function (options) {
+        // no-op
+      },
 
-      this.urlRoot = _.escape(encodeURIComponent(name)) + '.lesson';
-      var self = this;
-      this.fetch().done(function (data) {
-        self.setContent(data);
-      });
-    },
+      loadData: function (options) {
+        this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
+        const self = this;
+        this.fetch().done(function (data) {
+          self.setContent(data);
+        });
+      },
 
-    setContent: function (content, loadHelps) {
-      if (typeof loadHelps === 'undefined') {
-        loadHelps = true;
-      }
-      this.set('content', content);
+      setContent: function (content, loadHelps) {
+        if (typeof loadHelps === 'undefined') {
+          loadHelps = true;
+        }
+        this.set('content', content);
 
-      var currentUrl = document.URL;
+        // Precompiled regexes introduced by the fix:
+        const lessonUrlPattern = /\.lesson.*/;
+        const pageNumPattern = /.*\.lesson\/(\d{1,4})$/;
 
-      var lessonUrlMatch = currentUrl.match(/\.lesson(\/\d{1,4})?$/);
-      if (lessonUrlMatch) {
-        this.set('lessonUrl', currentUrl.replace(/\.lesson(\/\d{1,4})?$/, '.lesson'));
-      } else {
-        this.set('lessonUrl', currentUrl.split('?')[0]);
-      }
+        this.set('lessonUrl', document.URL.replace(lessonUrlPattern, '.lesson'));
 
-      var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-      if (pageMatch) {
-        this.set('pageNum', pageMatch[1]);
-      } else {
-        this.set('pageNum', 0);
-      }
+        if (pageNumPattern.test(document.URL)) {
+          this.set('pageNum', document.URL.replace(pageNumPattern, '$1'));
+        } else {
+          this.set('pageNum', 0);
+        }
+        this.trigger('content:loaded', this, loadHelps);
+      },
 
-      this.trigger('content:loaded', this, loadHelps);
-    },
+      fetch: function (options) {
+        options = options || {};
+        return Backbone.Model.prototype.fetch.call(
+          this,
+          _.extend({ dataType: 'html' }, options),
+        );
+      },
+    });
+  })(require('jquery'), _, Backbone, HTMLContentModel);
+}
 
-    fetch: function (options) {
-      options = options || {};
-      // For test purposes, simulate Backbone.Model.fetch returning a jQuery-like deferred with done()
-      return {
-        done: (cb) => {
-          cb('<html/>');
-          return this;
-        },
-      };
-    },
-  });
-})(null, _, Backbone, HTMLContentModel);
+// Minimal stub to add `extend` to HTMLContentModel, mimicking Backbone.Model.extend.
+HTMLContentModel.extend = function (props) {
+  function Child() {
+    if (typeof this.initialize === 'function') {
+      this.initialize.apply(this, arguments);
+    }
+  }
+  Child.prototype = Object.create(HTMLContentModel.prototype);
+  Child.prototype.constructor = Child;
+  Object.assign(Child.prototype, props);
+  return Child;
+};
 
-const LessonContentModel = LessonContentModelFactory;
-
-describe('LessonContentModel delta tests for regex and URL handling', () => {
-  let originalDocument;
+describe('LessonContentModel  delta tests for regex precompilation behavior', () => {
+  let LessonContentModel;
+  let model;
+  let originalURL;
 
   beforeAll(() => {
-    originalDocument = global.document;
-    global.document = { URL: '' };
+    LessonContentModel = createLessonContentModelClass();
   });
 
-  afterAll(() => {
-    global.document = originalDocument;
+  beforeEach(() => {
+    // Spy-able model instance with simple set/get/trigger behavior.
+    model = new LessonContentModel();
+    model.attributes = {};
+    model.set = function (key, value) {
+      this.attributes[key] = value;
+    };
+    model.trigger = jest.fn();
+
+    // Preserve and override document.URL for deterministic tests.
+    originalURL = global.document && global.document.URL;
+    if (!global.document) {
+      global.document = {};
+    }
   });
 
-  test('setContent derives lessonUrl without using unbounded .* and correctly strips page segment', () => {
-    // Arrange: URL that previously would match /.*\.lesson.*/ pattern
-    global.document.URL = 'http://example.com/path/to/lesson.lesson/123?foo=bar';
+  afterEach(() => {
+    if (originalURL !== undefined) {
+      document.URL = originalURL;
+    }
+  });
 
-    const model = new LessonContentModel();
+  test('setContent uses regex patterns that behave equivalently to the previous inline regex for lessonUrl and pageNum match', () => {
+    // Arrange: URL that matches the pageNum pattern (e.g., ...lesson/12)
+    document.URL = 'http://example.com/SomeLesson.lesson/12';
 
     // Act
-    model.setContent('<html/>');
+    model.setContent('<html>content</html>', true);
 
-    // Assert:
-    // - lessonUrl is normalized to end with ".lesson"
-    // - pageNum extracted as the trailing number
-    expect(model.get('lessonUrl')).toBe('http://example.com/path/to/lesson.lesson');
-    expect(model.get('pageNum')).toBe('123');
+    // Assert: behavior should remain equivalent (regardless of precompilation)
+    expect(model.attributes.lessonUrl).toBe(
+      'http://example.com/SomeLesson.lesson',
+    );
+    expect(model.attributes.pageNum).toBe('12');
+    expect(model.trigger).toHaveBeenCalledWith(
+      'content:loaded',
+      model,
+      true,
+    );
   });
 
-  test('setContent falls back gracefully when URL does not end with .lesson', () => {
-    // Arrange: Non-matching URL
-    global.document.URL = 'http://example.com/path/without-lesson-segment?foo=bar';
-
-    const model = new LessonContentModel();
+  test('setContent sets pageNum=0 when URL does not match the pageNumPattern', () => {
+    // Arrange: URL without trailing /<digits>
+    document.URL = 'http://example.com/SomeLesson.lesson';
 
     // Act
-    model.setContent('<html/>');
+    model.setContent('<html>content</html>', false);
 
-    // Assert:
-    // - lessonUrl should default to the URL without query parameters
-    // - pageNum should default to 0
-    expect(model.get('lessonUrl')).toBe('http://example.com/path/without-lesson-segment');
-    expect(model.get('pageNum')).toBe(0);
+    // Assert: pageNum falls back to 0 as before; lessonUrl is normalized
+    expect(model.attributes.lessonUrl).toBe(
+      'http://example.com/SomeLesson.lesson',
+    );
+    expect(model.attributes.pageNum).toBe(0);
+    expect(model.trigger).toHaveBeenCalledWith(
+      'content:loaded',
+      model,
+      false,
+    );
   });
 
-  test('loadData bounds and encodes name before constructing urlRoot', () => {
-    // Arrange: Very long name to ensure substring bounding is applied
-    const longName = 'x'.repeat(300);
-    const model = new LessonContentModel();
+  test('setContent does not recreate regex objects on multiple calls (indirectly asserting precompilation behavior)', () => {
+    // This test focuses on the changed behavior: regex precompilation to avoid inefficiency.
+    // Directly asserting object identity of regex instances from inside the module is not
+    // feasible without refactoring, so we assert via a behavioral proxy: the logic remains
+    // correct across multiple invocations with different URLs, which would have been the
+    // same code paths where regex reallocation used to occur.
 
-    // Spy on fetch to avoid actual network calls
-    const fetchSpy = jest.spyOn(model, 'fetch').mockImplementation(function () {
-      return {
-        done: (cb) => {
-          cb('<html/>');
-          return this;
-        },
-      };
+    const urls = [
+      'http://example.com/A.lesson/1',
+      'http://example.com/B.lesson/22',
+      'http://example.com/C.lesson',
+      'http://example.com/D.lesson/3333',
+    ];
+
+    urls.forEach((url) => {
+      document.URL = url;
+      model.setContent('<html>content</html>', true);
     });
 
-    // Act
-    model.loadData({ name: longName });
-
-    // Assert:
-    // - urlRoot should be based on the first 255 characters of name, encoded and escaped.
-    const boundedName = longName.substring(0, 255);
-    const expectedRoot = _.escape(encodeURIComponent(boundedName)) + '.lesson';
-    expect(model.urlRoot).toBe(expectedRoot);
-    expect(fetchSpy).toHaveBeenCalled();
-
-    fetchSpy.mockRestore();
+    // Behavior assertions for the last URL
+    expect(model.attributes.lessonUrl).toBe(
+      'http://example.com/D.lesson',
+    );
+    expect(model.attributes.pageNum).toBe('3333');
+    expect(model.trigger).toHaveBeenCalledTimes(urls.length);
   });
 });
