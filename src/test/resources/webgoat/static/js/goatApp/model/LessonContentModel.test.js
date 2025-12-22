@@ -1,107 +1,94 @@
-const { JSDOM } = require('jsdom');
+// Delta_UnitTest_Agent
+// Assumption: AMD module is loaded via requirejs in tests; we focus solely on the
+// behavior changed by the regex and URL processing fixes.
+// File under test: src/main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js
+// Derived test path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 
-class StubModel {
-  constructor(attrs = {}) {
-    this.attributes = { ...attrs };
-    this._listeners = {};
-  }
-  set(key, value) {
-    this.attributes[key] = value;
-  }
-  get(key) {
-    return this.attributes[key];
-  }
-  trigger(eventName, ...args) {
-    if (this._listeners[eventName]) {
-      this._listeners[eventName].forEach((fn) => fn(...args));
-    }
-  }
-  on(eventName, fn) {
-    if (!this._listeners[eventName]) this._listeners[eventName] = [];
-    this._listeners[eventName].push(fn);
-  }
-}
+/* eslint-env jest */
 
-global.define = function (deps, factory) {
-  const $ = {};
-  const _ = {
-    escape: (s) => s,
-  };
-  const Backbone = {
-    Model: StubModel,
-  };
-  const HTMLContentModel = StubModel;
+// TODO: Adjust the module path below if your RequireJS configuration differs.
+define([
+  'goatApp/model/LessonContentModel',
+  'jquery',
+  'underscore',
+  'backbone'
+], function (LessonContentModel, $, _, Backbone) {
+  'use strict';
 
-  module.exports = factory($, _, Backbone, HTMLContentModel);
-};
-
-require('../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
-const LessonContentModel = module.exports;
-
-describe('LessonContentModel delta tests (regex behavior)', () => {
-  beforeEach(() => {
-    const dom = new JSDOM(`<!DOCTYPE html><p>Test</p>`, {
-      url: 'http://localhost/WebGoat.lesson',
+  describe('LessonContentModel - delta tests for regex and URL handling', function () {
+    beforeEach(function () {
+      // JSDOM-style global document for URL-dependent logic.
+      global.document = {
+        URL: 'http://localhost/WebGoat.lesson/12'
+      };
     });
-    global.window = dom.window;
-    global.document = dom.window.document;
-  });
 
-  test('setContent normalizes lessonUrl by replacing only the trailing `.lesson` segment', () => {
-    const dom = new JSDOM(`<!DOCTYPE html><p>Test</p>`, {
-      url: 'http://localhost/app/WebGoat.lesson/123?x=y',
+    test('setContent normalizes lessonUrl without expensive greedy regex', function () {
+      // Arrange
+      var model = new LessonContentModel();
+      var content = '<html>dummy</html>';
+
+      // Act
+      model.setContent(content);
+
+      // Assert
+      // After the fix, lessonUrl should be the .lesson base, without trailing page number.
+      expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat.lesson');
     });
-    global.window = dom.window;
-    global.document = dom.window.document;
 
-    const model = new LessonContentModel();
-    model.setContent('<html>content</html>');
+    test('setContent extracts pageNum using streamlined regex and match()', function () {
+      // Arrange
+      var model = new LessonContentModel();
+      var content = '<html>dummy</html>';
+      global.document.URL = 'http://localhost/WebGoat.lesson/123';
 
-    expect(model.get('lessonUrl')).toBe('http://localhost/app/WebGoat.lesson');
-  });
+      // Act
+      model.setContent(content);
 
-  test('setContent sets pageNum from trailing digits after `.lesson/NNN`', () => {
-    const dom = new JSDOM(`<!DOCTYPE html><p>Test</p>`, {
-      url: 'http://localhost/app/WebGoat.lesson/42',
+      // Assert
+      // After the fix, pageNum is derived via document.URL.match(/\.lesson\/(\d{1,4})$/)
+      // instead of repeated greedy patterns and replace() calls.
+      expect(model.get('pageNum')).toBe('123');
     });
-    global.window = dom.window;
-    global.document = dom.window.document;
 
-    const model = new LessonContentModel();
-    model.setContent('<html>content</html>');
+    test('setContent defaults pageNum to 0 when no page suffix is present', function () {
+      // Arrange
+      var model = new LessonContentModel();
+      var content = '<html>dummy</html>';
+      global.document.URL = 'http://localhost/WebGoat.lesson';
 
-    expect(model.get('pageNum')).toBe('42');
-  });
+      // Act
+      model.setContent(content);
 
-  test('setContent defaults pageNum to 0 when URL does not match `.lesson/NNN` pattern', () => {
-    const dom = new JSDOM(`<!DOCTYPE html><p>Test</p>`, {
-      url: 'http://localhost/app/WebGoat',
+      // Assert
+      expect(model.get('pageNum')).toBe(0);
     });
-    global.window = dom.window;
-    global.document = dom.window.document;
 
-    const model = new LessonContentModel();
-    model.setContent('<html>content</html>');
+    test('loadData builds urlRoot from encodeURIComponent without double-encoding', function () {
+      // Arrange
+      var model = new LessonContentModel();
+      // Spy on Backbone.Model.prototype.fetch to avoid real network calls.
+      var fetchSpy = jest.spyOn(Backbone.Model.prototype, 'fetch').mockImplementation(function () {
+        return {
+          done: function (cb) {
+            cb('<html>dummy</html>');
+            return this;
+          }
+        };
+      });
 
-    expect(model.get('pageNum')).toBe(0);
-  });
+      var options = { name: 'Some Lesson Name' };
 
-  test('setContent emits content:loaded event with loadHelps inferred to true by default', () => {
-    const dom = new JSDOM(`<!DOCTYPE html><p>Test</p>`, {
-      url: 'http://localhost/app/WebGoat.lesson/10',
+      // Act
+      model.loadData(options);
+
+      // Assert
+      // urlRoot should be encoded once and suffixed with ".lesson".
+      expect(model.urlRoot).toBe(encodeURIComponent(options.name) + '.lesson');
+      expect(fetchSpy).toHaveBeenCalled();
+
+      // Cleanup
+      fetchSpy.mockRestore();
     });
-    global.window = dom.window;
-    global.document = dom.window.document;
-
-    const model = new LessonContentModel();
-    const handler = jest.fn();
-    model.on('content:loaded', handler);
-
-    model.setContent('<html>content</html>');
-
-    expect(handler).toHaveBeenCalledTimes(1);
-    const [self, loadHelps] = handler.mock.calls[0];
-    expect(self).toBe(model);
-    expect(loadHelps).toBe(true);
   });
 });

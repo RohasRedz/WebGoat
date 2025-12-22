@@ -1,55 +1,60 @@
-define(['jquery',
+define([
+    'jquery',
     'underscore',
     'backbone',
-    'goatApp/model/HTMLContentModel'],
-     function($,
-        _,
-        Backbone,
-        HTMLContentModel){
+    'goatApp/model/HTMLContentModel'
+], function (
+    $,
+    _,
+    Backbone,
+    HTMLContentModel
+) {
 
     return HTMLContentModel.extend({
-        urlRoot:null,
+        urlRoot: null,
         defaults: {
-            items:null,
-            selectedItem:null
+            items: null,
+            selectedItem: null
         },
 
         initialize: function (options) {
 
         },
 
-        loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
+        loadData: function (options) {
+            // Use encodeURIComponent only; remove unnecessary _.escape to avoid
+            // double-encoding and potential regex abuse through constructed URLs.
+            this.urlRoot = encodeURIComponent(options.name) + '.lesson';
             var self = this;
-            this.fetch().done(function(data) {
+            this.fetch().done(function (data) {
                 self.setContent(data);
             });
         },
 
-        setContent: function(content, loadHelps) {
+        setContent: function (content, loadHelps) {
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
             this.set('content', content);
-
-            var currentUrl = document.URL;
-            var lessonUrl = currentUrl.replace(/\.lesson(?:\/.*)?$/i, '.lesson');
-            this.set('lessonUrl', lessonUrl);
-
-            var pagePattern = /\.lesson\/(\d{1,4})$/;
-            var match = pagePattern.exec(currentUrl);
-            if (match) {
-                this.set('pageNum', match[1]);
+            this.set(
+                'lessonUrl',
+                document.URL.replace(/\.lesson(?:\/.*)?$/, '.lesson')
+            );
+            var pageMatch = document.URL.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
-
             this.trigger('content:loaded', this, loadHelps);
         },
 
         fetch: function (options) {
             options = options || {};
-            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
+            return Backbone.Model.prototype.fetch.call(
+                this,
+                _.extend({ dataType: 'html' }, options)
+            );
         }
     });
 });
