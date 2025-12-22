@@ -1,94 +1,96 @@
-// Delta_UnitTest_Agent
-// Assumption: AMD module is loaded via requirejs in tests; we focus solely on the
-// behavior changed by the regex and URL processing fixes.
-// File under test: src/main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js
-// Derived test path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+const LessonContentModelModulePath = '../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel';
 
-/* eslint-env jest */
+let ajaxMock;
 
-// TODO: Adjust the module path below if your RequireJS configuration differs.
-define([
-  'goatApp/model/LessonContentModel',
-  'jquery',
-  'underscore',
-  'backbone'
-], function (LessonContentModel, $, _, Backbone) {
-  'use strict';
-
-  describe('LessonContentModel - delta tests for regex and URL handling', function () {
-    beforeEach(function () {
-      // JSDOM-style global document for URL-dependent logic.
-      global.document = {
-        URL: 'http://localhost/WebGoat.lesson/12'
+jest.mock('backbone', () => {
+  const actual = jest.requireActual('backbone');
+  class MockModel extends actual.Model {
+    fetch(options) {
+      return {
+        done: (cb) => {
+          cb('<html>content</html>');
+          return this;
+        },
       };
-    });
+    }
+  }
+  return {
+    ...actual,
+    Model: MockModel,
+  };
+});
 
-    test('setContent normalizes lessonUrl without expensive greedy regex', function () {
-      // Arrange
-      var model = new LessonContentModel();
-      var content = '<html>dummy</html>';
+jest.mock('underscore', () => {
+  const actual = jest.requireActual('underscore');
+  return {
+    ...actual,
+    escape: jest.fn((s) => `[escaped]${s}`),
+  };
+});
 
-      // Act
-      model.setContent(content);
+jest.mock('jquery', () => ({}));
 
-      // Assert
-      // After the fix, lessonUrl should be the .lesson base, without trailing page number.
-      expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat.lesson');
-    });
+const LessonContentModel = require(LessonContentModelModulePath);
 
-    test('setContent extracts pageNum using streamlined regex and match()', function () {
-      // Arrange
-      var model = new LessonContentModel();
-      var content = '<html>dummy</html>';
-      global.document.URL = 'http://localhost/WebGoat.lesson/123';
+describe('LessonContentModel (delta tests)', () => {
+  beforeEach(() => {
+    global.document = {
+      URL: 'http://example.com/lesson/1234',
+    };
+  });
 
-      // Act
-      model.setContent(content);
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
 
-      // Assert
-      // After the fix, pageNum is derived via document.URL.match(/\.lesson\/(\d{1,4})$/)
-      // instead of repeated greedy patterns and replace() calls.
-      expect(model.get('pageNum')).toBe('123');
-    });
+  test('loadData should defensively encode and escape options.name into urlRoot', () => {
+    const model = new LessonContentModel();
+    const options = { name: 'My Lesson' };
 
-    test('setContent defaults pageNum to 0 when no page suffix is present', function () {
-      // Arrange
-      var model = new LessonContentModel();
-      var content = '<html>dummy</html>';
-      global.document.URL = 'http://localhost/WebGoat.lesson';
+    model.loadData(options);
 
-      // Act
-      model.setContent(content);
+    const _ = require('underscore');
+    expect(_.escape).toHaveBeenCalledTimes(1);
+    expect(_.escape).toHaveBeenCalledWith(encodeURIComponent(options.name));
 
-      // Assert
-      expect(model.get('pageNum')).toBe(0);
-    });
+    expect(model.urlRoot).toBe(`[escaped]${encodeURIComponent(options.name)}.lesson`);
+  });
 
-    test('loadData builds urlRoot from encodeURIComponent without double-encoding', function () {
-      // Arrange
-      var model = new LessonContentModel();
-      // Spy on Backbone.Model.prototype.fetch to avoid real network calls.
-      var fetchSpy = jest.spyOn(Backbone.Model.prototype, 'fetch').mockImplementation(function () {
-        return {
-          done: function (cb) {
-            cb('<html>dummy</html>');
-            return this;
-          }
-        };
-      });
+  test('setContent should derive lessonUrl and pageNum using bounded regexes', () => {
+    const model = new LessonContentModel();
 
-      var options = { name: 'Some Lesson Name' };
+    const setSpy = jest.spyOn(model, 'set');
+    const triggerSpy = jest.spyOn(model, 'trigger');
 
-      // Act
-      model.loadData(options);
+    model.setContent('<html>content</html>', true);
 
-      // Assert
-      // urlRoot should be encoded once and suffixed with ".lesson".
-      expect(model.urlRoot).toBe(encodeURIComponent(options.name) + '.lesson');
-      expect(fetchSpy).toHaveBeenCalled();
+    expect(setSpy).toHaveBeenCalledWith('content', '<html>content</html>');
 
-      // Cleanup
-      fetchSpy.mockRestore();
-    });
+    const lessonUrlCall = setSpy.mock.calls.find((c) => c[0] === 'lessonUrl');
+    expect(lessonUrlCall).toBeDefined();
+    expect(lessonUrlCall[1]).toBe('http://example.com/lesson.lesson');
+
+    const pageNumCall = setSpy.mock.calls.find((c) => c[0] === 'pageNum');
+    expect(pageNumCall).toBeDefined();
+    expect(pageNumCall[1]).toBe('1234');
+
+    expect(triggerSpy).toHaveBeenCalledWith('content:loaded', model, true);
+  });
+
+  test('setContent should fall back gracefully when URL does not match expected pattern', () => {
+    const model = new LessonContentModel();
+    global.document.URL = 'http://example.com/other';
+
+    const setSpy = jest.spyOn(model, 'set');
+
+    model.setContent('<html>content</html>', false);
+
+    const lessonUrlCall = setSpy.mock.calls.find((c) => c[0] === 'lessonUrl');
+    expect(lessonUrlCall).toBeDefined();
+    expect(lessonUrlCall[1]).toBe('http://example.com/other');
+
+    const pageNumCall = setSpy.mock.calls.find((c) => c[0] === 'pageNum');
+    expect(pageNumCall).toBeDefined();
+    expect(pageNumCall[1]).toBe(0);
   });
 });

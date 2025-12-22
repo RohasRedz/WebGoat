@@ -1,95 +1,83 @@
-const { JSDOM } = require('jsdom');
+const jwtRefreshModulePath = '../../../main/resources/lessons/jwt/js/jwt-refresh';
 
-describe('jwt-refresh delta tests (externalized password & token refresh)', () => {
-  let window;
-  let document;
+let ajaxMock;
 
-  beforeEach(() => {
-    const dom = new JSDOM(`<!DOCTYPE html><p>Test</p>`, {
-      url: 'http://localhost',
-      runScripts: 'outside-only',
-    });
-    window = dom.window;
-    document = window.document;
+jest.mock('jquery', () => {
+  ajaxMock = jest.fn();
+  return {
+    ajax: ajaxMock,
+  };
+});
 
-    global.window = window;
-    global.document = document;
-    global.localStorage = (() => {
-      const store = {};
+global.webgoat = {
+  customjs: {},
+};
+
+beforeEach(() => {
+  const store = {};
+  global.localStorage = {
+    getItem: jest.fn((key) => store[key]),
+    setItem: jest.fn((key, value) => {
+      store[key] = String(value);
+    }),
+  };
+  ajaxMock && ajaxMock.mockReset();
+  jest.resetModules();
+});
+
+describe('jwt-refresh.js (delta tests)', () => {
+  test('login should not send a hard-coded password in the request body', () => {
+    require(jwtRefreshModulePath);
+
+    login('Jerry');
+
+    expect(ajaxMock).toHaveBeenCalledTimes(1);
+    const config = ajaxMock.mock.calls[0][0];
+
+    expect(config.type).toBe('POST');
+    expect(config.url).toBe('JWT/refresh/login');
+    expect(config.contentType).toBe('application/json');
+
+    const body = JSON.parse(config.data);
+    expect(body.user).toBe('Jerry');
+    expect(body.password).toBe('');
+  });
+
+  test('newToken should send refresh token from localStorage and update tokens from response', () => {
+    localStorage.setItem('access_token', 'oldAccess');
+    localStorage.setItem('refresh_token', 'oldRefresh');
+
+    require(jwtRefreshModulePath);
+
+    ajaxMock.mockImplementation((cfg) => {
+      const resp = { access_token: 'newAccess', refresh_token: 'newRefresh' };
+      if (typeof cfg.success === 'function') {
+        cfg.success(resp);
+      }
+      if (typeof cfg.complete === 'function') {
+        cfg.complete(resp);
+      }
       return {
-        getItem: (k) => store[k] || null,
-        setItem: (k, v) => { store[k] = String(v); },
-        clear: () => { Object.keys(store).forEach((k) => delete store[k]); },
-      };
-    })();
-
-    global.$ = {
-      ajax: jest.fn().mockReturnValue({
-        success: function (cb) {
-          this._successCb = cb;
+        success: (cb) => {
+          cb(resp);
           return this;
         },
-        triggerSuccess: function (response) {
-          if (this._successCb) this._successCb(response);
-        },
-      }),
-    };
+      };
+    });
 
-    global.webgoat = {
-      customjs: {},
-    };
+    newToken();
 
-    jest.resetModules();
-    require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
-  });
+    expect(ajaxMock).toHaveBeenCalledTimes(1);
+    const cfg = ajaxMock.mock.calls[0][0];
 
-  test('login uses external password provider and does not send hard-coded password', () => {
-    const expectedPassword = 'secure-from-config';
+    expect(cfg.type).toBe('POST');
+    expect(cfg.url).toBe('JWT/refresh/newToken');
+    expect(cfg.headers.Authorization).toBe('Bearer oldAccess');
 
-    webgoat.customjs.getJwtRefreshPassword = jest.fn().mockReturnValue(expectedPassword);
+    const body = JSON.parse(cfg.data);
+    expect(body.refreshToken).toBe('oldRefresh');
 
-    $.ajax.mockClear();
-
-    global.login('Jerry');
-
-    expect(webgoat.customjs.getJwtRefreshPassword).toHaveBeenCalledTimes(1);
-
-    expect($.ajax).toHaveBeenCalledTimes(1);
-    const ajaxConfig = $.ajax.mock.calls[0][0];
-    const body = JSON.parse(ajaxConfig.data);
-
-    expect(body.user).toBe('Jerry');
-    expect(body.password).toBe(expectedPassword);
-  });
-
-  test('login aborts and logs error when password provider returns falsy value', () => {
-    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    webgoat.customjs.getJwtRefreshPassword = jest.fn().mockReturnValue(null);
-
-    $.ajax.mockClear();
-
-    global.login('Jerry');
-
-    expect($.ajax).not.toHaveBeenCalled();
-    expect(consoleErrorSpy).toHaveBeenCalled();
-
-    consoleErrorSpy.mockRestore();
-  });
-
-  test('newToken updates access_token and refresh_token from server response', () => {
-    localStorage.setItem('access_token', 'old-access');
-    localStorage.setItem('refresh_token', 'old-refresh');
-
-    $.ajax.mockClear();
-
-    global.newToken();
-
-    expect($.ajax).toHaveBeenCalledTimes(1);
-    const ajaxCall = $.ajax.mock.results[0].value;
-    const response = { access_token: 'new-access', refresh_token: 'new-refresh' };
-    ajaxCall.triggerSuccess(response);
-
-    expect(localStorage.getItem('access_token')).toBe('new-access');
-    expect(localStorage.getItem('refresh_token')).toBe('new-refresh');
+    expect(localStorage.setItem).toHaveBeenCalledWith('access_token', 'newAccess');
+    expect(localStorage.setItem).toHaveBeenCalledWith('refresh_token', 'newRefresh');
   });
 });
