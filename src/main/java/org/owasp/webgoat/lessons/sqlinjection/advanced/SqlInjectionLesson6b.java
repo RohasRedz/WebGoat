@@ -19,11 +19,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
-import lombok.extern.slf4j.Slf4j; // Added import for Slf4j
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestController
-@Slf4j // Added Slf4j annotation
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
+  private static final Logger log = LoggerFactory.getLogger(SqlInjectionLesson6b.class);
   private final LessonDataSource dataSource;
 
   public SqlInjectionLesson6b(LessonDataSource dataSource) {
@@ -54,11 +55,11 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception occurred", sqle); // Replaced printStackTrace
+        log.error("SQL Exception occurred during password retrieval.", sqle);
         // do nothing
       }
     } catch (Exception e) {
-      log.error("General Exception occurred", e); // Replaced printStackTrace
+      log.error("An unexpected error occurred during password retrieval.", e);
       // do nothing
     }
     return (password);
