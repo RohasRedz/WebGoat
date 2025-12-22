@@ -7,12 +7,6 @@ define(['jquery',
         Backbone,
         HTMLContentModel){
 
-    // Precompile safe, linear-time regexes to avoid inefficient backtracking
-    // Matches trailing ".lesson" segment (no page number)
-    var LESSON_URL_BASE_REGEX = /\.lesson(?:\/.*)?$/;
-    // Matches URLs ending in ".lesson/<118 digit page number>"
-    var LESSON_URL_PAGE_REGEX = /\.lesson\/(\d{1,4})$/;
-
     return HTMLContentModel.extend({
         urlRoot:null,
         defaults: {
@@ -38,27 +32,22 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Replace the original ad200hoc regexes with precompiled, efficient patterns
-            // Original behavior:
-            //  - lessonUrl: document.URL.replace(/\.lesson.*/,'.lesson')
-            //  - if (/.*\.lesson\/(\d{1,4})$/.test(document.URL)) {
-            //        pageNum: document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1')
-            //    } else { pageNum: 0 }
-            var currentUrl = String(document.URL || '');
+            // Use more efficient, anchored patterns to avoid catastrophic backtracking
+            var currentUrl = document.URL;
 
-            // Derive the base lesson URL deterministically using a safe regex
-            this.set('lessonUrl', currentUrl.replace(LESSON_URL_BASE_REGEX, '.lesson'));
+            // Replace trailing ".lesson..." with ".lesson" using an anchored pattern
+            this.set(
+                'lessonUrl',
+                currentUrl.replace(/\.lesson.*$/, '.lesson')
+            );
 
-            // Extract page number using a capture group without backtracking128heavy patterns
-            var pageNum = 0;
-            var match = LESSON_URL_PAGE_REGEX.exec(currentUrl);
-            if (match && match[1]) {
-                pageNum = parseInt(match[1], 10);
-                if (!Number.isFinite(pageNum)) {
-                    pageNum = 0;
-                }
+            // More efficient extraction of trailing page number segment
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
+            } else {
+                this.set('pageNum', 0);
             }
-            this.set('pageNum', pageNum);
 
             this.trigger('content:loaded',this,loadHelps);
         },
