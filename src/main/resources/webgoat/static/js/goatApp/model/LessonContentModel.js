@@ -19,19 +19,12 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            // Ensure options.name is treated as a plain, bounded string before using it
-            var rawName = (options && typeof options.name === 'string') ? options.name : '';
-            var safeName = rawName.trim();
+            // Ensure `options.name` is a reasonable, bounded string to avoid ReDoS and overlong inputs
+            var lessonName = typeof options.name === 'string' ? options.name : '';
+            // Limit length and allowed characters to reduce risk of regex/path abuse
+            lessonName = lessonName.slice(0, 128).replace(/[^a-zA-Z0-9_\-./]/g, '');
 
-            // Optionally enforce a maximum length and a limited character set to mitigate ReDoS
-            if (safeName.length > 100) {
-                safeName = safeName.substring(0, 100);
-            }
-            // Allow only simple, URL‑safe characters; drop anything else
-            safeName = safeName.replace(/[^a-zA-Z0-9._-]/g, '');
-
-            this.urlRoot = encodeURIComponent(safeName) + '.lesson';
-
+            this.urlRoot = encodeURIComponent(lessonName) + '.lesson';
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -44,23 +37,18 @@ define(['jquery',
             }
             this.set('content',content);
 
-            var currentUrl = String(document.URL);
+            // Use precompiled, simple regexes to avoid catastrophic backtracking
+            var lessonUrlRegex = /\.lesson.*/;
+            var pageNumRegex = /.*\.lesson\/(\d{1,4})$/;
 
-            // Use simpler, non‑catastrophic regular expressions and avoid unnecessary backtracking
-            var lessonUrlMatch = currentUrl.match(/\.lesson/);
-            if (lessonUrlMatch) {
-                this.set('lessonUrl', currentUrl.substring(0, lessonUrlMatch.index) + '.lesson');
-            } else {
-                this.set('lessonUrl', currentUrl);
-            }
+            this.set('lessonUrl', document.URL.replace(lessonUrlRegex, '.lesson'));
 
-            var pageNumMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageNumMatch) {
-                this.set('pageNum', pageNumMatch[1]);
+            var pageMatch = document.URL.match(pageNumRegex);
+            if (pageMatch && pageMatch[1]) {
+                this.set('pageNum', pageMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
-
             this.trigger('content:loaded',this,loadHelps);
         },
 
