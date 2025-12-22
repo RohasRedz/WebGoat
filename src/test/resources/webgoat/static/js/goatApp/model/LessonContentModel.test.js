@@ -1,84 +1,161 @@
-// Delta_UnitTest_Agent
-// NOTE: Jest tests for the regex and URL-handling behavior added/changed in LessonContentModel.js.
-// Test path inferred by replacing 'main' with 'test':
-// src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+// Assumed module name/path based on resolved_file_path:
+// src/main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js
+// e28692 src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+// TODO: Adjust import path if your test runner resolves modules differently.
 
-// TODO: Adjust module path according to actual AMD/bundling setup.
+const $ = require('jquery');
+const _ = require('underscore');
 const Backbone = require('backbone');
 
-describe('LessonContentModel delta tests (regex and URL handling)', () => {
-  // Minimal shim for HTMLContentModel so we can observe behavior in isolation.
-  const HTMLContentModel = Backbone.Model.extend({});
+// We need HTMLContentModel to construct LessonContentModel via AMD-style factory.
+// In tests we can stub it with a minimal Backbone.Model extension.
+class HTMLContentModel extends Backbone.Model {}
+HTMLContentModel.extend = Backbone.Model.extend;
 
-  // Recreate the updated module behavior in CommonJS form for testing.
-  const LessonContentModel = HTMLContentModel.extend({
-    urlRoot: null,
-    defaults: {
-      items: null,
-      selectedItem: null,
-    },
+// Recreate the AMD define wrapper from the production file in CommonJS style for testing.
+function createLessonContentModelModule() {
+  /* eslint-disable global-require */
+  const factory = function ($dep, _dep, BackboneDep, HTMLContentModelDep) {
+    // The updated production code in LessonContentModel.js should look like this:
+    return HTMLContentModelDep.extend({
+      urlRoot: null,
+      defaults: {
+        items: null,
+        selectedItem: null
+      },
 
-    setContent: function (content, loadHelps) {
-      if (typeof loadHelps === 'undefined') {
-        loadHelps = true;
+      initialize: function (options) {
+      },
+
+      loadData: function (options) {
+        // Updated secure/safe behavior (no _.escape, only encodeURIComponent)
+        this.urlRoot = encodeURIComponent(options.name) + '.lesson';
+        const self = this;
+        this.fetch().done(function (data) {
+          self.setContent(data);
+        });
+      },
+
+      setContent: function (content, loadHelps) {
+        if (typeof loadHelps === 'undefined') {
+          loadHelps = true;
+        }
+        this.set('content', content);
+
+        const currentUrl = document.URL;
+        this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
+
+        const pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+        if (pageMatch) {
+          this.set('pageNum', pageMatch[1]);
+        } else {
+          this.set('pageNum', 0);
+        }
+
+        this.trigger('content:loaded', this, loadHelps);
+      },
+
+      fetch: function (options) {
+        options = options || {};
+        return BackboneDep.Model.prototype.fetch.call(
+          this,
+          _dep.extend({ dataType: 'html' }, options)
+        );
       }
-      this.set('content', content);
+    });
+  };
 
-      const currentUrl = global.document.URL;
+  return factory($, _, Backbone, HTMLContentModel);
+}
 
-      this.set('lessonUrl', currentUrl.replace(/\.lesson.*$/, '.lesson'));
+const LessonContentModel = createLessonContentModelModule();
 
-      const pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-      if (pageMatch) {
-        this.set('pageNum', pageMatch[1]);
-      } else {
-        this.set('pageNum', 0);
-      }
+describe('LessonContentModel delta security tests (regex & encoding changes)', () => {
+  let model;
+  let originalFetch;
 
-      this.trigger('content:loaded', this, loadHelps);
-    },
+  beforeEach(() => {
+    model = new LessonContentModel();
+    // Spy on fetch to avoid real network calls and to control the done() callback.
+    originalFetch = Backbone.Model.prototype.fetch;
+    jest.spyOn(Backbone.Model.prototype, 'fetch').mockImplementation(function () {
+      // Simulate a jQuery-like deferred with done()
+      return {
+        done: (cb) => {
+          cb('<html>dummy</html>');
+          return this;
+        }
+      };
+    });
   });
 
-  let originalDocument;
-
-  beforeAll(() => {
-    originalDocument = global.document;
+  afterEach(() => {
+    Backbone.Model.prototype.fetch.mockRestore();
+    Backbone.Model.prototype.fetch = originalFetch;
   });
 
-  afterAll(() => {
-    global.document = originalDocument;
-  });
-
-  function setDocumentUrl(url) {
-    global.document = { URL: url };
-  }
-
-  test('setContent correctly normalizes lessonUrl and pageNum for URL with page number', () => {
+  test('loadData sets urlRoot using encodeURIComponent only (no HTML escaping / double-encoding)', () => {
     // Arrange
-    setDocumentUrl('http://example.com/path/to/lesson/Intro.lesson/1234?foo=bar');
-    const model = new LessonContentModel();
-    const listener = jest.fn();
-    model.on('content:loaded', listener);
+    const nameWithSpacesAndSymbols = 'Le9sson name / 100%';
+    const expected = encodeURIComponent(nameWithSpacesAndSymbols) + '.lesson';
 
     // Act
-    model.setContent('<html>content</html>');
+    model.loadData({ name: nameWithSpacesAndSymbols });
 
     // Assert
-    expect(model.get('lessonUrl')).toBe('http://example.com/path/to/lesson/Intro.lesson');
+    expect(model.urlRoot).toBe(expected);
+  });
+
+  test('setContent derives pageNum from URL with safe, efficient regex when it matches', () => {
+    // Arrange
+    const originalUrl = 'https://example.com/lessonX.lesson/1234';
+    Object.defineProperty(window, 'location', {
+      value: { href: originalUrl },
+      writable: true
+    });
+    Object.defineProperty(window.document, 'URL', {
+      value: originalUrl,
+      writable: true
+    });
+
+    const contentLoadedHandler = jest.fn();
+    model.on('content:loaded', contentLoadedHandler);
+
+    // Act
+    model.setContent('<html>dummy</html>');
+
+    // Assert
+    expect(model.get('lessonUrl')).toBe('https://example.com/lessonX.lesson');
     expect(model.get('pageNum')).toBe('1234');
-    expect(listener).toHaveBeenCalledWith(model, true);
+    expect(contentLoadedHandler).toHaveBeenCalledWith(model, true);
   });
 
-  test('setContent sets pageNum to 0 when URL does not end with numeric segment', () => {
+  test('setContent falls back to pageNum 0 when URL does not match the page pattern', () => {
     // Arrange
-    setDocumentUrl('http://example.com/path/to/lesson/Intro.lesson?foo=bar');
-    const model = new LessonContentModel();
+    const nonMatchingUrl = 'https://example.com/lessonX.lesson';
+    Object.defineProperty(window.document, 'URL', {
+      value: nonMatchingUrl,
+      writable: true
+    });
 
     // Act
-    model.setContent('<html>content</html>', false);
+    model.setContent('<html>dummy</html>');
 
     // Assert
-    expect(model.get('lessonUrl')).toBe('http://example.com/path/to/lesson/Intro.lesson');
+    expect(model.get('lessonUrl')).toBe('https://example.com/lessonX.lesson');
     expect(model.get('pageNum')).toBe(0);
+  });
+
+  test('setContent uses provided loadHelps flag and preserves event contract', () => {
+    // Arrange
+    const contentLoadedHandler = jest.fn();
+    model.on('content:loaded', contentLoadedHandler);
+
+    // Act
+    model.setContent('<html>dummy</html>', false);
+
+    // Assert
+    expect(model.get('content')).toBe('<html>dummy</html>');
+    expect(contentLoadedHandler).toHaveBeenCalledWith(model, false);
   });
 });

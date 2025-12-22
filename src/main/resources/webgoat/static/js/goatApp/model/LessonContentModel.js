@@ -19,7 +19,7 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
+            this.urlRoot = encodeURIComponent(options.name) + '.lesson'
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -31,24 +31,12 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-
-            // Use more efficient, anchored patterns to avoid catastrophic backtracking
-            var currentUrl = document.URL;
-
-            // Replace trailing ".lesson..." with ".lesson" using an anchored pattern
-            this.set(
-                'lessonUrl',
-                currentUrl.replace(/\.lesson.*$/, '.lesson')
-            );
-
-            // More efficient extraction of trailing page number segment
-            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
+            this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
+            if (/.*\.lesson\/(\d{1,4})$/.test(document.URL)) {
+                this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
             } else {
-                this.set('pageNum', 0);
+                this.set('pageNum',0);
             }
-
             this.trigger('content:loaded',this,loadHelps);
         },
 
