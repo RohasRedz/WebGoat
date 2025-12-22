@@ -1,100 +1,82 @@
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentMatchers;
 import org.owasp.webgoat.container.LessonDataSource;
 
-/**
- * Delta tests for {@link SqlInjectionLesson6b} focusing only on the logging behavior
- * that changed in getPassword():
- *
- * Before:
- *   - Exceptions were handled with e.printStackTrace() / sqle.printStackTrace().
- *
- * After:
- *   - Exceptions are handled with log.error("...", e).
- *
- * These tests verify that:
- *   - No stack traces are printed to stderr via printStackTrace().
- *   - Errors are logged through the Slf4j logger created by Lombok's @Slf4j instead.
- */
 class SqlInjectionLesson6bTest {
 
-  @Test
-  @DisplayName("getPassword() logs SQLExceptions with log.error instead of printStackTrace")
-  void getPassword_logsSqlExceptionUsingLogger() throws Exception {
-    // Arrange
-    LessonDataSource dataSource = mock(LessonDataSource.class);
-    Connection connection = mock(Connection.class);
-    Statement statement = mock(Statement.class);
+    @Test
+    @DisplayName("getPassword returns password from database on success and does not print stack trace")
+    void getPassword_readsPasswordWithoutPrintingStackTrace() throws Exception {
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        ResultSet resultSet = mock(ResultSet.class);
 
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(
-            connection.createStatement(
-                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-        .thenReturn(statement);
-    when(statement.executeQuery(ArgumentMatchers.anyString()))
-        .thenThrow(new SQLException("Test SQL failure"));
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+                .thenReturn(statement);
+        when(statement.executeQuery(anyString())).thenReturn(resultSet);
+        when(resultSet.first()).thenReturn(true);
+        when(resultSet.getString("password")).thenReturn("dbPassword");
 
-    SqlInjectionLesson6b endpoint = new SqlInjectionLesson6b(dataSource);
+        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
 
-    // Spy on System.err to ensure printStackTrace is not used
-    var originalErr = System.err;
-    java.io.ByteArrayOutputStream errContent = new java.io.ByteArrayOutputStream();
-    System.setErr(new java.io.PrintStream(errContent));
+        java.io.ByteArrayOutputStream errContent = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream originalErr = System.err;
+        System.setErr(new java.io.PrintStream(errContent));
 
-    try {
-      // Act
-      String password = endpoint.getPassword();
+        try {
+            String password = lesson.getPassword();
 
-      // Assert behavior still returns some password, but focus is on logging
-      assertThat(password).isNotNull();
+            assertEquals("dbPassword", password);
 
-      // Core delta assertion: printStackTrace should not have been used
-      assertThat(errContent.toString())
-          .doesNotContain("java.sql.SQLException")
-          .doesNotContain("Test SQL failure");
-    } finally {
-      System.setErr(originalErr);
+            String errOutput = errContent.toString();
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    errOutput.contains("Exception") || errOutput.contains("at "),
+                    "No stack trace or exception details should be printed");
+        } finally {
+            System.setErr(originalErr);
+        }
     }
-  }
 
-  @Test
-  @DisplayName("getPassword() logs general Exceptions with log.error instead of printStackTrace")
-  void getPassword_logsGeneralExceptionUsingLogger() throws Exception {
-    // Arrange
-    LessonDataSource dataSource = mock(LessonDataSource.class);
+    @Test
+    @DisplayName("getPassword handles SQL exception without printing stack trace and returns default password")
+    void getPassword_handlesSqlException_withoutStackTraceExposure() throws Exception {
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Connection connection = mock(Connection.class);
 
-    // Force a general Exception from dataSource.getConnection()
-    when(dataSource.getConnection()).thenThrow(new RuntimeException("Test general failure"));
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+                .thenThrow(new SQLException("DB is down"));
 
-    SqlInjectionLesson6b endpoint = new SqlInjectionLesson6b(dataSource);
+        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
 
-    var originalErr = System.err;
-    java.io.ByteArrayOutputStream errContent = new java.io.ByteArrayOutputStream();
-    System.setErr(new java.io.PrintStream(errContent));
+        java.io.ByteArrayOutputStream errContent = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream originalErr = System.err;
+        System.setErr(new java.io.PrintStream(errContent));
 
-    try {
-      // Act
-      String password = endpoint.getPassword();
+        try {
+            String password = lesson.getPassword();
 
-      // Assert: again, focus is on absence of printStackTrace output
-      assertThat(password).isNotNull();
+            assertEquals("dave", password);
 
-      // printStackTrace should not have been invoked
-      assertThat(errContent.toString())
-          .doesNotContain("RuntimeException")
-          .doesNotContain("Test general failure");
-    } finally {
-      System.setErr(originalErr);
+            String errOutput = errContent.toString();
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    errOutput.contains("SQLException") || errOutput.contains("at "),
+                    "No stack trace or SQL exception details should be printed");
+        } finally {
+            System.setErr(originalErr);
+        }
     }
-  }
 }
