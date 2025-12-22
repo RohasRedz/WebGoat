@@ -12,7 +12,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import lombok.extern.slf4j.Slf4j; // Added for secure logging
+import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@Slf4j // Added for secure logging
+@Slf4j
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -41,7 +41,7 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "dave";
+    String password = null; // Initialize to null, remove hard-coded default
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -54,13 +54,11 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception occurred while fetching password", sqle); // Replaced printStackTrace with secure logging
-        // do nothing - original business logic preserved
+        log.error("Error fetching password from database", sqle); // Replaced printStackTrace
       }
     } catch (Exception e) {
-      log.error("An unexpected error occurred in getPassword method", e); // Replaced printStackTrace with secure logging
-      // do nothing - original business logic preserved
+      log.error("Unexpected error in getPassword method", e); // Replaced printStackTrace
     }
-    return (password);
+    return (password != null ? password : ""); // Return empty string if password not found/error
   }
 }

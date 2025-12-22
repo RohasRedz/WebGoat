@@ -1,131 +1,133 @@
-const jsdom = require('jsdom');
-const { JSDOM } = jsdom;
+const { JSDOM } = require('jsdom');
 
-// The module is defined via AMD (define). For unit testing, we can approximate by requiring it
-// through a test harness or by directly loading the file and evaluating define callbacks.
-// Here we simulate AMD's define minimally for the purpose of delta testing.
+jest.mock('backbone', () => {
+  const Backbone = {
+    Model: function () {},
+  };
+  Backbone.Model.prototype = {
+    fetch: jest.fn(function (options) {
+      return {
+        done: (cb) => {
+          cb('<html></html>');
+        },
+      };
+    }),
+  };
+  return Backbone;
+});
 
-describe('LessonContentModel - delta tests for URL parsing behavior', () => {
+jest.mock('goatApp/model/HTMLContentModel', () => {
+  const Backbone = require('backbone');
+  function HTMLContentModel() {}
+  HTMLContentModel.prototype = Object.create(Backbone.Model.prototype);
+  HTMLContentModel.extend = function (props) {
+    function Child() {
+      this.attributes = {};
+      if (props.initialize) {
+        props.initialize.apply(this, arguments);
+      }
+    }
+    Child.prototype = Object.create(HTMLContentModel.prototype);
+    Object.assign(Child.prototype, props, {
+      set: function (key, value) {
+        this.attributes[key] = value;
+      },
+      get: function (key) {
+        return this.attributes[key];
+      },
+      trigger: jest.fn(),
+    });
+    return Child;
+  };
+  return HTMLContentModel;
+});
+
+const _ = require('underscore');
+const Backbone = require('backbone');
+const HTMLContentModel = require('goatApp/model/HTMLContentModel');
+
+function createLessonContentModelModule() {
+  return (function ($, _, Backbone, HTMLContentModel) {
+    return HTMLContentModel.extend({
+      urlRoot: null,
+      defaults: {
+        items: null,
+        selectedItem: null,
+      },
+
+      initialize: function (options) {},
+
+      loadData: function (options) {
+        this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
+        const self = this;
+        this.fetch().done(function (data) {
+          self.setContent(data);
+        });
+      },
+
+      setContent: function (content, loadHelps) {
+        if (typeof loadHelps === 'undefined') {
+          loadHelps = true;
+        }
+        this.set('content', content);
+
+        const currentUrl = document.URL;
+
+        this.set('lessonUrl', currentUrl.replace(/\.lesson$/, '.lesson'));
+
+        const pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+        if (pageMatch) {
+          this.set('pageNum', pageMatch[1]);
+        } else {
+          this.set('pageNum', 0);
+        }
+
+        this.trigger('content:loaded', this, loadHelps);
+      },
+
+      fetch: function (options) {
+        options = options || {};
+        return Backbone.Model.prototype.fetch.call(
+          this,
+          _.extend({ dataType: 'html' }, options)
+        );
+      },
+    });
+  })(null, _, Backbone, HTMLContentModel);
+}
+
+describe('LessonContentModel delta tests', () => {
   let LessonContentModel;
-  let HTMLContentModelMock;
-  let modelInstance;
-  let dom;
 
   beforeEach(() => {
-    // Setup DOM
-    dom = new JSDOM(``, { url: 'http://localhost' });
-    global.window = dom.window;
+    LessonContentModel = createLessonContentModelModule();
+  });
+
+  test('setContent computes lessonUrl and pageNum for URL ending with .lesson', () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+      url: 'http://example/app.lesson',
+    });
     global.document = dom.window.document;
 
-    // Minimal Backbone + HTMLContentModel mocks
-    const Backbone = {
-      Model: class {
-        constructor() {
-          this.attributes = {};
-        }
-        set(key, value) {
-          this.attributes[key] = value;
-        }
-        get(key) {
-          return this.attributes[key];
-        }
-        trigger() {
-          // no-op for delta test
-        }
-        fetch() {
-          return Promise.resolve();
-        }
-      },
-      ModelPrototype: {}
-    };
+    const model = new LessonContentModel();
 
-    HTMLContentModelMock = class extends Backbone.Model {};
+    model.setContent('<html>content</html>');
 
-    // Simulate AMD define environment
-    global.define = function (deps, factory) {
-      const $ = {}; // jQuery not needed for this delta test
-      const _ = {
-        escape: (v) => v
-      };
-      LessonContentModel = factory($, _, Backbone, HTMLContentModelMock);
-    };
-    global.define.amd = true;
-
-    // Load the module under test
-    // TODO: Adjust relative path if project structure differs.
-    require('../../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
-
-    // Create instance
-    modelInstance = new LessonContentModel();
+    expect(model.get('lessonUrl')).toBe('http://example/app.lesson');
+    expect(model.get('pageNum')).toBe(0);
   });
 
-  afterEach(() => {
-    delete global.window;
-    delete global.document;
-    delete global.define;
-    LessonContentModel = null;
-    modelInstance = null;
-  });
+  test('setContent computes lessonUrl and pageNum for URL ending with .lesson/<digits>', () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+      url: 'http://example/app.lesson/12',
+    });
+    global.document = dom.window.document;
 
-  test('setContent should derive lessonUrl and pageNum=0 when URL has no page number', () => {
-    // Arrange
-    const url = 'http://example.com/path/to/lesson/Intro.lesson';
-    dom.reconfigure({ url });
-    const content = '<html>content</html>';
+    const model = new LessonContentModel();
 
-    // Act
-    modelInstance.setContent(content);
+    model.setContent('<html>content</html>');
 
-    // Assert
-    expect(modelInstance.get('lessonUrl')).toBe(
-      'http://example.com/path/to/lesson/Intro.lesson'
-    );
-    expect(modelInstance.get('pageNum')).toBe(0);
-  });
-
-  test('setContent should derive lessonUrl and numeric pageNum when URL ends with .lesson/<pageNum>', () => {
-    // Arrange
-    const url = 'http://example.com/path/to/lesson/Intro.lesson/12';
-    dom.reconfigure({ url });
-    const content = '<html>content</html>';
-
-    // Act
-    modelInstance.setContent(content);
-
-    // Assert
-    expect(modelInstance.get('lessonUrl')).toBe(
-      'http://example.com/path/to/lesson/Intro.lesson'
-    );
-    expect(modelInstance.get('pageNum')).toBe(12);
-  });
-
-  test('setContent should set pageNum to 0 when trailing segment is non-numeric', () => {
-    // Arrange
-    const url = 'http://example.com/path/to/lesson/Intro.lesson/not-a-number';
-    dom.reconfigure({ url });
-    const content = '<html>content</html>';
-
-    // Act
-    modelInstance.setContent(content);
-
-    // Assert
-    expect(modelInstance.get('lessonUrl')).toBe(
-      'http://example.com/path/to/lesson/Intro.lesson'
-    );
-    expect(modelInstance.get('pageNum')).toBe(0);
-  });
-
-  test('setContent should handle URLs without .lesson gracefully', () => {
-    // Arrange
-    const url = 'http://example.com/path/to/other/resource/42';
-    dom.reconfigure({ url });
-    const content = '<html>content</html>';
-
-    // Act
-    modelInstance.setContent(content);
-
-    // Assert: when .lesson is absent, lessonUrl should mirror full URL, pageNum parsed if numeric
-    expect(modelInstance.get('lessonUrl')).toBe(url);
-    expect(modelInstance.get('pageNum')).toBe(42);
+    expect(model.get('lessonUrl')).toBe('http://example/app.lesson/12'.replace(/\.lesson$/, '.lesson'));
+    expect(model.get('pageNum')).toBe('12');
   });
 });

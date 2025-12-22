@@ -32,27 +32,18 @@ define(['jquery',
             }
             this.set('content',content);
 
-            var currentUrl = String(document.URL || '');
-            // Use simple, bounded parsing instead of complex regex to avoid ReDoS
-            var lessonIndex = currentUrl.indexOf('.lesson');
-            if (lessonIndex !== -1) {
-                this.set('lessonUrl', currentUrl.substring(0, lessonIndex) + '.lesson');
-            } else {
-                this.set('lessonUrl', currentUrl);
-            }
+            var currentUrl = document.URL;
 
-            // Extract pageNum using a safer, constrained pattern
-            // Expect URLs like: <anything>.lesson/<1–4 digit number>
-            var pageNum = 0;
-            var lastSlash = currentUrl.lastIndexOf('/');
-            if (lastSlash !== -1 && lastSlash + 1 < currentUrl.length) {
-                var pageCandidate = currentUrl.substring(lastSlash + 1);
-                // Only accept 1–4 digits
-                if (/^\d{1,4}$/.test(pageCandidate)) {
-                    pageNum = parseInt(pageCandidate, 10);
-                }
+            // Replace ".lesson" suffix with ".lesson" (anchor to end of string to avoid excessive backtracking)
+            this.set('lessonUrl', currentUrl.replace(/\.lesson$/, '.lesson'));
+
+            // Extract page number using a more efficient, anchored pattern without leading .*
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
+            } else {
+                this.set('pageNum', 0);
             }
-            this.set('pageNum', pageNum);
 
             this.trigger('content:loaded',this,loadHelps);
         },

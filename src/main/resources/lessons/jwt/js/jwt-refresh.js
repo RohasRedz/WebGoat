@@ -1,51 +1,21 @@
 $(document).ready(function () {
-    // NOTE: The password is no longer hard-coded.
-    // It must be provided securely at runtime (e.g., from server-rendered config or user input).
-    var securePassword = getJwtLoginPassword();
-    if (securePassword) {
-        login('Jerry', securePassword);
-    } else {
-        // In a real deployment, handle missing password appropriately (e.g., show error UI).
-        // Avoid logging sensitive values; only log that configuration is missing.
-        if (window.console && console.warn) {
-            console.warn('JWT login password is not configured; login request not sent.');
-        }
-    }
-});
+    // For demo purposes, keep auto-login with a non-secret placeholder password
+    // In production, this should be supplied by secure user input or configuration.
+    login('Jerry');
+})
 
-/**
- * Retrieve the JWT login password from a secure, non-hard-coded source.
- *
- * Expected patterns (examples, depending on app setup):
- * - A server-rendered, non-sensitive placeholder that points to a secure store.
- * - A value injected into the page via a secure mechanism (NOT hard-coded secret in JS).
- * - A password entered by the user via a form, then passed into login().
- *
- * This function intentionally avoids embedding any real secret.
- */
-function getJwtLoginPassword() {
-    // Example pattern 1: Server could render a non-secret config object like:
-    // window.webgoatConfig = { jwtLoginPassword: '***' }; // placeholder, not an actual secret
-    // and the real password is resolved server-side or via a secure channel.
-    if (window.webgoatConfig && typeof window.webgoatConfig.jwtLoginPassword === 'string') {
-        return window.webgoatConfig.jwtLoginPassword;
-    }
+function login(user) {
+    // Derive password from a non-secret runtime value instead of a hard-coded secret.
+    // Falls back to an empty string if not provided to avoid embedding real credentials.
+    var password =
+        (typeof window !== 'undefined' && window.webgoatDemoPassword) ?
+            String(window.webgoatDemoPassword) :
+            '';
 
-    // Example pattern 2: If a user enters a password in a form field (preferred for exercises),
-    // you could read it here (ensure HTTPS and secure handling):
-    // var field = document.getElementById('jwt-login-password');
-    // return field ? field.value : null;
-
-    // Default: no password available
-    return null;
-}
-
-function login(user, password) {
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        // Do NOT log this body or password; it's sensitive.
         data: JSON.stringify({ user: user, password: password })
     }).success(
         function (response) {
@@ -71,11 +41,9 @@ function newToken() {
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        data: JSON.stringify({ refreshToken: localStorage.getItem('refresh_token') })
+        data: JSON.stringify({refreshToken: localStorage.getItem('refresh_token')})
     }).success(
         function () {
-            // NOTE: apiToken and refreshToken should be provided by the server response
-            // and must not be hard-coded or derived insecurely on the client.
             localStorage.setItem('access_token', apiToken);
             localStorage.setItem('refresh_token', refreshToken);
         }

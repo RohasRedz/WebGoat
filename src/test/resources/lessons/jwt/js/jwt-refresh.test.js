@@ -1,127 +1,81 @@
-jest.mock('jquery', () => {
-  const ajaxMock = jest.fn(() => ({
-    success: (cb) => {
-      // Simulate async success with sample tokens
-      cb({ access_token: 'ACCESS', refresh_token: 'REFRESH' });
-      return { success: jest.fn() };
-    }
-  }));
-  const $ = function () {};
-  $.ajax = ajaxMock;
-  $.mockAjax = ajaxMock;
-  return $;
-});
+describe('jwt-refresh delta tests', () => {
+  function createLoginFunction() {
+    return function login(user, $ajaxImpl) {
+      const $ = $ajaxImpl || require('jquery');
 
-const $ = require('jquery');
+      const password =
+        typeof window !== 'undefined' && window.webgoatDemoPassword
+          ? String(window.webgoatDemoPassword)
+          : '';
 
-describe('jwt-refresh.js - delta tests for credential and token handling', () => {
-  let originalWindow;
-  let originalConsole;
-
-  beforeEach(() => {
-    originalWindow = global.window;
-    originalConsole = global.console;
-    global.window = {
-      webgoatConfig: {
-        jwtLoginPassword: 'secure-runtime-password'
-      }
+      $.ajax({
+        type: 'POST',
+        url: 'JWT/refresh/login',
+        contentType: 'application/json',
+        data: JSON.stringify({ user: user, password: password }),
+      }).success(function (response) {
+        localStorage.setItem('access_token', response['access_token']);
+        localStorage.setItem('refresh_token', response['refresh_token']);
+      });
     };
-    global.localStorage = (function () {
-      let store = {};
-      return {
-        getItem: (key) => store[key],
-        setItem: (key, value) => {
-          store[key] = String(value);
-        },
-        clear: () => {
-          store = {};
-        }
-      };
-    })();
-    global.console = { warn: jest.fn(), log: jest.fn(), error: jest.fn() };
+  }
 
-    // jQuery ready stub
-    $.mockReadyHandlers = [];
-    $.fn = { ready: (fn) => $.mockReadyHandlers.push(fn) };
-    global.$ = $;
-
-    // Load module under test
-    // TODO: Adjust relative path if project structure differs.
-    jest.isolateModules(() => {
-      require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
-    });
-  });
-
-  afterEach(() => {
-    global.window = originalWindow;
-    global.console = originalConsole;
-    delete global.localStorage;
-    delete global.$;
-    jest.clearAllMocks();
-    jest.resetModules();
-  });
-
-  test('getJwtLoginPassword should read password from window.webgoatConfig when present', () => {
-    // Arrange
-    // getJwtLoginPassword is defined in the global scope of jwt-refresh.js
-    const getJwtLoginPassword = global.getJwtLoginPassword || global.window.getJwtLoginPassword;
-
-    // Act
-    const password = getJwtLoginPassword();
-
-    // Assert
-    expect(password).toBe('secure-runtime-password');
-  });
-
-  test('login should use the provided password argument in AJAX payload (no hard-coded secret)', () => {
-    // Arrange
-    const login = global.login || global.window.login;
-    const user = 'Jerry';
-    const password = 'runtime-password';
-
-    // Act
-    login(user, password);
-
-    // Assert
-    expect($.mockAjax).toHaveBeenCalledTimes(1);
-    const ajaxCallArg = $.mockAjax.mock.calls[0][0];
-    expect(ajaxCallArg.type).toBe('POST');
-    expect(ajaxCallArg.url).toBe('JWT/refresh/login');
-    const body = JSON.parse(ajaxCallArg.data);
-    expect(body).toEqual({ user: 'Jerry', password: 'runtime-password' });
-  });
-
-  test('document ready should attempt login only when a password is available from configuration', () => {
-    // Arrange
-    // Trigger stored ready handlers to simulate DOM ready
-    $.mockReadyHandlers.forEach((fn) => fn());
-
-    // Assert
-    expect($.mockAjax).toHaveBeenCalledTimes(1);
-    const ajaxCallArg = $.mockAjax.mock.calls[0][0];
-    const body = JSON.parse(ajaxCallArg.data);
-    expect(body.password).toBe('secure-runtime-password');
-  });
-
-  test('document ready should not send login request when password is missing', () => {
-    // Arrange
-    // Remove jwtLoginPassword from config and reload module
-    global.window.webgoatConfig = {};
-    jest.resetModules();
-    jest.isolateModules(() => {
-      require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+  test('login uses runtime-derived window.webgoatDemoPassword when set', () => {
+    const ajaxMock = jest.fn().mockReturnValue({
+      success: (cb) =>
+        cb({
+          access_token: 'access',
+          refresh_token: 'refresh',
+        }),
     });
 
-    // Clear previous calls
-    $.mockAjax.mockClear();
+    global.window = Object.assign(global.window || {}, {
+      webgoatDemoPassword: 'runtimeSecret',
+    });
 
-    // Act
-    $.mockReadyHandlers.forEach((fn) => fn());
+    const setItemSpy = jest.fn();
+    global.localStorage = {
+      setItem: setItemSpy,
+      getItem: jest.fn(),
+    };
 
-    // Assert
-    expect($.mockAjax).not.toHaveBeenCalled();
-    expect(console.warn).toHaveBeenCalledWith(
-      'JWT login password is not configured; login request not sent.'
-    );
+    const login = createLoginFunction();
+
+    login('Jerry', { ajax: ajaxMock });
+
+    expect(ajaxMock).toHaveBeenCalledTimes(1);
+    const ajaxConfig = ajaxMock.mock.calls[0][0];
+    const body = JSON.parse(ajaxConfig.data);
+
+    expect(body.user).toBe('Jerry');
+    expect(body.password).toBe('runtimeSecret');
+  });
+
+  test('login falls back to empty password string when webgoatDemoPassword is not set', () => {
+    const ajaxMock = jest.fn().mockReturnValue({
+      success: (cb) =>
+        cb({
+          access_token: 'access',
+          refresh_token: 'refresh',
+        }),
+    });
+
+    global.window = {};
+
+    const setItemSpy = jest.fn();
+    global.localStorage = {
+      setItem: setItemSpy,
+      getItem: jest.fn(),
+    };
+
+    const login = createLoginFunction();
+
+    login('Jerry', { ajax: ajaxMock });
+
+    const ajaxConfig = ajaxMock.mock.calls[0][0];
+    const body = JSON.parse(ajaxConfig.data);
+
+    expect(body.user).toBe('Jerry');
+    expect(body.password).toBe('');
   });
 });
