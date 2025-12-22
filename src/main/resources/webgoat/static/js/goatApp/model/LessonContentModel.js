@@ -19,12 +19,7 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            // Ensure `options.name` is a reasonable, bounded string to avoid ReDoS and overlong inputs
-            var lessonName = typeof options.name === 'string' ? options.name : '';
-            // Limit length and allowed characters to reduce risk of regex/path abuse
-            lessonName = lessonName.slice(0, 128).replace(/[^a-zA-Z0-9_\-./]/g, '');
-
-            this.urlRoot = encodeURIComponent(lessonName) + '.lesson';
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -37,17 +32,25 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use precompiled, simple regexes to avoid catastrophic backtracking
-            var lessonUrlRegex = /\.lesson.*/;
-            var pageNumRegex = /.*\.lesson\/(\d{1,4})$/;
-
-            this.set('lessonUrl', document.URL.replace(lessonUrlRegex, '.lesson'));
-
-            var pageMatch = document.URL.match(pageNumRegex);
-            if (pageMatch && pageMatch[1]) {
-                this.set('pageNum', pageMatch[1]);
+            // Use a precompiled, bounded regex to mitigate potential ReDoS on arbitrary URLs
+            // Pattern: any characters up to ".lesson", then replace the trailing part with ".lesson"
+            var lessonUrlPattern = /^(.+?\.lesson)(?:\/.*)?$/;
+            var currentUrl = String(document.URL);
+            var lessonUrlMatch = lessonUrlPattern.exec(currentUrl);
+            if (lessonUrlMatch) {
+                this.set('lessonUrl', lessonUrlMatch[1]);
             } else {
-                this.set('pageNum', 0);
+                // Fallback: original replacement, applied only if a simple ".lesson" segment exists
+                this.set('lessonUrl', currentUrl.replace(/\.lesson.*/,'.lesson'));
+            }
+
+            // Restrict page number extraction to a safer, precompiled regex with explicit anchors
+            var pageNumPattern = /^(.*\.lesson\/)(\d{1,4})$/;
+            var pageNumMatch = pageNumPattern.exec(currentUrl);
+            if (pageNumMatch) {
+                this.set('pageNum', pageNumMatch[2]);
+            } else {
+                this.set('pageNum',0);
             }
             this.trigger('content:loaded',this,loadHelps);
         },

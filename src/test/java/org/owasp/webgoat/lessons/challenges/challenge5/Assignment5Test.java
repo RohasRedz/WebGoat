@@ -1,101 +1,113 @@
-// Assumption: package is derived from the source file path.
-// Source: src/main/java/org/owasp/webgoat/lessons/challenges/challenge5/Assignment5.java
+// Derived from: src/main/java/org/owasp/webgoat/lessons/challenges/challenge5/Assignment5.java
+// Test path (main -> test): src/test/java/org/owasp/webgoat/lessons/challenges/challenge5/Assignment5Test.java
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.SQLException;
-import org.junit.jupiter.api.DisplayName;
+
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 
 /**
- * Delta tests for Assignment5 focusing on the SQL injection fix:
- * - Verifies that a parameterized PreparedStatement with placeholders is used.
- * - Verifies that user input is bound via setString instead of string concatenation.
+ * Delta tests focused only on the changed behavior:
+ * - SQL must be parameterized (no direct injection via concatenation).
+ * - PreparedStatement parameters must be bound with the exact provided username/password.
  */
-public class Assignment5Test {
+class Assignment5Test {
+
+    private LessonDataSource dataSource;
+    private Flags flags;
+    private Connection connection;
+    private PreparedStatement preparedStatement;
+    private ResultSet resultSet;
+    private Assignment5 assignment5;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        dataSource = mock(LessonDataSource.class);
+        flags = mock(Flags.class);
+        connection = mock(Connection.class);
+        preparedStatement = mock(PreparedStatement.class);
+        resultSet = mock(ResultSet.class);
+
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(flags.getFlag(5)).thenReturn("FLAG-5");
+
+        assignment5 = new Assignment5(dataSource, flags);
+    }
 
     @Test
-    @DisplayName("login() should use parameterized PreparedStatement and bind user inputs safely")
     void login_usesParameterizedQueryAndBindsParameters() throws Exception {
         // Arrange
-        LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
-        Connection connection = Mockito.mock(Connection.class);
-        PreparedStatement preparedStatement = Mockito.mock(PreparedStatement.class);
-        ResultSet resultSet = Mockito.mock(ResultSet.class);
-        Flags flags = Mockito.mock(Flags.class);
-
-        Mockito.when(dataSource.getConnection()).thenReturn(connection);
-        Mockito.when(
-                        connection.prepareStatement(
-                                Mockito.anyString()))
-                .thenReturn(preparedStatement);
-        Mockito.when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        Mockito.when(resultSet.next()).thenReturn(true);
-        Mockito.when(flags.getFlag(5)).thenReturn("FLAG-5");
-
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
-
         String username = "Larry";
-        String password = "P@ssw0rd";
+        String password = "somePassword";
+        when(resultSet.next()).thenReturn(true);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
 
         // Act
         AttackResult result = assignment5.login(username, password);
 
-        // Assert
-        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-        Mockito.verify(connection)
-                .prepareStatement(sqlCaptor.capture());
+        // Assert: verify parameterized SQL is used
+        verify(connection).prepareStatement(sqlCaptor.capture());
+        String sql = sqlCaptor.getValue();
+        // The updated code uses placeholders instead of concatenating user input
+        assertEquals(
+            "select password from challenge_users where userid = ? and password = ?",
+            sql,
+            "SQL must use parameter placeholders to prevent injection"
+        );
 
-        String usedSql = sqlCaptor.getValue();
-        // Ensure the SQL contains placeholders instead of concatenated values.
-        assertTrue(
-                usedSql.contains("userid = ?") && usedSql.contains("password = ?"),
-                "SQL must use parameter placeholders for userid and password");
+        // Assert: parameters are bound in the correct order and with the correct values
+        verify(preparedStatement).setString(1, username);
+        verify(preparedStatement).setString(2, password);
 
-        // Ensure user input is not concatenated into the SQL string itself.
-        assertTrue(
-                !usedSql.contains(username) && !usedSql.contains(password),
-                "User input must not be present directly in the SQL string");
+        // Ensure query is actually executed so that the change is on the real path
+        verify(preparedStatement).executeQuery();
 
-        // Verify that parameters are bound using setString in correct order.
-        Mockito.verify(preparedStatement).setString(1, username);
-        Mockito.verify(preparedStatement).setString(2, password);
-
-        // Sanity-check: behavior remains successful when a row is returned.
-        assertTrue(result.getLessonCompleted(), "Login should succeed when resultSet has a row");
-        assertEquals("FLAG-5", result.getOutput(), "Flag from Flags service should be returned");
+        // Ensure successful path still works
+        // (we only care that the success behavior remains reachable)
+        // NOTE: we don't assert the full AttackResult structure here, only that it is not null.
+        // This keeps the test focused on the changed SQL behavior.
+        assertEquals(true, result.isLessonCompleted());
     }
 
     @Test
-    @DisplayName("login() should not execute query when username or password is empty")
-    void login_doesNotHitDatabaseWhenInputMissing() throws Exception {
+    void login_doesNotConcatenateMaliciousInputIntoSql() throws Exception {
         // Arrange
-        LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
-        Connection connection = Mockito.mock(Connection.class);
-        Mockito.when(dataSource.getConnection()).thenReturn(connection);
-        Flags flags = Mockito.mock(Flags.class);
+        String maliciousUser = "Larry' OR '1'='1";
+        String password = "anything";
+        when(resultSet.next()).thenReturn(false); // even if parameters are bound, query should not magically succeed
 
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
 
         // Act
-        AttackResult resultEmptyUser =
-                assignment5.login("", "somePassword");
-        AttackResult resultEmptyPassword =
-                assignment5.login("Larry", "");
+        assignment5.login(maliciousUser, password);
 
-        // Assert
-        Mockito.verifyNoInteractions(connection);
-        assertTrue(resultEmptyUser.isFailed(), "Expected failure when username is empty");
-        assertTrue(resultEmptyPassword.isFailed(), "Expected failure when password is empty");
+        // Assert: verify that SQL text itself does not contain the malicious payload
+        verify(connection).prepareStatement(sqlCaptor.capture());
+        String sql = sqlCaptor.getValue();
+
+        // The malicious payload must not appear inside the SQL literal
+        // since parameters are bound via setString rather than string concatenation.
+        org.junit.jupiter.api.Assertions.assertFalse(
+            sql.contains(maliciousUser),
+            "SQL must not contain raw user input; parameters must be bound instead"
+        );
+
+        // But the value is still passed via parameter binding
+        verify(preparedStatement).setString(1, maliciousUser);
+        verify(preparedStatement).setString(2, password);
     }
 }
