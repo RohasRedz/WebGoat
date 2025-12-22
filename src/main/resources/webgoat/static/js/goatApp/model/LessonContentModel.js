@@ -32,26 +32,28 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a precompiled, bounded regex to mitigate potential ReDoS on arbitrary URLs
-            // Pattern: any characters up to ".lesson", then replace the trailing part with ".lesson"
-            var lessonUrlPattern = /^(.+?\.lesson)(?:\/.*)?$/;
-            var currentUrl = String(document.URL);
-            var lessonUrlMatch = lessonUrlPattern.exec(currentUrl);
-            if (lessonUrlMatch) {
-                this.set('lessonUrl', lessonUrlMatch[1]);
+            var currentUrl = String(document.URL || '');
+            // Use simple, bounded parsing instead of complex regex to avoid ReDoS
+            var lessonIndex = currentUrl.indexOf('.lesson');
+            if (lessonIndex !== -1) {
+                this.set('lessonUrl', currentUrl.substring(0, lessonIndex) + '.lesson');
             } else {
-                // Fallback: original replacement, applied only if a simple ".lesson" segment exists
-                this.set('lessonUrl', currentUrl.replace(/\.lesson.*/,'.lesson'));
+                this.set('lessonUrl', currentUrl);
             }
 
-            // Restrict page number extraction to a safer, precompiled regex with explicit anchors
-            var pageNumPattern = /^(.*\.lesson\/)(\d{1,4})$/;
-            var pageNumMatch = pageNumPattern.exec(currentUrl);
-            if (pageNumMatch) {
-                this.set('pageNum', pageNumMatch[2]);
-            } else {
-                this.set('pageNum',0);
+            // Extract pageNum using a safer, constrained pattern
+            // Expect URLs like: <anything>.lesson/<1–4 digit number>
+            var pageNum = 0;
+            var lastSlash = currentUrl.lastIndexOf('/');
+            if (lastSlash !== -1 && lastSlash + 1 < currentUrl.length) {
+                var pageCandidate = currentUrl.substring(lastSlash + 1);
+                // Only accept 1–4 digits
+                if (/^\d{1,4}$/.test(pageCandidate)) {
+                    pageNum = parseInt(pageCandidate, 10);
+                }
             }
+            this.set('pageNum', pageNum);
+
             this.trigger('content:loaded',this,loadHelps);
         },
 
