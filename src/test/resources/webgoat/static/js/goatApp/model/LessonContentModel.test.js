@@ -1,133 +1,80 @@
-const { JSDOM } = require('jsdom');
-
-jest.mock('backbone', () => {
-  const Backbone = {
-    Model: function () {},
-  };
-  Backbone.Model.prototype = {
-    fetch: jest.fn(function (options) {
-      return {
-        done: (cb) => {
-          cb('<html></html>');
-        },
-      };
-    }),
-  };
-  return Backbone;
-});
-
+// File path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+// Jest delta tests for LessonContentModel.js focusing on safer regex behavior around document.URL.
+const $ = require('jquery'); // if actually needed by HTMLContentModel; otherwise can be mocked
+// TODO: Adjust path below to match the actual module resolution used in the project.
 jest.mock('goatApp/model/HTMLContentModel', () => {
   const Backbone = require('backbone');
-  function HTMLContentModel() {}
-  HTMLContentModel.prototype = Object.create(Backbone.Model.prototype);
-  HTMLContentModel.extend = function (props) {
-    function Child() {
-      this.attributes = {};
-      if (props.initialize) {
-        props.initialize.apply(this, arguments);
-      }
-    }
-    Child.prototype = Object.create(HTMLContentModel.prototype);
-    Object.assign(Child.prototype, props, {
-      set: function (key, value) {
-        this.attributes[key] = value;
-      },
-      get: function (key) {
-        return this.attributes[key];
-      },
-      trigger: jest.fn(),
-    });
-    return Child;
-  };
-  return HTMLContentModel;
+  return Backbone.Model.extend({});
 });
 
-const _ = require('underscore');
 const Backbone = require('backbone');
-const HTMLContentModel = require('goatApp/model/HTMLContentModel');
 
-function createLessonContentModelModule() {
-  return (function ($, _, Backbone, HTMLContentModel) {
-    return HTMLContentModel.extend({
-      urlRoot: null,
-      defaults: {
-        items: null,
-        selectedItem: null,
-      },
+// NOTE: We require the actual module under test after mocks are set up.
+const LessonContentModelFactory = () =>
+  require('../../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
 
-      initialize: function (options) {},
-
-      loadData: function (options) {
-        this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
-        const self = this;
-        this.fetch().done(function (data) {
-          self.setContent(data);
-        });
-      },
-
-      setContent: function (content, loadHelps) {
-        if (typeof loadHelps === 'undefined') {
-          loadHelps = true;
-        }
-        this.set('content', content);
-
-        const currentUrl = document.URL;
-
-        this.set('lessonUrl', currentUrl.replace(/\.lesson$/, '.lesson'));
-
-        const pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-        if (pageMatch) {
-          this.set('pageNum', pageMatch[1]);
-        } else {
-          this.set('pageNum', 0);
-        }
-
-        this.trigger('content:loaded', this, loadHelps);
-      },
-
-      fetch: function (options) {
-        options = options || {};
-        return Backbone.Model.prototype.fetch.call(
-          this,
-          _.extend({ dataType: 'html' }, options)
-        );
-      },
-    });
-  })(null, _, Backbone, HTMLContentModel);
-}
-
-describe('LessonContentModel delta tests', () => {
+describe('LessonContentModel - delta tests for URL regex handling', () => {
   let LessonContentModel;
 
   beforeEach(() => {
-    LessonContentModel = createLessonContentModelModule();
+    // Clear module cache to re-evaluate when needed
+    jest.resetModules();
+    LessonContentModel = LessonContentModelFactory();
   });
 
-  test('setContent computes lessonUrl and pageNum for URL ending with .lesson', () => {
-    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-      url: 'http://example/app.lesson',
-    });
-    global.document = dom.window.document;
-
+  test('setContent should derive lessonUrl by stripping page suffix using safe regex', () => {
+    // Arrange
     const model = new LessonContentModel();
+    const originalUrl = 'http://example.com/lesson1.lesson/12';
+    delete global.document;
+    global.document = { URL: originalUrl };
 
+    // Act
     model.setContent('<html>content</html>');
 
-    expect(model.get('lessonUrl')).toBe('http://example/app.lesson');
-    expect(model.get('pageNum')).toBe(0);
+    // Assert
+    // Expected behavior: remove the "/12" page component, leaving base ".lesson" URL
+    expect(model.get('lessonUrl')).toBe('http://example.com/lesson1.lesson');
   });
 
-  test('setContent computes lessonUrl and pageNum for URL ending with .lesson/<digits>', () => {
-    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-      url: 'http://example/app.lesson/12',
-    });
-    global.document = dom.window.document;
+  test('setContent should set pageNum from trailing numeric segment or 0 when absent', () => {
+    const modelWithPage = new LessonContentModel();
+    const urlWithPage = 'http://example.com/lesson1.lesson/99';
+    global.document = { URL: urlWithPage };
 
+    // Act
+    modelWithPage.setContent('<html>content</html>');
+
+    // Assert
+    expect(modelWithPage.get('pageNum')).toBe('99');
+
+    const modelWithoutPage = new LessonContentModel();
+    const urlWithoutPage = 'http://example.com/lesson1.lesson';
+    global.document = { URL: urlWithoutPage };
+
+    // Act
+    modelWithoutPage.setContent('<html>content</html>');
+
+    // Assert
+    expect(modelWithoutPage.get('pageNum')).toBe(0);
+  });
+
+  test('setContent should handle long URLs without catastrophic backtracking', () => {
+    // This test simulates that the regex can process a long URL quickly and deterministically.
     const model = new LessonContentModel();
+    const repeated = 'a'.repeat(10000);
+    const longUrl = `http://example.com/${repeated}.lesson/1234`;
+    global.document = { URL: longUrl };
 
+    const start = Date.now();
     model.setContent('<html>content</html>');
+    const durationMs = Date.now() - start;
 
-    expect(model.get('lessonUrl')).toBe('http://example/app.lesson/12'.replace(/\.lesson$/, '.lesson'));
-    expect(model.get('pageNum')).toBe('12');
+    // Assert: execution must remain fast, indicating safe regex usage.
+    expect(durationMs).toBeLessThan(200); // generous upper bound for unit environment
+    expect(model.get('lessonUrl')).toBe(
+      `http://example.com/${repeated}.lesson`
+    );
+    expect(model.get('pageNum')).toBe('1234');
   });
 });

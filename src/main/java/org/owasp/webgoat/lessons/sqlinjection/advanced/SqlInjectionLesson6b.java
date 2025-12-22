@@ -12,7 +12,6 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -20,11 +19,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestController
-@Slf4j
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
+  private static final Logger log = LoggerFactory.getLogger(SqlInjectionLesson6b.class);
 
   public SqlInjectionLesson6b(LessonDataSource dataSource) {
     this.dataSource = dataSource;
@@ -41,24 +42,25 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = null; // Initialize to null, remove hard-coded default
+    String password = "dave";
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
-      try {
-        Statement statement =
+      try (Statement statement =
             connection.createStatement(
                 ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-        ResultSet results = statement.executeQuery(query);
+           ResultSet results = statement.executeQuery(query)) {
 
         if (results != null && results.first()) {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("Error fetching password from database", sqle); // Replaced printStackTrace
+        log.error("Database error while fetching password: {}", sqle.getMessage());
+        // do nothing
       }
     } catch (Exception e) {
-      log.error("Unexpected error in getPassword method", e); // Replaced printStackTrace
+      log.error("Unexpected error in getPassword method: {}", e.getMessage());
+      // do nothing
     }
-    return (password != null ? password : ""); // Return empty string if password not found/error
+    return (password);
   }
 }

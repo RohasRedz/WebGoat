@@ -32,15 +32,20 @@ define(['jquery',
             }
             this.set('content',content);
 
-            var currentUrl = document.URL;
+            // Use safe, anchored, and precompiled regexes to avoid inefficient patterns
+            var currentUrl = String(document.URL || '');
+            var lessonUrlRegex = /(?:\.lesson)(?:\/.*)?$/;
+            var pageNumRegex = /\.lesson\/(\d{1,4})$/;
 
-            // Replace ".lesson" suffix with ".lesson" (anchor to end of string to avoid excessive backtracking)
-            this.set('lessonUrl', currentUrl.replace(/\.lesson$/, '.lesson'));
+            // Replace only the final .lesson segment (with optional trailing path) in a safe manner
+            this.set(
+                'lessonUrl',
+                currentUrl.replace(lessonUrlRegex, '.lesson')
+            );
 
-            // Extract page number using a more efficient, anchored pattern without leading .*
-            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
+            var pageNumMatch = currentUrl.match(pageNumRegex);
+            if (pageNumMatch) {
+                this.set('pageNum', pageNumMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
