@@ -1,31 +1,104 @@
-// Delta Jest tests for jwt-refresh.js focusing only on the secret handling changes:
-// - SECRET must come from process.env.JWT_SECRET
-// - Module throws on require if JWT_SECRET is missing.
+/**
+ * Delta tests for jwt-refresh.js focusing on changed behavior:
+ * - login() must abort when no password is configured via #jwt-login-config data attribute.
+ * - login() must proceed (issue AJAX request) when the password is properly configured.
+ */
 
-const path = require('path');
+describe('jwt-refresh (delta tests)', () => {
+  let $ajaxMock;
+  let $;
 
-describe('jwt-refresh SECRET configuration (delta test)', () => {
-    const modulePath = path.resolve(__dirname, '../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+  beforeEach(() => {
+    jest.resetModules();
+    jest.clearAllMocks();
 
-    afterEach(() => {
-        jest.resetModules();
-        delete process.env.JWT_SECRET;
-    });
+    // Mock jQuery with minimal features: ready, ajax, and a simple selector
+    $ajaxMock = jest.fn().mockReturnValue({ success: (cb) => cb({ access_token: 'AT', refresh_token: 'RT' }) });
 
-    test('module throws at require-time when JWT_SECRET is not defined', () => {
-        delete process.env.JWT_SECRET;
+    $ = function (selector) {
+      if (selector === '#jwt-login-config') {
+        return {
+          data: (key) => {
+            if (key === 'jwtPassword') {
+              return $.mockPassword;
+            }
+            return undefined;
+          }
+        };
+      }
+      // document.ready handler
+      if (typeof selector === 'function') {
+        selector();
+      }
+      return {};
+    };
+    $.ajax = $ajaxMock;
+    $.mockPassword = undefined;
 
-        expect(() => {
-            require(modulePath);
-        }).toThrow(/JWT secret is not configured/i);
-    });
+    global.$ = $;
+    global.jQuery = $;
 
-    test('module requires successfully when JWT_SECRET is defined', () => {
-        process.env.JWT_SECRET = 'test_secret_value';
+    // Mock localStorage for tokens (focus is on behavior, not persistence)
+    global.localStorage = {
+      store: {},
+      setItem(key, value) {
+        this.store[key] = value;
+      },
+      getItem(key) {
+        return this.store[key];
+      }
+    };
 
-        const router = require(modulePath);
+    // Mock console.error to assert secure failure behavior
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
 
-        expect(router).toBeDefined();
-        expect(typeof router).toBe('function');
-    });
+  afterEach(() => {
+    delete global.$;
+    delete global.jQuery;
+    delete global.localStorage;
+    jest.restoreAllMocks();
+  });
+
+  function loadModule() {
+    // Require the module after globals are set so it picks up our mocks
+    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+  }
+
+  test('login aborts and does not call AJAX when password is not configured', () => {
+    // Arrange: no password configured
+    $.mockPassword = undefined;
+
+    loadModule();
+
+    // The module calls login('Jerry') on document ready; with no password,
+    // it should log an error and not call $.ajax.
+    expect($ajaxMock).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      'JWT login password is not configured. Aborting login call.'
+    );
+  });
+
+  test('login proceeds and calls AJAX when password is configured', () => {
+    // Arrange: configure password via data attribute
+    $.mockPassword = 'configured-secret';
+
+    loadModule();
+
+    // The module should have called $.ajax with the password read from configuration
+    expect($ajaxMock).toHaveBeenCalledTimes(1);
+    const callArgs = $ajaxMock.mock.calls[0][0];
+
+    expect(callArgs.type).toBe('POST');
+    expect(callArgs.url).toBe('JWT/refresh/login');
+    expect(callArgs.contentType).toBe('application/json');
+
+    const payload = JSON.parse(callArgs.data);
+    expect(payload.user).toBe('Jerry');
+    expect(payload.password).toBe('configured-secret');
+
+    // Ensure tokens are still set as side effect of success callback
+    expect(global.localStorage.getItem('access_token')).toBe('AT');
+    expect(global.localStorage.getItem('refresh_token')).toBe('RT');
+  });
 });

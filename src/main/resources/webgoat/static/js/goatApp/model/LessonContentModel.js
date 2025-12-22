@@ -1,35 +1,54 @@
-define(['jquery', 'underscore', 'backbone'], function ($, _, Backbone) {
+define(['jquery',
+    'underscore',
+    'backbone',
+    'goatApp/model/HTMLContentModel'],
+     function($,
+        _,
+        Backbone,
+        HTMLContentModel){
 
-    // Simple, efficient, and safe regular expression for titles:
-    // - Allows letters, digits, spaces, and basic punctuation.
-    // - No nested quantifiers or ambiguous patterns (avoids ReDoS).
-    var TITLE_REGEX = /^[A-Za-z0-9 _.,!'"\-()]+$/;
-
-    var LessonContentModel = Backbone.Model.extend({
-
+    return HTMLContentModel.extend({
+        urlRoot:null,
         defaults: {
-            title: '',
-            introduction: '',
-            assignments: [],
-            showNextButton: false
+            items:null,
+            selectedItem:null
         },
 
-        validate: function (attrs) {
-            if (typeof attrs.title !== 'string' || attrs.title.length === 0) {
-                return 'Title is required';
-            }
+        initialize: function (options) {
 
-            // New: Efficient, safe regex-based validation for title
-            if (!TITLE_REGEX.test(attrs.title)) {
-                return 'Title contains invalid characters';
-            }
+        },
 
-            if (!_.isArray(attrs.assignments)) {
-                return 'Assignments must be an array';
+        loadData: function(options) {
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
+            var self = this;
+            this.fetch().done(function(data) {
+                self.setContent(data);
+            });
+        },
+
+        setContent: function(content, loadHelps) {
+            if (typeof loadHelps === 'undefined') {
+                loadHelps = true;
             }
-            return undefined;
+            this.set('content',content);
+
+            // Use a precompiled, simple regex to avoid catastrophic backtracking
+            var pageNumPattern = /.*\.lesson\/(\d{1,4})$/;
+            var currentUrl = String(document.URL || '');
+
+            this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
+
+            if (pageNumPattern.test(currentUrl)) {
+                this.set('pageNum', currentUrl.replace(pageNumPattern, '$1'));
+            } else {
+                this.set('pageNum',0);
+            }
+            this.trigger('content:loaded',this,loadHelps);
+        },
+
+        fetch: function (options) {
+            options = options || {};
+            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
         }
     });
-
-    return LessonContentModel;
 });
