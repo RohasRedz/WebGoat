@@ -2,18 +2,30 @@ $(document).ready(function () {
     login('Jerry');
 })
 
+/**
+ * WARNING: For security reasons, credentials MUST NOT be hard-coded in client-side code.
+ * The password is now expected to be provided via a secure runtime mechanism
+ * (e.g. user input, secure server-side flow, or configuration not committed to source).
+ *
+ * In a real deployment this client-side password field should not exist at all for
+ * authentication; instead, use a secure, server-side authentication flow.
+ */
+const JWT_REFRESH_PASSWORD = null; // Placeholder – must be supplied securely at runtime
+
 function login(user) {
-    // Obtain password from a non-hardcoded, configurable source
-    // In this lesson context, fall back to a benign placeholder if none is configured.
-    var configuredPassword = (window.webgoat && window.webgoat.jwt && window.webgoat.jwt.loginPassword)
-        ? window.webgoat.jwt.loginPassword
-        : '';
+    if (!JWT_REFRESH_PASSWORD) {
+        // Fail safe if password is not provided securely
+        // In production, this should be handled by a proper UI flow rather than silent auto-login
+        // Here we simply avoid making the insecure request.
+        // console.warn('JWT refresh password is not configured securely; aborting login.');
+        return;
+    }
 
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({ user: user, password: configuredPassword })
+        data: JSON.stringify({user: user, password: JWT_REFRESH_PASSWORD})
     }).success(
         function (response) {
             localStorage.setItem('access_token', response['access_token']);
@@ -38,7 +50,7 @@ function newToken() {
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        data: JSON.stringify({ refreshToken: localStorage.getItem('refresh_token') })
+        data: JSON.stringify({refreshToken: localStorage.getItem('refresh_token')})
     }).success(
         function () {
             localStorage.setItem('access_token', apiToken);

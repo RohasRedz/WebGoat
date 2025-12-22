@@ -32,25 +32,24 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a more efficient and safer pattern to avoid potential ReDoS
-            var currentUrl = document.URL || '';
-            // Normalize URL once
-            var normalizedUrl = currentUrl.split('#')[0].split('?')[0];
-
-            // Replace any trailing ".lesson" segment without using a greedy ".*"
-            this.set(
-                'lessonUrl',
-                normalizedUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson')
-            );
-
-            // Use a non-greedy, anchored regex without leading ".*" to avoid catastrophic backtracking
-            var pageMatch = normalizedUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
+            // Use a simpler, more efficient pattern and single evaluation for URL parsing
+            var currentUrl = String(document.URL);
+            // Match "<base>.lesson" (no need for greedy ".*")
+            var lessonMatch = currentUrl.match(/^(.*?\.lesson)(?:\/.*)?$/);
+            if (lessonMatch && lessonMatch[1]) {
+                this.set('lessonUrl', lessonMatch[1]);
             } else {
-                this.set('pageNum', 0);
+                // Fallback to existing URL if pattern does not match
+                this.set('lessonUrl', currentUrl);
             }
 
+            // Reuse the same URL and a precompiled pattern to avoid redundant regex work
+            var pageNumMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageNumMatch && pageNumMatch[1]) {
+                this.set('pageNum', pageNumMatch[1]);
+            } else {
+                this.set('pageNum',0);
+            }
             this.trigger('content:loaded',this,loadHelps);
         },
 

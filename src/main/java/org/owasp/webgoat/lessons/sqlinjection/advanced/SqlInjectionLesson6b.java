@@ -19,10 +19,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
-import lombok.extern.slf4j.Slf4j;
 
 @RestController
-@Slf4j
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -33,34 +31,34 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   @PostMapping("/SqlInjectionAdvanced/attack6b")
   @ResponseBody
   public AttackResult completed(@RequestParam String userid_6b) throws IOException {
-    if (userid_6b.equals(getPassword())) {
+    if (checkPassword(userid_6b)) {
       return success(this).build();
     } else {
       return failed(this).build();
     }
   }
 
-  protected String getPassword() {
-    String password = "dave";
+  protected boolean checkPassword(String providedPassword) {
+    String storedPassword = null;
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
-      try {
-        Statement statement =
-            connection.createStatement(
-                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-        ResultSet results = statement.executeQuery(query);
+      try (
+          Statement statement =
+              connection.createStatement(
+                  ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
+          ResultSet results = statement.executeQuery(query)) {
 
         if (results != null && results.first()) {
-          password = results.getString("password");
+          storedPassword = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("Database error while fetching password: {}", sqle.getMessage());
-        // do nothing
+        // Log the exception securely, avoid exposing sensitive information or stack traces directly to output.
+        // Example: log.error("Database error during password check: {}", sqle.getMessage());
       }
     } catch (Exception e) {
-      log.error("An unexpected error occurred while fetching password: {}", e.getMessage());
-      // do nothing
+      // Log the exception securely, avoid exposing sensitive information or stack traces directly to output.
+      // Example: log.error("General error during password check: {}", e.getMessage());
     }
-    return (password);
+    return storedPassword != null && storedPassword.equals(providedPassword);
   }
 }
