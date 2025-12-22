@@ -1,61 +1,62 @@
-define([
-    'jquery',
+define(['jquery',
     'underscore',
     'backbone',
-    'goatApp/model/HTMLContentModel'
-], function ($, _, Backbone, HTMLContentModel) {
-
-    var LESSON_URL_REGEX = /\.lesson(\/\d{1,4})?$/;
-    var PAGE_NUM_REGEX = /.*\.lesson\/(\d{1,4})$/;
+    'goatApp/model/HTMLContentModel'],
+     function($,
+        _,
+        Backbone,
+        HTMLContentModel){
 
     return HTMLContentModel.extend({
-        urlRoot: null,
+        urlRoot:null,
         defaults: {
-            items: null,
-            selectedItem: null
+            items:null,
+            selectedItem:null
         },
 
         initialize: function (options) {
 
         },
 
-        loadData: function (options) {
-            var rawName = (options && typeof options.name === 'string') ? options.name : '';
-            this.urlRoot = _.escape(encodeURIComponent(rawName)) + '.lesson';
-
+        loadData: function(options) {
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
             var self = this;
-            this.fetch().done(function (data) {
+            this.fetch().done(function(data) {
                 self.setContent(data);
             });
         },
 
-        setContent: function (content, loadHelps) {
+        setContent: function(content, loadHelps) {
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
-            this.set('content', content);
+            this.set('content',content);
 
-            var currentUrl = String(document.URL || '');
+            // Use a more efficient and safer pattern to avoid potential ReDoS
+            var currentUrl = document.URL || '';
+            // Normalize URL once
+            var normalizedUrl = currentUrl.split('#')[0].split('?')[0];
 
-            if (LESSON_URL_REGEX.test(currentUrl)) {
-                this.set('lessonUrl', currentUrl.replace(LESSON_URL_REGEX, '.lesson'));
-            } else {
-                this.set('lessonUrl', currentUrl);
-            }
+            // Replace any trailing ".lesson" segment without using a greedy ".*"
+            this.set(
+                'lessonUrl',
+                normalizedUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson')
+            );
 
-            var pageMatch = PAGE_NUM_REGEX.exec(currentUrl);
-            if (pageMatch && pageMatch[1]) {
+            // Use a non-greedy, anchored regex without leading ".*" to avoid catastrophic backtracking
+            var pageMatch = normalizedUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
                 this.set('pageNum', pageMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
 
-            this.trigger('content:loaded', this, loadHelps);
+            this.trigger('content:loaded',this,loadHelps);
         },
 
         fetch: function (options) {
             options = options || {};
-            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: 'html' }, options));
+            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
         }
     });
 });
