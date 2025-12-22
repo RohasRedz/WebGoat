@@ -32,18 +32,21 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a precompiled, simple, non-backtracking regex pattern for performance safety.
-            // This pattern is linear-time and does not contain nested quantifiers or ambiguous branches.
+            // Use safe, precompiled regular expressions and avoid complex patterns that
+            // could lead to catastrophic backtracking (ReDoS), while preserving behavior.
+            var pageUrl = document.URL;
             var lessonUrlPattern = /\.lesson.*/;
-            this.set('lessonUrl', document.URL.replace(lessonUrlPattern, '.lesson'));
-
-            // Precompile page number pattern as well; it is already a simple, efficient pattern.
             var pageNumPattern = /.*\.lesson\/(\d{1,4})$/;
-            if (pageNumPattern.test(document.URL)) {
-                this.set('pageNum', document.URL.replace(pageNumPattern, '$1'));
+
+            this.set('lessonUrl', pageUrl.replace(lessonUrlPattern, '.lesson'));
+
+            var pageNumMatch = pageNumPattern.exec(pageUrl);
+            if (pageNumMatch) {
+                this.set('pageNum', pageNumMatch[1]);
             } else {
-                this.set('pageNum',0);
+                this.set('pageNum', 0);
             }
+
             this.trigger('content:loaded',this,loadHelps);
         },
 

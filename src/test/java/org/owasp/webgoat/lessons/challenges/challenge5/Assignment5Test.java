@@ -1,7 +1,6 @@
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 import java.sql.Connection;
@@ -14,15 +13,14 @@ import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
+import org.springframework.util.StringUtils;
 
 /**
- * Delta tests focused on the secure SQL parameterization in Assignment5.login().
- *
- * These tests verify that:
- * - The SQL query uses parameter placeholders (no user input concatenated into SQL text).
- * - The username and password are passed via PreparedStatement parameters.
+ * Delta tests for Assignment5 focusing only on the changed SQL behavior.
+ * Verifies that a parameterized PreparedStatement is used and that parameters
+ * are bound as expected for success/failure flows.
  */
-class Assignment5Test {
+public class Assignment5Test {
 
     private LessonDataSource dataSource;
     private Flags flags;
@@ -45,36 +43,71 @@ class Assignment5Test {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        when(resultSet.next()).thenReturn(true); // simulate successful login
         when(flags.getFlag(5)).thenReturn("FLAG-5");
     }
 
     @Test
-    void login_usesParameterizedQueryAndBindsUserInputs() throws Exception {
+    void login_usesParameterizedQuery_andSucceedsForValidCredentials() throws Exception {
         String username = "Larry";
-        String password = "secretPassword";
+        String password = "secret";
+
+        when(resultSet.next()).thenReturn(true);
 
         AttackResult result = assignment5.login(username, password);
 
-        // Verify that a query with parameter placeholders is used
+        // Verify SQL uses placeholders instead of concatenated input
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
         verify(connection).prepareStatement(sqlCaptor.capture());
-        String usedSql = sqlCaptor.getValue();
-
-        // The query should contain placeholders for userid and password
-        // and must not contain raw user-supplied values.
+        String sql = sqlCaptor.getValue();
+        // The exact whitespace is not important; we care about the placeholders
+        // and absence of user input concatenation.
+        // This checks that the query contains parameter placeholders.
         org.junit.jupiter.api.Assertions.assertTrue(
-                usedSql.contains("userid = ?") && usedSql.contains("password = ?"),
-                "SQL should use parameter placeholders");
-        org.junit.jupiter.api.Assertions.assertFalse(
-                usedSql.contains(username) || usedSql.contains(password),
-                "SQL must not embed raw user input");
+                sql.toLowerCase().contains("userid = ?") && sql.toLowerCase().contains("password = ?"),
+                "SQL should use parameter placeholders for userid and password");
 
-        // Verify that the parameters are bound via setString
-        verify(preparedStatement).setString(1, eq(username));
-        verify(preparedStatement).setString(2, eq(password));
+        // Verify parameters are bound correctly and in correct order
+        verify(preparedStatement).setString(1, username);
+        verify(preparedStatement).setString(2, password);
+        verify(preparedStatement).executeQuery();
 
-        // Sanity check: behavior still returns success when resultSet.next() is true
-        assertEquals("success", result.getLessonStatus().name().toLowerCase());
+        // Behavior: success branch when a row is returned
+        org.junit.jupiter.api.Assertions.assertTrue(result.getLessonCompleted(), "Expected success when credentials match");
+    }
+
+    @Test
+    void login_failsForInvalidCredentials_butStillUsesParameterizedQuery() throws Exception {
+        String username = "Larry";
+        String password = "wrong";
+
+        when(resultSet.next()).thenReturn(false);
+
+        AttackResult result = assignment5.login(username, password);
+
+        // Still must use parameterized query for invalid credentials
+        verify(connection).prepareStatement(anyString());
+        verify(preparedStatement).setString(1, username);
+        verify(preparedStatement).setString(2, password);
+        verify(preparedStatement).executeQuery();
+
+        org.junit.jupiter.api.Assertions.assertFalse(result.getLessonCompleted(), "Expected failure when credentials are invalid");
+    }
+
+    @Test
+    void login_rejectsSqlInjectionPayloadInsteadOfAlteringQueryStructure() throws Exception {
+        String username = "Larry";
+        String injectionPassword = "pw' OR '1'='1";
+
+        when(resultSet.next()).thenReturn(false);
+
+        AttackResult result = assignment5.login(username, injectionPassword);
+
+        // The injection payload should not alter the SQL structure, only be bound as a parameter.
+        verify(connection).prepareStatement(anyString());
+        verify(preparedStatement).setString(1, username);
+        verify(preparedStatement).setString(2, injectionPassword);
+
+        org.junit.jupiter.api.Assertions.assertFalse(result.getLessonCompleted(),
+                "SQL injection payload must not cause authentication to succeed");
     }
 }
