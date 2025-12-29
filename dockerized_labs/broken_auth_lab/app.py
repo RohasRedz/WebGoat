@@ -1,21 +1,19 @@
+import os
 from flask import Flask, render_template, request, redirect, url_for, make_response, flash
 import hashlib
 import json
 from datetime import datetime, timedelta
 import base64
-import os
 
 app = Flask(__name__)
-
-flask_env = os.environ.get('FLASK_ENV', 'development')
-
-if flask_env == 'production':
-    secret_key = os.environ.get('FLASK_SECRET_KEY')
-    if not secret_key:
-        raise ValueError("FLASK_SECRET_KEY environment variable must be set in production.")
-    app.secret_key = secret_key
-else:  # development, testing, etc.
-    app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'insecure-dev-secret-key-do-not-use-in-prod')
+# Remediation: Load secret key from environment variable to avoid hardcoding.
+# For production, ensure FLASK_SECRET_KEY is set securely.
+app.secret_key = os.environ.get('FLASK_SECRET_KEY')
+if not app.secret_key:
+    # In a production environment, this should ideally be a more robust error handling
+    # or a randomly generated key for development purposes only.
+    # For this fix, we enforce that the secret key must be set via environment variable.
+    raise RuntimeError("FLASK_SECRET_KEY environment variable not set. Please set it for production deployment.")
 
 # Vulnerable: Storing user data in memory
 users = {
