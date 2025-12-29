@@ -4,13 +4,18 @@ import json
 from datetime import datetime, timedelta
 import base64
 import os
-import secrets
 
 app = Flask(__name__)
-# Load secret key from environment variable or generate a strong random one.
-# This prevents hardcoding sensitive information and ensures a unique key for each deployment.
-# In a production environment, ensure FLASK_SECRET_KEY is set securely.
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(16))
+
+flask_env = os.environ.get('FLASK_ENV', 'development')
+
+if flask_env == 'production':
+    secret_key = os.environ.get('FLASK_SECRET_KEY')
+    if not secret_key:
+        raise ValueError("FLASK_SECRET_KEY environment variable must be set in production.")
+    app.secret_key = secret_key
+else:  # development, testing, etc.
+    app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'insecure-dev-secret-key-do-not-use-in-prod')
 
 # Vulnerable: Storing user data in memory
 users = {
