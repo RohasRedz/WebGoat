@@ -1,35 +1,32 @@
-import os
-from flask import Flask, render_template, request, redirect, url_for, make_response, flash
+from flask import Flask, render_template, request, redirect, url_for, make_response, flash, session
+from werkzeug.security import generate_password_hash, check_password_hash
 import hashlib
 import json
 from datetime import datetime, timedelta
 import base64
+import os
+import secrets # Added for secure token generation
+import re # Added for password policy validation
 
 app = Flask(__name__)
-# Remediation: Load secret key from environment variable to avoid hardcoding.
-# For production, ensure FLASK_SECRET_KEY is set securely.
-app.secret_key = os.environ.get('FLASK_SECRET_KEY')
-if not app.secret_key:
-    # In a production environment, this should ideally be a more robust error handling
-    # or a randomly generated key for development purposes only.
-    # For this fix, we enforce that the secret key must be set via environment variable.
-    raise RuntimeError("FLASK_SECRET_KEY environment variable not set. Please set it for production deployment.")
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'a_fallback_secret_key_for_dev_only_do_not_use_in_prod')
+app.permanent_session_lifetime = timedelta(days=30)
 
-# Vulnerable: Storing user data in memory
+# Storing user data in memory (Note: In-memory storage is not suitable for production)
 users = {
     'admin': {
-        'password': 'admin123',  # Vulnerable: Weak password
+        'password': generate_password_hash('admin123'),
         'email': 'admin@example.com',
         'role': 'admin'
     },
     'user': {
-        'password': 'password123',  # Vulnerable: Weak password
+        'password': generate_password_hash('password123'),
         'email': 'user@example.com',
         'role': 'user'
     }
 }
 
-# Vulnerable: Storing reset tokens in memory
+# Storing reset tokens in memory (Note: In-memory storage is not suitable for production)
 password_reset_tokens = {}
 
 @app.route('/')
@@ -46,19 +43,13 @@ def login():
     password = request.form.get('password')
     remember_me = request.form.get('remember_me')
 
-    if username in users and users[username]['password'] == password:  # Vulnerable: Plain text password comparison
-        response = make_response(redirect(url_for('dashboard')))
-        
-        # Vulnerable: Insecure session management
-        session_token = base64.b64encode(f"{username}:{datetime.now()}".encode()).decode()
-        
+    if username in users and check_password_hash(users[username]['password'], password):
+        session['username'] = username
         if remember_me:
-            # Vulnerable: Insecure "Remember Me" implementation
-            response.set_cookie('session', session_token, max_age=30*24*60*60)
-        else:
-            response.set_cookie('session', session_token)
-            
-        return response
+            session.permanent = True
+        
+        flash('Login successful!')
+        return redirect(url_for('dashboard'))
     
     flash('Invalid username or password')
     return redirect(url_for('lab'))
@@ -69,11 +60,15 @@ def register():
     password = request.form.get('password')
     email = request.form.get('email')
     
-    # Vulnerable: No password complexity requirements
     if username and password and email:
+        # Remediation 4: Basic password complexity requirements
+        if len(password) < 8 or not re.search(r"[a-zA-Z]", password) or not re.search(r"\d", password):
+            flash('Password must be at least 8 characters long and contain both letters and digits.')
+            return redirect(url_for('lab'))
+
         if username not in users:
             users[username] = {
-                'password': password,  # Vulnerable: Storing plain text passwords
+                'password': generate_password_hash(password),
                 'email': email,
                 'role': 'user'
             }
@@ -87,16 +82,16 @@ def register():
 def reset_password():
     email = request.form.get('email')
     
-    # Vulnerable: Password reset token generation
     for username, user_data in users.items():
         if user_data['email'] == email:
-            # Vulnerable: Predictable token generation
-            token = hashlib.md5(f"{email}:{datetime.now()}".encode()).hexdigest()
+            # Remediation 1: Secure, random token generation
+            token = secrets.token_urlsafe(32)
             password_reset_tokens[token] = username
             
-            # In a real application, this would send an email
-            # Vulnerable: Token exposed in response
-            flash(f'Password reset link: /reset/{token}')
+            # Remediation 2: Simulate email send, do NOT expose token in UI
+            flash('Password reset link sent to your email (simulated).')
+            # In a real application, this would send an email like:
+            # send_email(email, 'Password Reset', f'Click here to reset your password: {url_for("reset_form", token=token, _external=True)}')
             return redirect(url_for('lab'))
     
     flash('Email not found')
@@ -110,22 +105,19 @@ def reset_form(token):
 
 @app.route('/dashboard')
 def dashboard():
-    session_token = request.cookies.get('session')
-    if not session_token:
+    if 'username' not in session:
         return redirect(url_for('lab'))
     
-    try:
-        # Vulnerable: Insecure session validation
-        username = base64.b64decode(session_token).decode().split(':')[0]
-        if username in users:
-            return render_template('dashboard.html', 
+    username = session['username']
+    if username in users:
+        return render_template('dashboard.html', 
                                 username=username, 
                                 role=users[username]['role'],
                                 email=users[username]['email'])
-    except:
-        pass
     
     return redirect(url_for('lab'))
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)  # Vulnerable: Debug mode enabled in production 
+    # Remediation 3: Gate debug mode on environment variable
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False') == 'True'
+    app.run(host='0.0.0.0', port=5000, debug=debug_mode)
