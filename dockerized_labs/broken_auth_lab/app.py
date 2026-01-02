@@ -1,32 +1,34 @@
-from flask import Flask, render_template, request, redirect, url_for, make_response, flash, session
-from werkzeug.security import generate_password_hash, check_password_hash
+import os
+from flask import Flask, render_template, request, redirect, url_for, make_response, flash
 import hashlib
 import json
 from datetime import datetime, timedelta
 import base64
-import os
-import secrets # Added for secure token generation
-import re # Added for password policy validation
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'a_fallback_secret_key_for_dev_only_do_not_use_in_prod')
-app.permanent_session_lifetime = timedelta(days=30)
+# Securely load the Flask secret key from an environment variable.
+# This prevents hardcoding sensitive information directly in the source code.
+# If FLASK_SECRET_KEY is not set, the application will terminate,
+# preventing it from running with an insecure or missing key.
+app.secret_key = os.environ.get('FLASK_SECRET_KEY')
+if not app.secret_key:
+    raise ValueError("FLASK_SECRET_KEY environment variable not set. Please set it for production.")
 
-# Storing user data in memory (Note: In-memory storage is not suitable for production)
+# Vulnerable: Storing user data in memory
 users = {
     'admin': {
-        'password': generate_password_hash('admin123'),
+        'password': 'admin123',  # Vulnerable: Weak password
         'email': 'admin@example.com',
         'role': 'admin'
     },
     'user': {
-        'password': generate_password_hash('password123'),
+        'password': 'password123',  # Vulnerable: Weak password
         'email': 'user@example.com',
         'role': 'user'
     }
 }
 
-# Storing reset tokens in memory (Note: In-memory storage is not suitable for production)
+# Vulnerable: Storing reset tokens in memory
 password_reset_tokens = {}
 
 @app.route('/')
@@ -43,13 +45,19 @@ def login():
     password = request.form.get('password')
     remember_me = request.form.get('remember_me')
 
-    if username in users and check_password_hash(users[username]['password'], password):
-        session['username'] = username
-        if remember_me:
-            session.permanent = True
+    if username in users and users[username]['password'] == password:  # Vulnerable: Plain text password comparison
+        response = make_response(redirect(url_for('dashboard')))
         
-        flash('Login successful!')
-        return redirect(url_for('dashboard'))
+        # Vulnerable: Insecure session management
+        session_token = base64.b64encode(f"{username}:{datetime.now()}".encode()).decode()
+        
+        if remember_me:
+            # Vulnerable: Insecure "Remember Me" implementation
+            response.set_cookie('session', session_token, max_age=30*24*60*60)
+        else:
+            response.set_cookie('session', session_token)
+            
+        return response
     
     flash('Invalid username or password')
     return redirect(url_for('lab'))
@@ -60,15 +68,11 @@ def register():
     password = request.form.get('password')
     email = request.form.get('email')
     
+    # Vulnerable: No password complexity requirements
     if username and password and email:
-        # Remediation 4: Basic password complexity requirements
-        if len(password) < 8 or not re.search(r"[a-zA-Z]", password) or not re.search(r"\d", password):
-            flash('Password must be at least 8 characters long and contain both letters and digits.')
-            return redirect(url_for('lab'))
-
         if username not in users:
             users[username] = {
-                'password': generate_password_hash(password),
+                'password': password,  # Vulnerable: Storing plain text passwords
                 'email': email,
                 'role': 'user'
             }
@@ -82,16 +86,16 @@ def register():
 def reset_password():
     email = request.form.get('email')
     
+    # Vulnerable: Password reset token generation
     for username, user_data in users.items():
         if user_data['email'] == email:
-            # Remediation 1: Secure, random token generation
-            token = secrets.token_urlsafe(32)
+            # Vulnerable: Predictable token generation
+            token = hashlib.md5(f"{email}:{datetime.now()}".encode()).hexdigest()
             password_reset_tokens[token] = username
             
-            # Remediation 2: Simulate email send, do NOT expose token in UI
-            flash('Password reset link sent to your email (simulated).')
-            # In a real application, this would send an email like:
-            # send_email(email, 'Password Reset', f'Click here to reset your password: {url_for("reset_form", token=token, _external=True)}')
+            # In a real application, this would send an email
+            # Vulnerable: Token exposed in response
+            flash(f'Password reset link: /reset/{token}')
             return redirect(url_for('lab'))
     
     flash('Email not found')
@@ -105,19 +109,22 @@ def reset_form(token):
 
 @app.route('/dashboard')
 def dashboard():
-    if 'username' not in session:
+    session_token = request.cookies.get('session')
+    if not session_token:
         return redirect(url_for('lab'))
     
-    username = session['username']
-    if username in users:
-        return render_template('dashboard.html', 
+    try:
+        # Vulnerable: Insecure session validation
+        username = base64.b64decode(session_token).decode().split(':')[0]
+        if username in users:
+            return render_template('dashboard.html', 
                                 username=username, 
                                 role=users[username]['role'],
                                 email=users[username]['email'])
+    except:
+        pass
     
     return redirect(url_for('lab'))
 
 if __name__ == '__main__':
-    # Remediation 3: Gate debug mode on environment variable
-    debug_mode = os.environ.get('FLASK_DEBUG', 'False') == 'True'
-    app.run(host='0.0.0.0', port=5000, debug=debug_mode)
+    app.run(host='0.0.0.0', port=5000, debug=True)  # Vulnerable: Debug mode enabled in production 
