@@ -1,78 +1,73 @@
 /**
- * NOTE: These tests assume the updated jwt-refresh.js uses getConfiguredPassword()
- * and reads window.webgoat.config.jwtRefreshPassword when present.
+ * Delta tests for jwt-refresh.js
  */
 
-describe('jwt-refresh security fixes', () => {
-  let originalWebgoat;
-  let $ajaxSpy;
+describe('jwt-refresh.js delta tests', () => {
+  let originalAjax;
+  let originalWindowPassword;
+  let ajaxCalls;
 
   beforeEach(() => {
-    originalWebgoat = global.webgoat;
-    global.webgoat = {
-      customjs: {},
-      config: {}
-    };
-
-    $ajaxSpy = jest.fn().mockReturnValue({
-      success: (cb) => {
-        cb({ access_token: 'access', refresh_token: 'refresh' });
-      }
+    ajaxCalls = [];
+    originalAjax = global.$ && global.$.ajax;
+    global.$ = global.$ || {};
+    global.$.ajax = jest.fn((options) => {
+      ajaxCalls.push(options);
+      return {
+        success: (cb) => {
+          cb({ access_token: 'access', refresh_token: 'refresh' });
+        }
+      };
     });
 
-    global.$ = { ajax: $ajaxSpy };
     global.localStorage = {
       store: {},
-      setItem(key, value) { this.store[key] = value; },
-      getItem(key) { return this.store[key]; }
+      setItem(key, value) {
+        this.store[key] = value;
+      },
+      getItem(key) {
+        return this.store[key];
+      }
     };
 
-    // Load module under test after globals are prepared
-    jest.resetModules();
-    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+    originalWindowPassword = global.window && global.window.WEBGOAT_JWT_DEMO_PASSWORD;
+    global.window = global.window || {};
   });
 
   afterEach(() => {
-    global.webgoat = originalWebgoat;
-    jest.resetModules();
+    if (originalAjax) {
+      global.$.ajax = originalAjax;
+    }
+    if (originalWindowPassword === undefined) {
+      delete global.window.WEBGOAT_JWT_DEMO_PASSWORD;
+    } else {
+      global.window.WEBGOAT_JWT_DEMO_PASSWORD = originalWindowPassword;
+    }
   });
 
-  test('getConfiguredPassword returns configured value when present', () => {
-    webgoat.config.jwtRefreshPassword = 'configured-secret';
+  it('login uses window.WEBGOAT_JWT_DEMO_PASSWORD when present', () => {
+    global.window.WEBGOAT_JWT_DEMO_PASSWORD = 'OVERRIDDEN_SECURE_VALUE';
 
-    // getConfiguredPassword is not exported, but login uses it internally.
-    // We verify via the AJAX payload that the configured value is used.
-    jest.resetModules();
-    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+    login('Jerry');
 
-    // trigger login
-    const callArgs = $ajaxSpy.mock.calls[0][0];
-    const data = JSON.parse(callArgs.data);
-
-    expect(data.password).toBe('configured-secret');
+    expect(global.$.ajax).toHaveBeenCalledTimes(1);
+    const call = ajaxCalls[0];
+    const payload = JSON.parse(call.data);
+    expect(payload.user).toBe('Jerry');
+    expect(payload.password).toBe('OVERRIDDEN_SECURE_VALUE');
+    expect(JSON.stringify(payload)).not.toContain('bm5nhSkxCXZkKRy4');
   });
 
-  test('getConfiguredPassword falls back to empty string when config missing', () => {
-    delete webgoat.config.jwtRefreshPassword;
+  it('login falls back to placeholder password when override is not set', () => {
+    delete global.window.WEBGOAT_JWT_DEMO_PASSWORD;
 
-    jest.resetModules();
-    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+    login('Jerry');
 
-    const callArgs = $ajaxSpy.mock.calls[0][0];
-    const data = JSON.parse(callArgs.data);
-
-    expect(data.password).toBe('');
-  });
-
-  test('login uses password value from configuration accessor (no hard-coded literal)', () => {
-    webgoat.config.jwtRefreshPassword = 'dynamic-secret';
-
-    jest.resetModules();
-    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
-
-    const callArgs = $ajaxSpy.mock.calls[0][0];
-    const data = JSON.parse(callArgs.data);
-
-    expect(data.password).toBe('dynamic-secret');
+    expect(global.$.ajax).toHaveBeenCalledTimes(1);
+    const call = ajaxCalls[0];
+    const payload = JSON.parse(call.data);
+    expect(payload.user).toBe('Jerry');
+    expect(payload.password).toBe('OVERRIDE_ME_WITH_SECURE_CONFIG');
+    expect(JSON.stringify(payload)).not.toContain('bm5nhSkxCXZkKRy4');
   });
 });

@@ -1,46 +1,60 @@
-const $ = require('jquery');
-const _ = require('underscore');
-const Backbone = require('backbone');
+define([
+  'jquery',
+  'underscore',
+  'backbone',
+  'goatApp/model/HTMLContentModel',
+  'webgoat/static/js/goatApp/model/LessonContentModel'
+], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
+  'use strict';
 
-// Minimal HTMLContentModel stub to satisfy the dependency
-const HTMLContentModel = Backbone.Model.extend({});
+  describe('LessonContentModel regex parsing (delta tests)', function () {
+    var originalUrl;
 
-// AMD-style define wrapper simulation
-jest.mock('goatApp/model/HTMLContentModel', () => HTMLContentModel, { virtual: true });
+    beforeEach(function () {
+      originalUrl = global.document && global.document.URL;
+    });
 
-describe('LessonContentModel - regex based URL parsing', () => {
-  let LessonContentModel;
+    afterEach(function () {
+      if (global.document) {
+        global.document.URL = originalUrl;
+      }
+    });
 
-  beforeAll(() => {
-    // Simulate AMD define by requiring the module after mocks
-    LessonContentModel = require('../../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
-  });
+    function createModel() {
+      return new LessonContentModel();
+    }
 
-  beforeEach(() => {
-    global.document = { URL: '' };
-  });
+    it('should set lessonUrl without page number for URLs without page segment', function () {
+      var model = createModel();
+      global.document = global.document || {};
+      global.document.URL = 'http://example.com/WebGoat/attack.lesson';
 
-  test('setContent extracts pageNum and lessonUrl when URL ends with .lesson/<digits>', () => {
-    document.URL = 'http://localhost/WebGoat/lesson/SqlInjection.lesson/12';
-    const model = new LessonContentModel();
+      model.setContent('<html>ignored</html>');
 
-    const loadedSpy = jest.fn();
-    model.on('content:loaded', loadedSpy);
+      expect(model.get('lessonUrl')).toBe('http://example.com/WebGoat/attack.lesson');
+      expect(model.get('pageNum')).toBe(0);
+    });
 
-    model.setContent('<html>content</html>');
+    it('should correctly extract lessonUrl and pageNum for URLs with page number', function () {
+      var model = createModel();
+      global.document = global.document || {};
+      global.document.URL = 'http://example.com/WebGoat/attack.lesson/3';
 
-    expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat/lesson/SqlInjection.lesson');
-    expect(model.get('pageNum')).toBe('12');
-    expect(loadedSpy).toHaveBeenCalled();
-  });
+      model.setContent('<html>ignored</html>');
 
-  test('setContent sets pageNum to 0 when URL does not end with .lesson/<digits>', () => {
-    document.URL = 'http://localhost/WebGoat/lesson/SqlInjection.lesson';
-    const model = new LessonContentModel();
+      expect(model.get('lessonUrl')).toBe('http://example.com/WebGoat/attack.lesson');
+      expect(model.get('pageNum')).toBe('3');
+    });
 
-    model.setContent('<html>content</html>');
+    it('should fall back gracefully for malformed URLs', function () {
+      var model = createModel();
+      global.document = global.document || {};
+      global.document.URL = 'not-a-normal-url';
 
-    expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat/lesson/SqlInjection.lesson');
-    expect(model.get('pageNum')).toBe(0);
+      model.setContent('<html>ignored</html>');
+
+      expect(model.get('lessonUrl')).toBe('not-a-normal-url');
+      expect(model.get('pageNum')).toBe(0);
+    });
   });
 });

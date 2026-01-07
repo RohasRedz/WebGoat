@@ -41,23 +41,23 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = null;
+    String password = "dave";
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
-      try (Statement statement =
+      try {
+        Statement statement =
             connection.createStatement(
                 ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-           ResultSet results = statement.executeQuery(query)) {
+        ResultSet results = statement.executeQuery(query);
+
         if (results != null && results.first()) {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception in getPassword: {}", sqle.getMessage(), sqle);
-        // do nothing
+        log.error("SQL error during password retrieval for user 'dave': {}", sqle.getMessage(), sqle);
       }
     } catch (Exception e) {
-      log.error("Exception in getPassword: {}", e.getMessage(), e);
-      // do nothing
+      log.error("General error during password retrieval for user 'dave': {}", e.getMessage(), e);
     }
     return (password);
   }

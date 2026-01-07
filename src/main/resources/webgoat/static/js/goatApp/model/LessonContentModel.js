@@ -31,13 +31,23 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-            this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
-            var pageMatch = document.URL.match(/\.lesson\/(\d{1,4})$/);
+
+            var currentUrl = document.URL;
+
+            var lessonUrlMatch = currentUrl.match(/^(.*?\.lesson)(?:\/\d{1,4})?$/);
+            if (lessonUrlMatch) {
+                this.set('lessonUrl', lessonUrlMatch[1]);
+            } else {
+                this.set('lessonUrl', currentUrl);
+            }
+
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
             if (pageMatch) {
                 this.set('pageNum', pageMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
+
             this.trigger('content:loaded',this,loadHelps);
         },
 
