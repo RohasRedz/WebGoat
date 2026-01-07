@@ -32,18 +32,16 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a simpler, more efficient pattern to strip .lesson suffix
             var currentUrl = document.URL;
-            var lessonUrl = currentUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson');
-            this.set('lessonUrl', lessonUrl);
+            this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
 
-            // Extract page number using a non-backtracking, efficient regex
-            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            var pageMatch = /(\d{1,4})$/.exec(currentUrl);
             if (pageMatch) {
                 this.set('pageNum', pageMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
+
             this.trigger('content:loaded',this,loadHelps);
         },
 

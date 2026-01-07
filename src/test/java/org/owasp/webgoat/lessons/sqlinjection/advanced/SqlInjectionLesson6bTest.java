@@ -1,58 +1,84 @@
-// Test file path (mirrors main with 'main' -> 'test'):
-// src/test/java/org/owasp/webgoat/lessons/sqlinjection/advanced/SqlInjectionLesson6bTest.java
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
-import java.io.IOException;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.owasp.webgoat.container.LessonDataSource;
-import org.owasp.webgoat.container.assignments.AttackResult;
 
-/**
- * Delta tests for SqlInjectionLesson6b focused on preserving
- * completed() behavior after logging changes in getPassword():
- * - When userid_6b equals getPassword(), completed() must succeed.
- * - When userid_6b does not equal getPassword(), completed() must fail.
- *
- * These tests intentionally do not inspect logging side effects.
- */
-public class SqlInjectionLesson6bTest {
+class SqlInjectionLesson6bTest {
 
     @Test
-    @DisplayName("completed succeeds when userid_6b matches getPassword")
-    void completed_succeedsWhenUserIdMatchesPassword() throws IOException {
-        // Arrange
+    @DisplayName("verifyPassword() returns true when input matches stored password without exposing it")
+    void verifyPassword_returnsTrueForMatchingPassword_andDoesNotExposePassword() throws Exception {
         LessonDataSource dataSource = mock(LessonDataSource.class);
+        Connection connection = mock(Connection.class);
+        PreparedStatement preparedStatement = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
 
-        // Use a spy so we can control getPassword() without changing production code
-        SqlInjectionLesson6b endpoint = spy(new SqlInjectionLesson6b(dataSource));
-        doReturn("secret-pass").when(endpoint).getPassword();
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
 
-        // Act
-        AttackResult result = endpoint.completed("secret-pass");
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("password")).thenReturn("dave");
 
-        // Assert
-        assertTrue(result.isSuccess(), "completed() should succeed when userid_6b matches getPassword()");
+        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
+
+        boolean match = lesson.verifyPassword("dave");
+
+        assertTrue(match);
+        verify(resultSet).getString("password");
+        verify(preparedStatement).executeQuery();
     }
 
     @Test
-    @DisplayName("completed fails when userid_6b does not match getPassword")
-    void completed_failsWhenUserIdDoesNotMatchPassword() throws IOException {
-        // Arrange
+    @DisplayName("verifyPassword() returns false when input does not match stored password")
+    void verifyPassword_returnsFalseForNonMatchingPassword() throws Exception {
         LessonDataSource dataSource = mock(LessonDataSource.class);
+        Connection connection = mock(Connection.class);
+        PreparedStatement preparedStatement = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
 
-        SqlInjectionLesson6b endpoint = spy(new SqlInjectionLesson6b(dataSource));
-        doReturn("secret-pass").when(endpoint).getPassword();
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
 
-        // Act
-        AttackResult result = endpoint.completed("wrong-pass");
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("password")).thenReturn("dave");
 
-        // Assert
-        assertFalse(result.isSuccess(), "completed() should fail when userid_6b does not match getPassword()");
+        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
+
+        boolean match = lesson.verifyPassword("wrong");
+
+        assertFalse(match);
+    }
+
+    @Test
+    @DisplayName("verifyPassword() handles missing result row without exposing stack traces")
+    void verifyPassword_handlesMissingRowSecurely() throws Exception {
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Connection connection = mock(Connection.class);
+        PreparedStatement preparedStatement = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+
+        when(resultSet.next()).thenReturn(false);
+
+        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
+
+        boolean match = lesson.verifyPassword("any");
+
+        assertFalse(match);
     }
 }
