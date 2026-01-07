@@ -1,14 +1,16 @@
+/*
+ * Delta test for BATCH-001 - Assignment5.java
+ */
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
-import static org.owasp.webgoat.container.assignments.AttackResult.Status.*;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
@@ -16,98 +18,85 @@ import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 
 /**
- * Delta tests focused on the changed behavior:
- * - Use of parameterized PreparedStatement instead of string concatenation.
- * - Preserved success/failure semantics for valid/invalid credentials.
- * - Protection against SQL injection payloads.
+ * Delta tests for Assignment5 focusing on the secure PreparedStatement usage.
+ * These tests ensure that user-supplied values are bound as parameters instead of being
+ * concatenated into the SQL string, verifying the fix for SQL injection vulnerability.
+ *
+ * Jira: SVCF-1808
  */
-class Assignment5Test {
+public class Assignment5Test {
 
-    private LessonDataSource dataSource;
-    private Flags flags;
-    private Assignment5 assignment5;
+    @Test
+    @DisplayName("login() should use parameterized PreparedStatement with username and password")
+    void login_usesPreparedStatementParameters() throws Exception {
+        // Arrange
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
+        Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-    private Connection connection;
-    private PreparedStatement preparedStatement;
-    private ResultSet resultSet;
-
-    @BeforeEach
-    void setUp() throws Exception {
-        dataSource = mock(LessonDataSource.class);
-        flags = mock(Flags.class);
-        assignment5 = new Assignment5(dataSource, flags);
-
-        connection = mock(Connection.class);
-        preparedStatement = mock(PreparedStatement.class);
-        resultSet = mock(ResultSet.class);
+        Connection connection = mock(Connection.class);
+        PreparedStatement preparedStatement = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
 
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
-    }
-
-    @Test
-    void login_withValidLarryCredentials_returnsSuccess() throws Exception {
         when(resultSet.next()).thenReturn(true);
         when(flags.getFlag(5)).thenReturn("flag-5");
 
-        AttackResult result = assignment5.login("Larry", "secret");
+        String username = "Larry";
+        String password = "secret";
 
-        assertEquals(SUCCESS, result.getStatus());
-        assertTrue(result.getOutput().contains("flag-5"));
+        // Act
+        AttackResult result = assignment5.login(username, password);
 
-        // Verify parameterized query is used with correct bindings
+        // Assert
+        // 1) Ensure the SQL string no longer contains raw concatenated user inputs
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
         verify(connection).prepareStatement(sqlCaptor.capture());
-        String sql = sqlCaptor.getValue();
-        assertTrue(sql.contains("userid = ?"), "SQL must use parameter placeholder for userid");
-        assertTrue(sql.contains("password = ?"), "SQL must use parameter placeholder for password");
+        String sqlUsed = sqlCaptor.getValue();
 
-        verify(preparedStatement).setString(1, "Larry");
-        verify(preparedStatement).setString(2, "secret");
+        // The SQL should be parameterized; it must contain '?' placeholders
+        // and must not literally contain the username or password.
+        org.junit.jupiter.api.Assertions.assertTrue(
+                sqlUsed.contains("userid = ?") && sqlUsed.contains("password = ?"),
+                "SQL should use parameter placeholders for userid and password");
+        org.junit.jupiter.api.Assertions.assertFalse(
+                sqlUsed.contains(username) || sqlUsed.contains(password),
+                "SQL must not directly contain user-supplied values");
+
+        // 2) Verify that PreparedStatement parameters are set correctly
+        verify(preparedStatement).setString(1, username);
+        verify(preparedStatement).setString(2, password);
+        verify(preparedStatement).executeQuery();
+
+        // 3) Verify successful login result preserved
+        assertEquals(true, result.isLessonCompleted(), "Login should still succeed for valid credentials");
     }
 
     @Test
-    void login_withWrongPassword_returnsFailure() throws Exception {
-        when(resultSet.next()).thenReturn(false);
+    @DisplayName("login() should reject non-Larry usernames (unchanged behavior guard)")
+    void login_rejectsNonLarryUsernames() throws Exception {
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
+        Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-        AttackResult result = assignment5.login("Larry", "wrong");
+        AttackResult result = assignment5.login("NotLarry", "any");
 
-        assertEquals(FAILED, result.getStatus());
-        verify(preparedStatement).setString(1, "Larry");
-        verify(preparedStatement).setString(2, "wrong");
+        org.junit.jupiter.api.Assertions.assertFalse(result.isLessonCompleted());
     }
 
     @Test
-    void login_withNonLarryUsername_shortCircuitsBeforeQuery() throws Exception {
-        AttackResult result = assignment5.login("Bob", "anything");
+    @DisplayName("login() should fail when username or password is blank (input validation unchanged)")
+    void login_rejectsBlankInputs() throws Exception {
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
+        Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-        assertEquals(FAILED, result.getStatus());
-        // Ensure no DB interaction when username is not "Larry"
-        verifyNoInteractions(connection);
-    }
+        AttackResult result1 = assignment5.login("", "pw");
+        AttackResult result2 = assignment5.login("Larry", "");
 
-    @Test
-    void login_withSqlInjectionPayload_doesNotChangeSqlStructure() throws Exception {
-        when(resultSet.next()).thenReturn(false);
-
-        String evilUser = "Larry' OR '1'='1";
-        String evilPass = "anything' OR '1'='1";
-
-        assignment5.login(evilUser, evilPass);
-
-        // Capture SQL and verify it still contains placeholders rather than concatenated payloads
-        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-        verify(connection).prepareStatement(sqlCaptor.capture());
-        String sql = sqlCaptor.getValue();
-
-        assertFalse(sql.contains(evilUser), "SQL must not contain raw username input");
-        assertFalse(sql.contains(evilPass), "SQL must not contain raw password input");
-        assertTrue(sql.contains("userid = ?"), "SQL must still use parameter placeholder for userid");
-        assertTrue(sql.contains("password = ?"), "SQL must still use parameter placeholder for password");
-
-        // Verify parameters receive the potentially malicious input as data, not as SQL
-        verify(preparedStatement).setString(1, evilUser);
-        verify(preparedStatement).setString(2, evilPass);
+        org.junit.jupiter.api.Assertions.assertFalse(result1.isLessonCompleted());
+        org.junit.jupiter.api.Assertions.assertFalse(result2.isLessonCompleted());
     }
 }

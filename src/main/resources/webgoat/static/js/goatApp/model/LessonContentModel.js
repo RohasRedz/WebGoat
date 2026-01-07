@@ -32,16 +32,28 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a more specific, linear-time safe pattern for lesson URL normalization
-            this.set(
-                'lessonUrl',
-                document.URL.replace(/\.lesson(?:\/.*)?$/, '.lesson')
-            );
+            // Use simple, efficient, and safe regex / string logic to avoid complex backtracking
+            var currentUrl = document.URL;
 
-            // Use a stricter, non-ambiguous pattern for page number extraction
-            var pageMatch = document.URL.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
+            // Derive base lesson URL without using a complex backtracking-prone regex
+            // 1) Strip trailing "/<pageNum>" if present
+            var pageNumMatch = currentUrl.match(/\/(\d{1,4})$/);
+            var baseUrl = currentUrl;
+            if (pageNumMatch) {
+                baseUrl = currentUrl.slice(0, -pageNumMatch[0].length);
+            }
+
+            // 2) Ensure we end with ".lesson"
+            var lessonSuffixIndex = baseUrl.indexOf('.lesson');
+            if (lessonSuffixIndex !== -1) {
+                baseUrl = baseUrl.substring(0, lessonSuffixIndex + '.lesson'.length);
+            }
+
+            this.set('lessonUrl', baseUrl);
+
+            // Extract page number efficiently if present
+            if (pageNumMatch) {
+                this.set('pageNum', pageNumMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
