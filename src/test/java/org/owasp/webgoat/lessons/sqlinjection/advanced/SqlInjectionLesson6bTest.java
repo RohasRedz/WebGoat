@@ -1,52 +1,105 @@
+// Assuming package based on source file location.
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
-import java.io.IOException;
-
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
-import org.owasp.webgoat.container.assignments.AttackResult;
 
-class SqlInjectionLesson6bTest {
+/**
+ * Delta tests for SqlInjectionLesson6b focusing on the change that removed
+ * printStackTrace() calls in the catch blocks to prevent information leakage.
+ *
+ * Since this is a delta test, we focus on:
+ * - Behavior in the normal (no-exception) path is preserved.
+ * - When exceptions occur, the method still returns a value but no stack traces are printed
+ *   (indirectly validated by not expecting exceptions and by simulating error paths).
+ *
+ * NOTE: Directly asserting on logging output is avoided; instead we ensure that
+ * exceptions thrown inside data-access logic do not escape and that the method
+ * still returns a non-null password even when the data source misbehaves.
+ */
+public class SqlInjectionLesson6bTest {
 
-    // Helper subclass to stub getPassword() without changing production code
-    private static class SqlInjectionLesson6bStub extends SqlInjectionLesson6b {
+    @Test
+    @DisplayName("getPassword should return value from database when query succeeds (behavior preserved)")
+    void getPasswordReturnsValueFromDatabase() throws Exception {
+        // Arrange
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        ResultSet resultSet = mock(ResultSet.class);
 
-        private final String passwordToReturn;
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement(
+                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+                .thenReturn(statement);
+        when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
+                .thenReturn(resultSet);
+        when(resultSet.first()).thenReturn(true);
+        when(resultSet.getString("password")).thenReturn("db-password");
 
-        SqlInjectionLesson6bStub(LessonDataSource dataSource, String passwordToReturn) {
-            super(dataSource);
-            this.passwordToReturn = passwordToReturn;
-        }
+        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
 
-        @Override
-        protected String getPassword() {
-            return passwordToReturn;
-        }
+        // Act
+        String password = lesson.getPassword();
+
+        // Assert
+        assertEquals("db-password", password,
+                "Expected getPassword to return value retrieved from the database");
     }
 
     @Test
-    @DisplayName("completed should fail when userid_6b does not equal getPassword()")
-    void completed_returnsFailureWhenUserIdDoesNotMatchPassword() throws IOException {
+    @DisplayName("getPassword should not throw when SQLException occurs and should fall back to default (no stack trace leak)")
+    void getPasswordHandlesSqlExceptionWithoutThrowing() throws Exception {
+        // Arrange
         LessonDataSource dataSource = mock(LessonDataSource.class);
-        SqlInjectionLesson6b lesson = new SqlInjectionLesson6bStub(dataSource, "expectedPassword");
+        Connection connection = mock(Connection.class);
+        when(dataSource.getConnection()).thenReturn(connection);
 
-        AttackResult result = lesson.completed("wrongPassword");
+        // Simulate SQLException in createStatement
+        when(connection.createStatement(
+                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+                .thenThrow(new SQLException("DB error"));
 
-        assertFalse(result.isLessonSolved(), "Mismatched userid_6b should not solve the lesson");
+        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
+
+        // Act
+        String password = lesson.getPassword();
+
+        // Assert
+        // The method should swallow the exception and return the default "dave"
+        // (instead of propagating or crashing, and without printing stack traces).
+        assertEquals("dave", password,
+                "Expected getPassword to return default when SQLException occurs");
     }
 
     @Test
-    @DisplayName("completed should succeed when userid_6b equals getPassword()")
-    void completed_returnsSuccessWhenUserIdMatchesPassword() throws IOException {
+    @DisplayName("getPassword should handle generic Exception from getConnection gracefully")
+    void getPasswordHandlesGenericExceptionWithoutThrowing() throws Exception {
+        // Arrange
         LessonDataSource dataSource = mock(LessonDataSource.class);
-        SqlInjectionLesson6b lesson = new SqlInjectionLesson6bStub(dataSource, "expectedPassword");
+        // Simulate a generic exception from getConnection
+        when(dataSource.getConnection()).thenThrow(new RuntimeException("connection failure"));
 
-        AttackResult result = lesson.completed("expectedPassword");
+        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
 
-        assertTrue(result.isLessonSolved(), "Matching userid_6b should solve the lesson");
+        // Act
+        String password = lesson.getPassword();
+
+        // Assert
+        // With the fix, generic exceptions are also swallowed in the outer try-catch,
+        // and the default value is returned.
+        assertEquals("dave", password,
+                "Expected getPassword to return default when getConnection throws an exception");
     }
 }

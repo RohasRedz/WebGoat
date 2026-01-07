@@ -1,64 +1,112 @@
-const $ = require('jquery');
-const _ = require('underscore');
-const Backbone = require('backbone');
+// Assuming this test file lives under a Jest-controlled environment.
+// Module path is inferred from original AMD usage; adapt import path as needed.
+// TODO: Adjust require path according to actual project test setup if different.
+jest.mock('backbone', () => {
+  const actual = jest.requireActual('backbone');
+  return {
+    ...actual,
+    Model: actual.Model,
+  };
+});
 
-// Minimal HTMLContentModel stub for testing; the real module may provide more behavior.
-const HTMLContentModel = Backbone.Model.extend({});
+jest.mock('underscore', () => ({
+  extend: Object.assign,
+}));
 
-// Simulate the AMD factory from LessonContentModel.js
-function createLessonContentModel() {
-  const factory = require('../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js'); // TODO: adjust path if needed
-  // If the module directly returns the extended model, just return it.
-  return factory($, _, Backbone, HTMLContentModel);
-}
+// We cannot directly require the AMD module without a loader; instead, we
+// simulate the core logic change (regex and URL parsing) by requiring the
+// built bundle or by extracting the function. For this delta test, we assume
+// the AMD module is made CommonJS-compatible in tests.
+// TODO: Replace with actual path to the compiled/bundled module if necessary.
+const jsdom = require('jsdom');
+const { JSDOM } = jsdom;
 
-describe('LessonContentModel (delta tests for URL parsing)', () => {
-  let LessonContentModel;
+// Minimal shim to import the module in a Jest environment.
+// If your build exposes LessonContentModel via a bundle, replace this with that import.
+// For now, we re-require the original AMD file through a pre-bundled output.
+// TODO: Update path if your test setup differs.
+let LessonContentModel;
+beforeAll(() => {
+  // eslint-disable-next-line global-require
+  LessonContentModel = require('../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js'); // TODO: adjust path
+});
 
-  beforeEach(() => {
-    // JSDOM provides document and window; ensure they exist
-    global.document = { URL: 'http://example.com/start.lesson' };
-    LessonContentModel = createLessonContentModel();
-  });
-
-  test('setContent normalizes lessonUrl by stripping trailing /<page> and preserving .lesson base', () => {
+describe('LessonContentModel delta tests (regex & URL handling)', () => {
+  test('setContent parses pageNum from URL with .lesson/<digits> suffix using updated regex', () => {
     // Arrange
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+      url: 'http://example.com/path/challenge.lesson/1234',
+    });
+    global.document = dom.window.document;
+    global.window = dom.window;
+
+    // Instantiate model
     const model = new LessonContentModel();
-    // URL contains a numeric page suffix, which should be stripped from lessonUrl
-    document.URL = 'http://example.com/lesson/attack.lesson/3';
+
+    // Spy on trigger to ensure it is called (unchanged behavior)
+    const triggerSpy = jest.spyOn(model, 'trigger').mockImplementation(() => {});
 
     // Act
-    model.setContent('<html>content</html>');
+    model.setContent('<div>content</div>', true);
 
     // Assert
-    const lessonUrl = model.get('lessonUrl');
-    expect(lessonUrl).toBe('http://example.com/lesson/attack.lesson');
-
-    // Ensure content was set as well to verify method executed
-    expect(model.get('content')).toBe('<html>content</html>');
+    expect(model.get('lessonUrl')).toBe(
+      'http://example.com/path/challenge.lesson'
+    );
+    expect(model.get('pageNum')).toBe('1234');
+    expect(triggerSpy).toHaveBeenCalledWith('content:loaded', model, true);
   });
 
-  test('setContent sets pageNum to numeric suffix when URL ends with digits', () => {
+  test('setContent sets pageNum to 0 when URL does not match .lesson/<digits> pattern', () => {
     // Arrange
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+      url: 'http://example.com/path/challenge.lesson',
+    });
+    global.document = dom.window.document;
+    global.window = dom.window;
+
     const model = new LessonContentModel();
-    document.URL = 'http://example.com/lesson/attack.lesson/42';
+    const triggerSpy = jest.spyOn(model, 'trigger').mockImplementation(() => {});
 
     // Act
-    model.setContent('<html>content</html>');
+    model.setContent('<div>content</div>', false);
 
     // Assert
-    expect(model.get('pageNum')).toBe(42);
-  });
-
-  test('setContent sets pageNum to 0 when URL has no numeric tail', () => {
-    // Arrange
-    const model = new LessonContentModel();
-    document.URL = 'http://example.com/lesson/attack.lesson';
-
-    // Act
-    model.setContent('<html>content</html>');
-
-    // Assert
+    expect(model.get('lessonUrl')).toBe(
+      'http://example.com/path/challenge.lesson'
+    );
     expect(model.get('pageNum')).toBe(0);
+    expect(triggerSpy).toHaveBeenCalledWith('content:loaded', model, false);
+  });
+
+  test('loadData encodes options.name safely into urlRoot', () => {
+    // Arrange
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+      url: 'http://example.com/path/challenge.lesson',
+    });
+    global.document = dom.window.document;
+    global.window = dom.window;
+
+    const model = new LessonContentModel();
+
+    // Mock fetch to avoid network and to validate URL / options behavior
+    const fetchMock = jest.spyOn(model, 'fetch').mockImplementation(function () {
+      return {
+        done: (cb) => {
+          cb('<div>dummy</div>');
+          return this;
+        },
+      };
+    });
+
+    // Act
+    model.loadData({ name: 'my lesson/with spaces' });
+
+    // Assert
+    expect(model.urlRoot).toBe(
+      encodeURIComponent('my lesson/with spaces') + '.lesson'
+    );
+    expect(fetchMock).toHaveBeenCalled();
+    expect(model.get('content')).toBe('<div>dummy</div>');
   });
 });

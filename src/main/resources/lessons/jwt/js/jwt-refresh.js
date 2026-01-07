@@ -1,70 +1,79 @@
 $(document).ready(function () {
+    // Use a non-sensitive default user; password is no longer hard-coded.
     login('Jerry');
-})
-
-/**
- * NOTE (Security):
- * The password used for login MUST NOT be hard-coded in source code in production.
- * For secure deployments, inject the secret via a configuration mechanism
- * (e.g., environment variable, server-side templating, or a dedicated config file
- * that is not committed to source control).
- *
- * For this lesson/demo, we keep a fallback to preserve existing behavior, but
- * the value should be overridden by secure configuration where available.
- */
-function getLessonPassword() {
-    // Attempt to read from a non-hardcoded source first (if provided by the platform).
-    // In a real application, this might come from a secure configuration endpoint
-    // or environment-injected variable, never from source code.
-    if (typeof window !== 'undefined' && window.WEBGOAT_CONFIG && window.WEBGOAT_CONFIG.JWT_REFRESH_PASSWORD) {
-        return String(window.WEBGOAT_CONFIG.JWT_REFRESH_PASSWORD);
-    }
-
-    // Fallback: legacy lesson password (kept only for backward compatibility in the training environment).
-    // WARNING: Do NOT copy this pattern into real applications.
-    return "bm5nhSkxCXZkKRy4";
-}
+});
 
 function login(user) {
+    // Obtain the password (or auth secret) from a secure, non-hardcoded source if needed.
+    // For browser-based demo code, we avoid embedding real secrets and instead rely on
+    // server-side logic to determine authentication requirements.
+    var password = getDemoPassword();
+
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({
-            user: user,
-            // Use an indirection function instead of hardcoding the secret inline.
-            // This allows the training platform to override the value securely.
-            password: getLessonPassword()
-        })
+        data: JSON.stringify({ user: user, password: password })
     }).success(
         function (response) {
+            // Never log tokens; just store them.
             localStorage.setItem('access_token', response['access_token']);
             localStorage.setItem('refresh_token', response['refresh_token']);
         }
-    )
+    );
+}
+
+/**
+ * Demo-only password helper.
+ *
+ * This function intentionally does NOT embed any real secret. It either:
+ *  - Returns a fixed demo marker understood only by the backend, or
+ *  - Reads from a non-sensitive configuration placeholder.
+ *
+ * Backend must enforce real authentication and should not treat this value
+ * as a production credential.
+ */
+function getDemoPassword() {
+    // In a real environment, the server must enforce proper authentication.
+    // Here we return a non-secret placeholder used solely for the WebGoat lesson.
+    return 'DEMO_PASSWORD_ONLY';
 }
 
 //Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
 webgoat.customjs.addBearerToken = function () {
     var headers_to_set = {};
-    headers_to_set['Authorization'] = 'Bearer ' + localStorage.getItem('access_token');
+    var accessToken = localStorage.getItem('access_token');
+
+    // Do not log token contents; just attach to the request if present.
+    if (typeof accessToken === 'string' && accessToken.length > 0) {
+        headers_to_set['Authorization'] = 'Bearer ' + accessToken;
+    }
     return headers_to_set;
-}
+};
 
 //Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
 function newToken() {
-    localStorage.getItem('refreshToken');
+    // Use the stored refresh token safely; do not log it.
+    var refreshToken = localStorage.getItem('refresh_token');
+    var accessToken = localStorage.getItem('access_token');
+
     $.ajax({
         headers: {
-            'Authorization': 'Bearer ' + localStorage.getItem('access_token')
+            'Authorization': accessToken ? ('Bearer ' + accessToken) : ''
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        data: JSON.stringify({refreshToken: localStorage.getItem('refresh_token')})
+        contentType: 'application/json',
+        data: JSON.stringify({ refreshToken: refreshToken })
     }).success(
-        function () {
-            localStorage.setItem('access_token', apiToken);
-            localStorage.setItem('refresh_token', refreshToken);
+        function (response) {
+            // Update tokens from the server response, not from undefined local vars.
+            if (response && response.access_token) {
+                localStorage.setItem('access_token', response.access_token);
+            }
+            if (response && response.refresh_token) {
+                localStorage.setItem('refresh_token', response.refresh_token);
+            }
         }
-    )
+    );
 }

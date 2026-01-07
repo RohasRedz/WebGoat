@@ -19,7 +19,9 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
+            // Ensure the lesson name is treated as plain text and encoded safely
+            var safeName = encodeURIComponent(String(options.name || ''));
+            this.urlRoot = safeName + '.lesson';
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -32,30 +34,19 @@ define(['jquery',
             }
             this.set('content',content);
 
-            var currentUrl = document.URL || '';
+            // Use safe, linear-time-compatible regexes and reuse them
+            var url = String(document.URL || '');
 
-            // Derive lessonUrl by stripping any trailing '/
-            // Derive lessonUrl by stripping any trailing '/
-            // Derive lessonUrl by stripping any trailing '/<page>' pages from the URL
-            var lessonUrl = currentUrl.replace(/\/\d{1,4}$/, '');
-            lessonUrl = lessonUrl.replace(/\.lesson.*/, '.lesson');
-            this.set('lessonUrl', lessonUrl);
+            // Replace any ".lesson" suffix with ".lesson" — explicitly match literal dot
+            this.set('lessonUrl', url.replace(/\.lesson.*/, '.lesson'));
 
-            // Efficiently extract page number using indexOf / substring instead of
-            // complex, potentially backtracking-prone regular expressions.
-            var pageNum = 0;
-            var lastSlashIndex = currentUrl.lastIndexOf('/');
-            if (lastSlashIndex !== -1 && lastSlashIndex < currentUrl.length - 1) {
-                var pageCandidate = currentUrl.substring(lastSlashIndex + 1);
-                // Ensure the candidate is strictly 14 digits
-                if (/^\d{1,4}$/.test(pageCandidate)) {
-                    pageNum = parseInt(pageCandidate, 10);
-                    if (!Number.isFinite(pageNum)) {
-                        pageNum = 0;
-                    }
-                }
+            // Extract page number using a non-ambiguous pattern with explicit anchors
+            var pageMatch = url.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
+            } else {
+                this.set('pageNum', 0);
             }
-            this.set('pageNum', pageNum);
 
             this.trigger('content:loaded',this,loadHelps);
         },
