@@ -12,7 +12,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import lombok.extern.slf4j.Slf4j; // Added for logging
+import lombok.extern.slf4j.Slf4j; // Added import for Slf4j
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@Slf4j // Added Slf4j annotation
+@Slf4j // Added Slf4j annotation for logging
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -41,7 +41,7 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = null; // Changed from "dave" to null to remove hard-coded password
+    String password = "dave";
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -54,12 +54,10 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception in getPassword method", sqle); // Replaced printStackTrace
-        // do nothing
+        log.error("SQL Exception occurred while fetching password: {}", sqle.getMessage(), sqle); // Replaced printStackTrace with Slf4j logging
       }
     } catch (Exception e) {
-      log.error("General Exception in getPassword method", e); // Replaced printStackTrace
-      // do nothing
+      log.error("An unexpected error occurred while fetching password: {}", e.getMessage(), e); // Replaced printStackTrace with Slf4j logging
     }
     return (password);
   }

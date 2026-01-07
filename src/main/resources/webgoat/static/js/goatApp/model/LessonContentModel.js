@@ -7,6 +7,10 @@ define(['jquery',
         Backbone,
         HTMLContentModel){
 
+    // Precompiled, efficient regular expressions to avoid excessive backtracking
+    var LESSON_URL_RE = /\.lesson(?:\/(\d{1,4}))?$/;
+    var LESSON_PAGE_RE = /(\d{1,4})$/;
+
     return HTMLContentModel.extend({
         urlRoot:null,
         defaults: {
@@ -32,39 +36,26 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Hardened URL handling to avoid complex regular expression backtracking
-            var currentUrl = String(document.URL || '');
-            // Strip any trailing "/<digits>" segment if present, without heavy regex
-            var baseLessonUrl = currentUrl;
-            var lastSlashIdx = currentUrl.lastIndexOf('/');
-            if (lastSlashIdx !== -1) {
-                var lastSegment = currentUrl.substring(lastSlashIdx + 1);
-                // Last segment looks like a page number (1-4 digits)
-                if (/^\d{1,4}$/.test(lastSegment)) {
-                    baseLessonUrl = currentUrl.substring(0, lastSlashIdx);
-                }
+            var currentUrl = document.URL;
+            // Normalize and trim the URL to minimize unexpected regex behavior
+            if (typeof currentUrl === 'string') {
+                currentUrl = currentUrl.trim();
             }
 
-            // Ensure we produce "<something>.lesson" safely without complex regex
-            if (baseLessonUrl.indexOf('.lesson') === -1) {
-                // Fallback: if no ".lesson" present, use original URL as-is
-                this.set('lessonUrl', currentUrl);
+            // Use a precompiled, efficient regex to strip the trailing `.lesson` segment
+            if (LESSON_URL_RE.test(currentUrl)) {
+                this.set('lessonUrl', currentUrl.replace(LESSON_URL_RE, '.lesson'));
             } else {
-                // Truncate everything after ".lesson"
-                var lessonIndex = baseLessonUrl.indexOf('.lesson');
-                this.set('lessonUrl', baseLessonUrl.substring(0, lessonIndex + '.lesson'.length));
+                this.set('lessonUrl', currentUrl);
             }
 
-            // Determine page number using a simple check on the last path segment
-            var pageNum = 0;
-            var lastSlashIdx2 = currentUrl.lastIndexOf('/');
-            if (lastSlashIdx2 !== -1) {
-                var lastSegment2 = currentUrl.substring(lastSlashIdx2 + 1);
-                if (/^\d{1,4}$/.test(lastSegment2)) {
-                    pageNum = parseInt(lastSegment2, 10);
-                }
+            // Extract pageNum using a safer, precompiled regex
+            var pageMatch = LESSON_PAGE_RE.exec(currentUrl);
+            if (pageMatch && pageMatch[1]) {
+                this.set('pageNum', pageMatch[1]);
+            } else {
+                this.set('pageNum', 0);
             }
-            this.set('pageNum', pageNum);
 
             this.trigger('content:loaded',this,loadHelps);
         },
