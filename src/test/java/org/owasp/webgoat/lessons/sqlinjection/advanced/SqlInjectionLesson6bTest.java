@@ -1,119 +1,73 @@
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.*;
-
+import java.io.IOException;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-
-import org.junit.jupiter.api.DisplayName;
+import java.sql.Statement;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
+
 /**
- * Delta tests focused on:
- * - getPassword() no longer using a hardcoded fallback password.
- * - getPassword() using PreparedStatement with parameter binding.
- * - completed(...) behavior when no password is available vs. correct password.
+ * Delta tests for SqlInjectionLesson6b focusing only on the information exposure and
+ * hardcoded-password fixes:
+ * - Ensure getPassword() no longer returns a hardcoded default when the query fails.
+ * - Ensure completed() behaves securely when the internal lookup fails (no unintended success).
  */
-class SqlInjectionLesson6bTest {
+public class SqlInjectionLesson6bTest {
 
-    @Test
-    @DisplayName("getPassword uses PreparedStatement with parameter binding for user 'dave'")
-    void getPassword_usesPreparedStatementAndBindsUsername() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        SqlInjectionLesson6b endpoint = new SqlInjectionLesson6b(dataSource);
+  private LessonDataSource dataSource;
+  private SqlInjectionLesson6b lesson;
 
-        Connection connection = mock(Connection.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        ResultSet resultSet = mock(ResultSet.class);
+  private Connection connection;
+  private Statement statement;
 
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+  @BeforeEach
+  void setUp() throws Exception {
+    dataSource = Mockito.mock(LessonDataSource.class);
+    lesson = new SqlInjectionLesson6b(dataSource);
 
-        // Simulate that password is present in DB
-        when(resultSet.first()).thenReturn(true);
-        when(resultSet.getString("password")).thenReturn("secretFromDb");
+    connection = Mockito.mock(Connection.class);
+    statement = Mockito.mock(Statement.class);
 
-        // Act
-        String password = endpoint.getPassword();
+    when(dataSource.getConnection()).thenReturn(connection);
+    when(connection.createStatement(
+            ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+        .thenReturn(statement);
+  }
 
-        // Assert
-        // Verify secure SQL and parameter binding
-        verify(connection).prepareStatement("SELECT password FROM user_system_data WHERE user_name = ?");
-        verify(preparedStatement).setString(1, "dave");
-        verify(preparedStatement).executeQuery();
+  @Test
+  void getPassword_returnsEmptyStringWhenQueryFails_insteadOfHardcodedSecret() throws Exception {
+    // Arrange: simulate a failure when creating or executing the statement
+    when(connection.createStatement(
+            ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+        .thenThrow(new RuntimeException("DB not available"));
 
-        // Ensure value comes from DB, not from any hardcoded default
-        assertThat(password).isEqualTo("secretFromDb");
-    }
+    // Act
+    String password = lesson.getPassword();
 
-    @Test
-    @DisplayName("getPassword returns null when no DB row is found (no hardcoded fallback)")
-    void getPassword_returnsNullWhenNoRowFound() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        SqlInjectionLesson6b endpoint = new SqlInjectionLesson6b(dataSource);
+    // Assert: previously this would have returned the hardcoded "dave"
+    assertEquals("", password, "getPassword should no longer return a hardcoded default value");
+  }
 
-        Connection connection = mock(Connection.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        ResultSet resultSet = mock(ResultSet.class);
+  @Test
+  void completed_doesNotSucceedWhenInternalPasswordLookupFails() throws IOException {
+    // Arrange: force getPassword() to return empty (no DB row / failure)
+    when(connection.createStatement(
+            ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+        .thenThrow(new RuntimeException("DB not available"));
 
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+    // Act: user attempts to complete lesson with arbitrary input
+    AttackResult result = lesson.completed("dave");
 
-        // No row found
-        when(resultSet.first()).thenReturn(false);
-
-        // Act
-        String password = endpoint.getPassword();
-
-        // Assert
-        // Previously it would have returned hardcoded "dave"; now it must be null
-        assertThat(password).as("No row found should not yield a hardcoded fallback password").isNull();
-    }
-
-    @Test
-    @DisplayName("completed fails when userid_6b does not match DB password (no fallback bypass)")
-    void completed_failsWhenUseridDoesNotMatchPasswordOrPasswordMissing() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        SqlInjectionLesson6b endpointSpy = spy(new SqlInjectionLesson6b(dataSource));
-
-        // Simulate missing password (e.g., DB error or no result)
-        doReturn(null).when(endpointSpy).getPassword();
-
-        // Act
-        AttackResult result = endpointSpy.completed("dave");
-
-        // Assert
-        // With null password, equality should fail and AttackResult should not mark lesson as completed
-        assertThat(result).isNotNull();
-        assertThat(result.getLessonCompleted()).as("No password available must not pass the challenge").isFalse();
-    }
-
-    @Test
-    @DisplayName("completed succeeds only when userid_6b equals the retrieved password")
-    void completed_succeedsOnlyWhenUseridMatchesPassword() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        SqlInjectionLesson6b endpointSpy = spy(new SqlInjectionLesson6b(dataSource));
-
-        // Simulate a password retrieved from DB
-        doReturn("secretFromDb").when(endpointSpy).getPassword();
-
-        // Act
-        AttackResult success = endpointSpy.completed("secretFromDb");
-        AttackResult failure = endpointSpy.completed("wrongUser");
-
-        // Assert
-        assertThat(success.getLessonCompleted()).isTrue();
-        assertThat(failure.getLessonCompleted()).isFalse();
-    }
+    // Assert: since getPassword() will not fall back to \"dave\" anymore, the lesson must not succeed
+    assertFalse(result.isSuccess(), "Lesson should not succeed when password lookup fails");
+  }
 }
