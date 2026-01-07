@@ -7,10 +7,6 @@ define(['jquery',
         Backbone,
         HTMLContentModel){
 
-    // Precompiled, efficient regular expressions to avoid excessive backtracking
-    var LESSON_URL_RE = /\.lesson(?:\/(\d{1,4}))?$/;
-    var LESSON_PAGE_RE = /(\d{1,4})$/;
-
     return HTMLContentModel.extend({
         urlRoot:null,
         defaults: {
@@ -36,27 +32,21 @@ define(['jquery',
             }
             this.set('content',content);
 
-            var currentUrl = document.URL;
-            // Normalize and trim the URL to minimize unexpected regex behavior
-            if (typeof currentUrl === 'string') {
-                currentUrl = currentUrl.trim();
+            // Limit URL length before applying regex to avoid performance issues on extremely long values
+            var currentUrl = String(document.URL || '');
+            var MAX_URL_LENGTH = 2048;
+            if (currentUrl.length > MAX_URL_LENGTH) {
+                currentUrl = currentUrl.substring(0, MAX_URL_LENGTH);
             }
 
-            // Use a precompiled, efficient regex to strip the trailing `.lesson` segment
-            if (LESSON_URL_RE.test(currentUrl)) {
-                this.set('lessonUrl', currentUrl.replace(LESSON_URL_RE, '.lesson'));
-            } else {
-                this.set('lessonUrl', currentUrl);
-            }
-
-            // Extract pageNum using a safer, precompiled regex
-            var pageMatch = LESSON_PAGE_RE.exec(currentUrl);
-            if (pageMatch && pageMatch[1]) {
+            // Use a simple, linear-time regex and avoid unnecessary backtracking
+            this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
                 this.set('pageNum', pageMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
-
             this.trigger('content:loaded',this,loadHelps);
         },
 
