@@ -32,15 +32,14 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use safer, anchored patterns to avoid excessive backtracking
-            var url = document.URL;
+            // Use a more specific, linear-time safe pattern for lesson URL normalization
+            this.set(
+                'lessonUrl',
+                document.URL.replace(/\.lesson(?:\/.*)?$/, '.lesson')
+            );
 
-            // Replace everything after the first ".lesson" with ".lesson"
-            // Equivalent to previous behavior but without leading ".*" and using non-greedy match
-            this.set('lessonUrl', url.replace(/\.lesson(?:\/.*)?$/, '.lesson'));
-
-            // Safely extract page number from URLs ending with ".lesson/<1-4 digit page>"
-            var pageMatch = url.match(/\.lesson\/(\d{1,4})$/);
+            // Use a stricter, non-ambiguous pattern for page number extraction
+            var pageMatch = document.URL.match(/\.lesson\/(\d{1,4})$/);
             if (pageMatch) {
                 this.set('pageNum', pageMatch[1]);
             } else {

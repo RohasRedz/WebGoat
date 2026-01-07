@@ -1,71 +1,92 @@
-jest.mock('jquery', () => {
-  const ajaxMock = jest.fn(() => ({
-    success: function (cb) {
-      // Simulate async success callback
-      cb({ access_token: 'access', refresh_token: 'refresh' });
-      return this;
-    }
-  }));
-  const $ = function () {};
-  $.ajax = ajaxMock;
-  $.ajaxMock = ajaxMock; // expose for assertions
-  return $;
-});
+jest.mock("axios", () => jest.fn());
+const axios = require("axios");
 
-const $ = require('jquery');
+// Load the factory from the main resources path
+const jwtRefreshFactoryModulePath = "../../../../../main/resources/lessons/jwt/js/jwt-refresh.js";
+require(jwtRefreshFactoryModulePath);
 
-// Load the script under test; it will attach functions to global scope.
-require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+describe("jwtRefreshFactory - loginAsGuest delta tests", () => {
+  let accessToken;
+  let serviceRoutes;
+  let webSession;
+  let jwtAuthenticationFactory;
+  let logoutFactory;
+  let ngNotify;
+  let factory;
 
-describe('jwt-refresh getJwtPassword and login behavior (delta tests)', () => {
   beforeEach(() => {
-    // Reset global webgoat.customjs before each test
-    global.webgoat = { customjs: {} };
-    localStorage.clear();
-    $.ajaxMock.mockClear();
+    axios.mockReset();
+
+    accessToken = {
+      current: jest.fn(),
+      setToken: jest.fn()
+    };
+    serviceRoutes = {};
+    webSession = {
+      data: {},
+      account: Promise.resolve()
+    };
+    jwtAuthenticationFactory = {
+      getJwtHeaderName: jest.fn(() => "X-Authorization"),
+      configureAxiosInterceptor: jest.fn(() => jest.fn())
+    };
+    logoutFactory = {
+      logout: jest.fn()
+    };
+    ngNotify = {
+      setSessionData: jest.fn(),
+      notify: jest.fn()
+    };
+
+    // Note: jwtRefreshFactory is attached to window by the script
+    factory = global.window.jwtRefreshFactory(
+      accessToken,
+      serviceRoutes,
+      webSession,
+      100000, // interval, not relevant for these delta tests
+      jwtAuthenticationFactory,
+      logoutFactory,
+      ngNotify
+    );
   });
 
-  test('getJwtPassword returns configured jwtPassword when defined', () => {
-    global.webgoat.customjs.jwtPassword = 'runtimeSecret';
+  test("loginAsGuest uses configured guest credentials when provided", async () => {
+    webSession.config = {
+      guestUser: "configGuest",
+      guestPassword: "configSecret"
+    };
 
-    // getJwtPassword is defined in the script global scope
-    const password = global.getJwtPassword();
+    axios.mockResolvedValue({
+      headers: { "x-authorization": "jwt-token" },
+      data: { some: "data" }
+    });
 
-    expect(password).toBe('runtimeSecret');
+    const loginPromise = factory.loginAsGuest(() => Promise.reject("onRejection called"));
+
+    const axiosCall = await loginPromise.then(() => axios.mock.calls[0][0]);
+
+    expect(axiosCall.url).toBe("/WebGoat/jwt/login");
+    expect(axiosCall.method).toBe("POST");
+    expect(axiosCall.data).toContain("username=configGuest");
+    expect(axiosCall.data).toContain("password=configSecret");
   });
 
-  test('getJwtPassword returns empty string when jwtPassword is not defined', () => {
-    const password = global.getJwtPassword();
+  test("loginAsGuest falls back to non-secret password when no config is present", async () => {
+    // No webSession.config defined
+    delete webSession.config;
 
-    expect(password).toBe('');
-  });
+    axios.mockResolvedValue({
+      headers: { "x-authorization": "jwt-token" },
+      data: { some: "data" }
+    });
 
-  test('login uses getJwtPassword value in AJAX body', () => {
-    global.webgoat.customjs.jwtPassword = 'runtimeSecret';
+    const loginPromise = factory.loginAsGuest(() => Promise.reject("onRejection called"));
 
-    // Spy on getJwtPassword to ensure it is used
-    const spy = jest.spyOn(global, 'getJwtPassword');
+    const axiosCall = await loginPromise.then(() => axios.mock.calls[0][0]);
 
-    global.login('Jerry');
-
-    expect(spy).toHaveBeenCalled();
-
-    expect($.ajaxMock).toHaveBeenCalledTimes(1);
-    const ajaxConfig = $.ajaxMock.mock.calls[0][0];
-    const dataSent = JSON.parse(ajaxConfig.data);
-
-    expect(dataSent.user).toBe('Jerry');
-    expect(dataSent.password).toBe('runtimeSecret');
-  });
-
-  test('login sends empty password when jwtPassword is not configured (no hardcoded secret)', () => {
-    // Do not set webgoat.customjs.jwtPassword, so getJwtPassword returns ''
-    global.login('Jerry');
-
-    const ajaxConfig = $.ajaxMock.mock.calls[0][0];
-    const dataSent = JSON.parse(ajaxConfig.data);
-
-    expect(dataSent.user).toBe('Jerry');
-    expect(dataSent.password).toBe(''); // verifies no hardcoded secret is used
+    expect(axiosCall.data).toContain("username=guest");
+    // The updated code uses empty string as default password; ensure no hard-coded 'guest' password
+    expect(axiosCall.data).toContain("password=");
+    expect(axiosCall.data).not.toContain("password=guest");
   });
 });

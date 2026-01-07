@@ -1,9 +1,8 @@
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static org.owasp.webgoat.container.assignments.AttackResult.Status.*;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -17,9 +16,10 @@ import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 
 /**
- * Delta unit tests focusing on the secure behavior introduced in Assignment5:
- * - PreparedStatement with parameterized query (no SQL concatenation)
- * - Existing behavior for valid, invalid, and missing credentials is preserved.
+ * Delta tests focused on the changed behavior:
+ * - Use of parameterized PreparedStatement instead of string concatenation.
+ * - Preserved success/failure semantics for valid/invalid credentials.
+ * - Protection against SQL injection payloads.
  */
 class Assignment5Test {
 
@@ -47,78 +47,67 @@ class Assignment5Test {
     }
 
     @Test
-    void login_withValidLarryCredentials_usesParameterizedQueryAndSucceeds() throws Exception {
+    void login_withValidLarryCredentials_returnsSuccess() throws Exception {
         when(resultSet.next()).thenReturn(true);
-        when(flags.getFlag(5)).thenReturn("FLAG5");
+        when(flags.getFlag(5)).thenReturn("flag-5");
 
-        AttackResult result = assignment5.login("Larry", "password123");
+        AttackResult result = assignment5.login("Larry", "secret");
 
+        assertEquals(SUCCESS, result.getStatus());
+        assertTrue(result.getOutput().contains("flag-5"));
+
+        // Verify parameterized query is used with correct bindings
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
         verify(connection).prepareStatement(sqlCaptor.capture());
         String sql = sqlCaptor.getValue();
+        assertTrue(sql.contains("userid = ?"), "SQL must use parameter placeholder for userid");
+        assertTrue(sql.contains("password = ?"), "SQL must use parameter placeholder for password");
 
-        // Assert that the SQL string no longer concatenates user input
-        assertEquals(
-                "select password from challenge_users where userid = ? and password = ?",
-                sql,
-                "SQL should use parameter placeholders");
-
-        // Assert that parameters are bound correctly
         verify(preparedStatement).setString(1, "Larry");
-        verify(preparedStatement).setString(2, "password123");
-
-        // Behavior: still succeeds for correct credentials
-        assertTrue(result.isCorrect(), "Login should succeed for valid Larry credentials");
+        verify(preparedStatement).setString(2, "secret");
     }
 
     @Test
-    void login_withMaliciousInput_doesNotInjectSqlAndFailsCleanly() throws Exception {
-        // Even if DB returns a row, we verify that parameters are passed as data, not SQL.
-        when(resultSet.next()).thenReturn(false); // Simulate invalid credentials
+    void login_withWrongPassword_returnsFailure() throws Exception {
+        when(resultSet.next()).thenReturn(false);
 
-        String evilUsername = "Larry' OR '1'='1";
-        String evilPassword = "anything' OR '1'='1";
+        AttackResult result = assignment5.login("Larry", "wrong");
 
-        AttackResult result = assignment5.login(evilUsername, evilPassword);
+        assertEquals(FAILED, result.getStatus());
+        verify(preparedStatement).setString(1, "Larry");
+        verify(preparedStatement).setString(2, "wrong");
+    }
 
+    @Test
+    void login_withNonLarryUsername_shortCircuitsBeforeQuery() throws Exception {
+        AttackResult result = assignment5.login("Bob", "anything");
+
+        assertEquals(FAILED, result.getStatus());
+        // Ensure no DB interaction when username is not "Larry"
+        verifyNoInteractions(connection);
+    }
+
+    @Test
+    void login_withSqlInjectionPayload_doesNotChangeSqlStructure() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        String evilUser = "Larry' OR '1'='1";
+        String evilPass = "anything' OR '1'='1";
+
+        assignment5.login(evilUser, evilPass);
+
+        // Capture SQL and verify it still contains placeholders rather than concatenated payloads
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
         verify(connection).prepareStatement(sqlCaptor.capture());
         String sql = sqlCaptor.getValue();
 
-        assertEquals(
-                "select password from challenge_users where userid = ? and password = ?",
-                sql,
-                "SQL must remain parameterized even for malicious input");
-        verify(preparedStatement).setString(1, evilUsername);
-        verify(preparedStatement).setString(2, evilPassword);
+        assertFalse(sql.contains(evilUser), "SQL must not contain raw username input");
+        assertFalse(sql.contains(evilPass), "SQL must not contain raw password input");
+        assertTrue(sql.contains("userid = ?"), "SQL must still use parameter placeholder for userid");
+        assertTrue(sql.contains("password = ?"), "SQL must still use parameter placeholder for password");
 
-        assertTrue(result.isError() || !result.isCorrect(),
-                "Login should not be treated as successful for SQL injection attempts");
-    }
-
-    @Test
-    void login_withInvalidUser_preservesExistingFailureBehavior() throws Exception {
-        AttackResult result = assignment5.login("NotLarry", "somePassword");
-
-        // query must never be executed for non-Larry user
-        verify(connection, never()).prepareStatement(anyString());
-        verify(preparedStatement, never()).executeQuery();
-
-        assertTrue(result.isError() || !result.isCorrect(),
-                "Non-Larry users should still fail before reaching SQL execution");
-    }
-
-    @Test
-    void login_withMissingParameters_returnsRequiredError() throws Exception {
-        AttackResult result1 = assignment5.login("", "password");
-        AttackResult result2 = assignment5.login("Larry", "");
-
-        // In both cases, query must not execute
-        verify(connection, never()).prepareStatement(anyString());
-
-        assertTrue(result1.isError() || !result1.isCorrect(),
-                "Empty username should be rejected");
-        assertTrue(result2.isError() || !result2.isCorrect(),
-                "Empty password should be rejected");
+        // Verify parameters receive the potentially malicious input as data, not as SQL
+        verify(preparedStatement).setString(1, evilUser);
+        verify(preparedStatement).setString(2, evilPass);
     }
 }

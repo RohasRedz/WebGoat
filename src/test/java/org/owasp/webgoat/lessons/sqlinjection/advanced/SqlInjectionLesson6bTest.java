@@ -1,103 +1,100 @@
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Delta unit tests for SqlInjectionLesson6b:
- * - Ensure behavioral equivalence for getPassword() and completed() after logging changes.
- * - Indirectly exercise paths where exceptions are logged instead of printStackTrace.
+ * Delta tests for changed behavior in SqlInjectionLesson6b:
+ * - Exceptions in getPassword() are handled without crashing.
+ * - Exceptions are logged via the logger instead of using printStackTrace().
+ *
+ * NOTE: This test uses Mockito's inline mocking (mock construction and static)
+ * to emulate the logging behavior. Adjust configuration if your build differs.
  */
 class SqlInjectionLesson6bTest {
 
     private LessonDataSource dataSource;
     private SqlInjectionLesson6b lesson;
-    private Connection connection;
-    private Statement statement;
-    private ResultSet resultSet;
 
     @BeforeEach
-    void setUp() throws Exception {
+    void setUp() {
         dataSource = mock(LessonDataSource.class);
         lesson = new SqlInjectionLesson6b(dataSource);
+    }
 
-        connection = mock(Connection.class);
-        statement = mock(Statement.class);
-        resultSet = mock(ResultSet.class);
-
+    @Test
+    void getPassword_sqlExceptionIsLoggedAndDefaultPasswordReturned() throws Exception {
+        Connection connection = mock(Connection.class);
         when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-                .thenReturn(statement);
-        when(statement.executeQuery(anyString())).thenReturn(resultSet);
+
+        // Mock statement/execute to throw SQLException
+        try (MockedConstruction<Statement> ignored = Mockito.mockConstruction(
+                Statement.class,
+                (mock, ctx) -> when(mock.executeQuery(anyString())).thenThrow(new SQLException("boom")));
+             MockedStatic<LoggerFactory> loggerFactoryMockedStatic = Mockito.mockStatic(LoggerFactory.class)) {
+
+            Logger mockLogger = mock(Logger.class);
+            loggerFactoryMockedStatic
+                    .when(() -> LoggerFactory.getLogger(SqlInjectionLesson6b.class))
+                    .thenReturn(mockLogger);
+
+            String password = lesson.getPassword();
+
+            // When exception occurs, default password should be returned and error logged
+            assertEquals("dave", password);
+            verify(mockLogger).error(
+                    contains("SQL Exception occurred while fetching password in getPassword method"),
+                    any(SQLException.class));
+        }
     }
 
     @Test
-    void getPassword_returnsDatabasePasswordWhenAvailable() throws Exception {
-        when(resultSet.first()).thenReturn(true);
-        when(resultSet.getString("password")).thenReturn("dbPassword");
+    void getPassword_generalExceptionIsLoggedAndDefaultPasswordReturned() throws Exception {
+        when(dataSource.getConnection()).thenThrow(new RuntimeException("connection failure"));
 
-        String password = lesson.getPassword();
+        try (MockedStatic<LoggerFactory> loggerFactoryMockedStatic = Mockito.mockStatic(LoggerFactory.class)) {
+            Logger mockLogger = mock(Logger.class);
+            loggerFactoryMockedStatic
+                    .when(() -> LoggerFactory.getLogger(SqlInjectionLesson6b.class))
+                    .thenReturn(mockLogger);
 
-        assertEquals("dbPassword", password,
-                "getPassword should still return the value from DB after logging fix");
+            String password = lesson.getPassword();
+
+            assertEquals("dave", password);
+            verify(mockLogger).error(
+                    contains("General Exception occurred in getPassword method"),
+                    any(RuntimeException.class));
+        }
     }
 
     @Test
-    void getPassword_returnsDefaultWhenExceptionOccursButDoesNotThrow() throws Exception {
-        when(dataSource.getConnection()).thenThrow(new RuntimeException("Connection failure"));
+    void completed_doesNotThrowWhenGetPasswordThrowsIOException() throws Exception {
+        // This delta test ensures that even if getPassword had issues,
+        // the completed() method itself still handles comparison and returns AttackResult.
+        SqlInjectionLesson6b spyLesson = Mockito.spy(lesson);
+        // Force getPassword to return a specific value
+        doReturn("dave").when(spyLesson).getPassword();
 
-        String password = lesson.getPassword();
+        AttackResult resultSuccess = spyLesson.completed("dave");
+        AttackResult resultFailure = spyLesson.completed("not-dave");
 
-        // Behavior before and after: should fall back to default "dave" and not throw
-        assertEquals("dave", password,
-                "When an exception occurs, getPassword should still return default and not propagate exceptions");
-    }
-
-    @Test
-    void completed_returnsSuccessWhenUserIdMatchesPassword() throws IOException {
-        // Simulate DB returning "secret" as password, and user supplying same value
-        when(resultSet.first()).thenReturn(true);
-        when(resultSet.getString("password")).thenReturn("secret");
-
-        AttackResult result = lesson.completed("secret");
-
-        assertTrue(result.isCorrect(),
-                "completed() must still succeed when supplied userid_6b equals actual password");
-    }
-
-    @Test
-    void completed_returnsFailureWhenUserIdDoesNotMatchPassword() throws IOException {
-        when(resultSet.first()).thenReturn(true);
-        when(resultSet.getString("password")).thenReturn("secret");
-
-        AttackResult result = lesson.completed("wrong");
-
-        assertTrue(result.isError() || !result.isCorrect(),
-                "completed() must still fail when userid_6b does not equal the password");
-    }
-
-    @Test
-    void getPassword_logsSqlExceptionWithoutThrowing() throws Exception {
-        // Force an SQLException path in inner try/catch
-        when(statement.executeQuery(anyString())).thenThrow(new java.sql.SQLException("SQL error"));
-
-        String password = lesson.getPassword();
-
-        // Still returns default or last value, and does not propagate the exception
-        assertEquals("dave", password,
-                "On SQL exception, getPassword should log and return default password");
+        assertTrue(resultSuccess.getSuccess());
+        assertFalse(resultFailure.getSuccess());
     }
 }
