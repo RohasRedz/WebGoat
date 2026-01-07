@@ -1,19 +1,35 @@
 $(document).ready(function () {
-    // Use a non-sensitive placeholder password for the training flow; the actual
-    // secret must be supplied at runtime (e.g., via configuration) and never hard-coded.
-    var trainingUser = 'Jerry';
-    var trainingPassword = (window.WEBGOAT_JWT_PASSWORD && typeof window.WEBGOAT_JWT_PASSWORD === 'string')
-        ? window.WEBGOAT_JWT_PASSWORD
-        : 'CHANGE_ME_AT_RUNTIME';
-    login(trainingUser, trainingPassword);
+    login('Jerry');
 })
 
-function login(user, password) {
+/**
+ * Retrieve the JWT demo password from a configuration source.
+ * Fallback is intentionally non-functional to avoid hardcoded secrets.
+ */
+function getJwtDemoPassword() {
+    // In WebGoat’s static context we don’t have real env vars; use a configurable hook if present.
+    if (typeof window !== 'undefined' &&
+        window.webgoat &&
+        window.webgoat.config &&
+        typeof window.webgoat.config.getJwtDemoPassword === 'function') {
+        return window.webgoat.config.getJwtDemoPassword();
+    }
+
+    // Safe non-secret fallback: this value is not a real password and should be
+    // rejected server-side if used without proper configuration.
+    return 'CHANGE_ME_SECURELY';
+}
+
+function login(user) {
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({user: user, password: password})
+        data: JSON.stringify({
+            user: user,
+            // Removed hard-coded secret; delegate to configuration helper instead.
+            password: getJwtDemoPassword()
+        })
     }).success(
         function (response) {
             localStorage.setItem('access_token', response['access_token']);

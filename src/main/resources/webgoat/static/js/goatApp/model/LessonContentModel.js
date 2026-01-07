@@ -31,16 +31,19 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-            // Precompile efficient regular expressions to avoid catastrophic backtracking
-            var lessonUrlPattern = /\.lesson(?:$|\/)/;
-            var pageNumPattern = /.*\.lesson\/(\d{1,4})$/;
 
-            this.set('lessonUrl', document.URL.replace(lessonUrlPattern, '.lesson'));
-            if (pageNumPattern.test(document.URL)) {
-                this.set('pageNum', document.URL.replace(pageNumPattern, '$1'));
+            // Use a pre-compiled, linear-time-safe regex for lesson URL detection
+            var lessonUrlRegex = /\.lesson(?:\/(\d{1,4}))?$/;
+
+            this.set('lessonUrl', document.URL.replace(lessonUrlRegex, '.lesson'));
+
+            var pageMatch = lessonUrlRegex.exec(document.URL);
+            if (pageMatch && pageMatch[1]) {
+                this.set('pageNum', pageMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
+
             this.trigger('content:loaded',this,loadHelps);
         },
 
