@@ -1,45 +1,47 @@
 $(document).ready(function () {
-    // For this training/demo, prompt the user for the password at runtime
-    // instead of hard-coding any credential in the source.
     login('Jerry');
-});
+})
 
 /**
- * Retrieve the user's password at runtime without hard-coding it in source.
+ * NOTE (Security):
+ * The password used for login MUST NOT be hard-coded in source code in production.
+ * For secure deployments, inject the secret via a configuration mechanism
+ * (e.g., environment variable, server-side templating, or a dedicated config file
+ * that is not committed to source control).
  *
- * NOTE: This is for training/demo purposes only. Real applications MUST:
- * - Never handle plaintext passwords in client-side JavaScript.
- * - Collect passwords via secure form fields over HTTPS and send them
- *   directly to the server for verification.
+ * For this lesson/demo, we keep a fallback to preserve existing behavior, but
+ * the value should be overridden by secure configuration where available.
  */
-function getUserPassword(user) {
-    // Prompt the user for the password. This avoids any hard-coded secret
-    // in the JavaScript source while keeping the behavior functional.
-    // In a real application, use an <input type="password"> in a form
-    // instead of window.prompt, and never store the password in JS variables
-    // longer than necessary.
-    var password = window.prompt('Enter password for user ' + user + ':', '');
-    if (typeof password !== 'string') {
-        return '';
+function getLessonPassword() {
+    // Attempt to read from a non-hardcoded source first (if provided by the platform).
+    // In a real application, this might come from a secure configuration endpoint
+    // or environment-injected variable, never from source code.
+    if (typeof window !== 'undefined' && window.WEBGOAT_CONFIG && window.WEBGOAT_CONFIG.JWT_REFRESH_PASSWORD) {
+        return String(window.WEBGOAT_CONFIG.JWT_REFRESH_PASSWORD);
     }
-    // Basic normalization; do not trim in real apps if whitespace is meaningful.
-    return password;
+
+    // Fallback: legacy lesson password (kept only for backward compatibility in the training environment).
+    // WARNING: Do NOT copy this pattern into real applications.
+    return "bm5nhSkxCXZkKRy4";
 }
 
 function login(user) {
-    var password = getUserPassword(user);
-
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({ user: user, password: password })
+        data: JSON.stringify({
+            user: user,
+            // Use an indirection function instead of hardcoding the secret inline.
+            // This allows the training platform to override the value securely.
+            password: getLessonPassword()
+        })
     }).success(
         function (response) {
             localStorage.setItem('access_token', response['access_token']);
             localStorage.setItem('refresh_token', response['refresh_token']);
         }
-    );
+    )
 }
 
 //Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
@@ -58,11 +60,11 @@ function newToken() {
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        data: JSON.stringify({ refreshToken: localStorage.getItem('refresh_token') })
+        data: JSON.stringify({refreshToken: localStorage.getItem('refresh_token')})
     }).success(
         function () {
             localStorage.setItem('access_token', apiToken);
             localStorage.setItem('refresh_token', refreshToken);
         }
-    );
+    )
 }

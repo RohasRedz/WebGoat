@@ -7,12 +7,6 @@ define(['jquery',
         Backbone,
         HTMLContentModel){
 
-    // Precompiled, constrained regular expressions for lesson URL and page number
-    // Matches a URL ending in ".lesson" (no catastrophic backtracking)
-    var LESSON_URL_REGEX = /\.lesson(?:$|[?#])/;
-    // Matches a URL ending in ".lesson/<1-4 digit page>" with only digits in the group
-    var PAGE_NUM_REGEX = /.*\.lesson\/(\d{1,4})$/;
-
     return HTMLContentModel.extend({
         urlRoot:null,
         defaults: {
@@ -38,21 +32,31 @@ define(['jquery',
             }
             this.set('content',content);
 
-            var currentUrl = String(document.URL || '');
+            var currentUrl = document.URL || '';
 
-            // Use precompiled, constrained regex for lesson URL
-            if (LESSON_URL_REGEX.test(currentUrl)) {
-                this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
-            } else {
-                this.set('lessonUrl', currentUrl);
-            }
+            // Derive lessonUrl by stripping any trailing '/
+            // Derive lessonUrl by stripping any trailing '/
+            // Derive lessonUrl by stripping any trailing '/<page>' pages from the URL
+            var lessonUrl = currentUrl.replace(/\/\d{1,4}$/, '');
+            lessonUrl = lessonUrl.replace(/\.lesson.*/, '.lesson');
+            this.set('lessonUrl', lessonUrl);
 
-            // Use precompiled, constrained regex for page number extraction
-            if (PAGE_NUM_REGEX.test(currentUrl)) {
-                this.set('pageNum', currentUrl.replace(PAGE_NUM_REGEX, '$1'));
-            } else {
-                this.set('pageNum', 0);
+            // Efficiently extract page number using indexOf / substring instead of
+            // complex, potentially backtracking-prone regular expressions.
+            var pageNum = 0;
+            var lastSlashIndex = currentUrl.lastIndexOf('/');
+            if (lastSlashIndex !== -1 && lastSlashIndex < currentUrl.length - 1) {
+                var pageCandidate = currentUrl.substring(lastSlashIndex + 1);
+                // Ensure the candidate is strictly 14 digits
+                if (/^\d{1,4}$/.test(pageCandidate)) {
+                    pageNum = parseInt(pageCandidate, 10);
+                    if (!Number.isFinite(pageNum)) {
+                        pageNum = 0;
+                    }
+                }
             }
+            this.set('pageNum', pageNum);
+
             this.trigger('content:loaded',this,loadHelps);
         },
 

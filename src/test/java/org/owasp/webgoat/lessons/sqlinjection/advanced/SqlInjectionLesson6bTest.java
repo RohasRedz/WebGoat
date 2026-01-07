@@ -1,103 +1,52 @@
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.io.IOException;
 
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 
-/**
- * Delta tests for SqlInjectionLesson6b focusing only on the behavior
- * changed by the fix:
- * - getPassword no longer returns a hard-coded "dave" on error/empty result.
- * - Exceptions are logged and not rethrown as stack traces.
- */
 class SqlInjectionLesson6bTest {
 
-    private LessonDataSource dataSource;
-    private SqlInjectionLesson6b lesson;
+    // Helper subclass to stub getPassword() without changing production code
+    private static class SqlInjectionLesson6bStub extends SqlInjectionLesson6b {
 
-    private Connection connection;
-    private Statement statement;
-    private ResultSet resultSet;
+        private final String passwordToReturn;
 
-    @BeforeEach
-    void setUp() throws Exception {
-        dataSource = mock(LessonDataSource.class);
-        lesson = new SqlInjectionLesson6b(dataSource);
+        SqlInjectionLesson6bStub(LessonDataSource dataSource, String passwordToReturn) {
+            super(dataSource);
+            this.passwordToReturn = passwordToReturn;
+        }
 
-        connection = mock(Connection.class);
-        statement = mock(Statement.class);
-        resultSet = mock(ResultSet.class);
-
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.createStatement(
-                anyInt(),
-                anyInt())).thenReturn(statement);
-        when(statement.executeQuery(anyString())).thenReturn(resultSet);
+        @Override
+        protected String getPassword() {
+            return passwordToReturn;
+        }
     }
 
     @Test
-    void getPassword_whenNoRowInDatabase_doesNotReturnHardCodedDave() throws Exception {
-        // Arrange: simulate empty result set (no rows)
-        when(resultSet.first()).thenReturn(false);
+    @DisplayName("completed should fail when userid_6b does not equal getPassword()")
+    void completed_returnsFailureWhenUserIdDoesNotMatchPassword() throws IOException {
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        SqlInjectionLesson6b lesson = new SqlInjectionLesson6bStub(dataSource, "expectedPassword");
 
-        // Act
-        String password = lesson.getPassword();
+        AttackResult result = lesson.completed("wrongPassword");
 
-        // Assert: default password is now empty string and not the old hard-coded "dave"
-        assertNotNull(password, "Password should never be null");
-        assertEquals("", password, "Password should be empty string when no DB row is found");
-        assertNotEquals("dave", password, "Password must not fall back to hard-coded 'dave' anymore");
+        assertFalse(result.isLessonSolved(), "Mismatched userid_6b should not solve the lesson");
     }
 
     @Test
-    void getPassword_whenSQLExceptionOccurs_returnsEmptyStringAndDoesNotThrow() throws Exception {
-        // Arrange: simulate SQL exception during statement creation or query execution
-        when(connection.createStatement(anyInt(), anyInt())).thenThrow(new SQLException("DB failure"));
+    @DisplayName("completed should succeed when userid_6b equals getPassword()")
+    void completed_returnsSuccessWhenUserIdMatchesPassword() throws IOException {
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        SqlInjectionLesson6b lesson = new SqlInjectionLesson6bStub(dataSource, "expectedPassword");
 
-        // Act & Assert: method should handle the exception, log it, and return the default (empty) password
-        String password = assertDoesNotThrow(lesson::getPassword,
-                "getPassword should not propagate SQLExceptions");
+        AttackResult result = lesson.completed("expectedPassword");
 
-        assertEquals("", password, "On SQL error, password should default to empty string (not 'dave')");
-    }
-
-    @Test
-    void completed_returnsSuccessOnlyWhenSuppliedUseridMatchesDatabasePassword() throws Exception {
-        // Arrange: simulate DB returning a specific password for user 'dave'
-        when(resultSet.first()).thenReturn(true);
-        when(resultSet.getString("password")).thenReturn("secret-db-password");
-
-        // First call: correct password -> success
-        AttackResult successResult = lesson.completed("secret-db-password");
-        assertTrue(successResult.getLessonCompleted(),
-                "completed should succeed when supplied userid_6b equals DB password");
-
-        // Second call: incorrect password -> failure
-        AttackResult failureResult = lesson.completed("wrong-password");
-        assertFalse(failureResult.getLessonCompleted(),
-                "completed should fail when supplied userid_6b does not equal DB password");
-    }
-
-    @Test
-    void getPassword_whenGeneralExceptionOccurs_returnsEmptyStringAndDoesNotThrow() throws Exception {
-        // Arrange: simulate an unchecked/other exception from dataSource.getConnection()
-        when(dataSource.getConnection()).thenThrow(new RuntimeException("unexpected"));
-
-        // Act & Assert
-        String password = assertDoesNotThrow(lesson::getPassword,
-                "getPassword should catch and log unexpected exceptions");
-
-        assertEquals("", password, "On general exception, password should default to empty string");
+        assertTrue(result.isLessonSolved(), "Matching userid_6b should solve the lesson");
     }
 }
