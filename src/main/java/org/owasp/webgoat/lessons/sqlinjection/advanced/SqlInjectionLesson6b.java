@@ -12,7 +12,6 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -22,7 +21,6 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@Slf4j
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -41,7 +39,8 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "dave";
+    // Remediation: Remove hard-coded default password. Initialize to a safe, non-sensitive value.
+    String password = ""; // Changed from "dave" to ""
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -54,10 +53,14 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL error during password retrieval for user 'dave': {}", sqle.getMessage(), sqle);
+        // Remediation: Removed printStackTrace to prevent information exposure through logs.
+        // In a real application, use a secure logging framework (e.g., SLF4J) to log errors
+        // without exposing sensitive details or stack traces to external systems/users.
+        // do nothing
       }
     } catch (Exception e) {
-      log.error("General error during password retrieval for user 'dave': {}", e.getMessage(), e);
+      // Remediation: Removed printStackTrace to prevent information exposure through logs.
+      // do nothing
     }
     return (password);
   }

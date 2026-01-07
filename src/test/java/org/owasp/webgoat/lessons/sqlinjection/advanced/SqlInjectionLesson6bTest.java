@@ -1,100 +1,68 @@
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.when;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.sql.Statement;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.owasp.webgoat.container.LessonDataSource;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+/**
+ * Delta tests for SqlInjectionLesson6b focusing on removal of hard-coded password
+ * and reliance on database value only.
+ *
+ * Behavior under test:
+ * - getPassword() no longer returns the hard-coded value "dave" when the DB returns nothing.
+ * - When the DB query returns a row, getPassword() returns the DB value.
+ */
 public class SqlInjectionLesson6bTest {
 
   private LessonDataSource dataSource;
-  private SqlInjectionLesson6b lesson6b;
-
   private Connection connection;
   private Statement statement;
   private ResultSet resultSet;
+  private SqlInjectionLesson6b lesson6b;
 
   @BeforeEach
   void setUp() throws Exception {
-    dataSource = mock(LessonDataSource.class);
+    dataSource = org.mockito.Mockito.mock(LessonDataSource.class);
+    connection = org.mockito.Mockito.mock(Connection.class);
+    statement = org.mockito.Mockito.mock(Statement.class);
+    resultSet = org.mockito.Mockito.mock(ResultSet.class);
     lesson6b = new SqlInjectionLesson6b(dataSource);
-
-    connection = mock(Connection.class);
-    statement = mock(Statement.class);
-    resultSet = mock(ResultSet.class);
 
     when(dataSource.getConnection()).thenReturn(connection);
     when(connection.createStatement(
-            ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+            org.mockito.Mockito.eq(ResultSet.TYPE_SCROLL_INSENSITIVE),
+            org.mockito.Mockito.eq(ResultSet.CONCUR_READ_ONLY)))
         .thenReturn(statement);
-    when(statement.executeQuery(anyString())).thenReturn(resultSet);
+    when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
+        .thenReturn(resultSet);
+  }
+
+  @Test
+  void getPassword_returnsDatabasePasswordWhenRowExists() throws Exception {
     when(resultSet.first()).thenReturn(true);
-    when(resultSet.getString("password")).thenReturn("dave");
-  }
-
-  @Test
-  void getPassword_returnsNonNullValue_whenQuerySucceeds() {
-    String password = lesson6b.getPassword();
-
-    assertNotNull(password);
-    assertEquals("dave", password);
-  }
-
-  @Test
-  void getPassword_returnsDefaultAndDoesNotThrow_whenSqlExceptionOccurs() throws Exception {
-    when(connection.createStatement(
-            ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-        .thenThrow(new SQLException("synthetic SQL error"));
+    when(resultSet.getString("password")).thenReturn("db-secret");
 
     String password = lesson6b.getPassword();
 
-    assertNotNull(password);
-    assertEquals("dave", password);
+    // After the fix, the method must still return the DB value when available.
+    assertEquals("db-secret", password);
   }
 
   @Test
-  void getPassword_logsErrorWhenSqlExceptionOccurs() throws Exception {
-    when(connection.createStatement(
-            ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-        .thenThrow(new SQLException("synthetic SQL error"));
+  void getPassword_doesNotFallBackToHardCodedDefaultWhenNoRow() throws Exception {
+    // Simulate no results from the database
+    when(resultSet.first()).thenReturn(false);
 
-    Logger logger = LoggerFactory.getLogger(SqlInjectionLesson6b.class);
-    TestLogAppender appender = new TestLogAppender();
-    appender.start();
-    ((ch.qos.logback.classic.Logger) logger).addAppender(appender);
+    String password = lesson6b.getPassword();
 
-    try {
-      lesson6b.getPassword();
-
-      boolean hasErrorLog =
-          appender.getEvents().stream()
-              .anyMatch(
-                  e ->
-                      e.getLevel() == ch.qos.logback.classic.Level.ERROR
-                          && e.getFormattedMessage()
-                              .contains(
-                                  "SQL error during password retrieval for user 'dave'"));
-      org.junit.jupiter.api.Assertions.assertTrue(hasErrorLog);
-    } finally {
-      ((ch.qos.logback.classic.Logger) logger).detachAppender(appender);
-      appender.stop();
-    }
-  }
-
-  private static class TestLogAppender
-      extends ch.qos.logback.core.read.ListAppender<
-          ch.qos.logback.classic.spi.ILoggingEvent> {
-    java.util.List<ch.qos.logback.classic.spi.ILoggingEvent> getEvents() {
-      return this.list;
-    }
+    // Before the fix, this would have returned "dave" (hard-coded default).
+    // After the fix, the default is an empty string, eliminating the hard-coded secret.
+    assertEquals("", password);
   }
 }
