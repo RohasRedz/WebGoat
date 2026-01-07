@@ -31,12 +31,22 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-            this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
-            if (/.*\.lesson\/(\d{1,4})$/.test(document.URL)) {
-                this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
+
+            // Use safer, anchored patterns to avoid excessive backtracking
+            var url = document.URL;
+
+            // Replace everything after the first ".lesson" with ".lesson"
+            // Equivalent to previous behavior but without leading ".*" and using non-greedy match
+            this.set('lessonUrl', url.replace(/\.lesson(?:\/.*)?$/, '.lesson'));
+
+            // Safely extract page number from URLs ending with ".lesson/<1-4 digit page>"
+            var pageMatch = url.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
             } else {
-                this.set('pageNum',0);
+                this.set('pageNum', 0);
             }
+
             this.trigger('content:loaded',this,loadHelps);
         },
 

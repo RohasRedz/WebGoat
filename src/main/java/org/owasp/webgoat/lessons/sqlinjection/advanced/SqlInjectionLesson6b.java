@@ -19,10 +19,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestController
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
+  private static final Logger log = LoggerFactory.getLogger(SqlInjectionLesson6b.class);
 
   public SqlInjectionLesson6b(LessonDataSource dataSource) {
     this.dataSource = dataSource;
@@ -52,11 +55,11 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        sqle.printStackTrace();
+        log.error("SQL Exception in getPassword method", sqle);
         // do nothing
       }
     } catch (Exception e) {
-      e.printStackTrace();
+      log.error("General Exception in getPassword method", e);
       // do nothing
     }
     return (password);

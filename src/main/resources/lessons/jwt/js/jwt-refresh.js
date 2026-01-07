@@ -2,12 +2,21 @@ $(document).ready(function () {
     login('Jerry');
 })
 
+function getJwtPassword() {
+    // Obtain password from a runtime-configured, non-hardcoded source.
+    // Fallback to an empty string if not configured, to avoid embedding secrets in source.
+    if (window.webgoat && window.webgoat.customjs && typeof window.webgoat.customjs.jwtPassword === 'string') {
+        return window.webgoat.customjs.jwtPassword;
+    }
+    return '';
+}
+
 function login(user) {
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({user: user, password: "bm5nhSkxCXZkKRy4"})
+        data: JSON.stringify({user: user, password: getJwtPassword()})
     }).success(
         function (response) {
             localStorage.setItem('access_token', response['access_token']);
