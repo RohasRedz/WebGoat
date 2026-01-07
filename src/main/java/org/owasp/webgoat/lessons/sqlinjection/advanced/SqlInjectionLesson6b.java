@@ -9,10 +9,10 @@ import static org.owasp.webgoat.container.assignments.AttackResultBuilder.succes
 
 import java.io.IOException;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
-import lombok.extern.slf4j.Slf4j; // Added import
+import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@Slf4j // Added annotation
+@Slf4j
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -41,26 +41,23 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "dave";
+    String password = null; // Initialize to null, no hardcoded default
     try (Connection connection = dataSource.getConnection()) {
-      String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
-      try {
-        Statement statement =
-            connection.createStatement(
-                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-        ResultSet results = statement.executeQuery(query);
+      // Use PreparedStatement to prevent SQL Injection and parameterize the username
+      String query = "SELECT password FROM user_system_data WHERE user_name = ?";
+      try (PreparedStatement statement = connection.prepareStatement(query)) {
+        statement.setString(1, "dave"); // 'dave' is hardcoded in the original query, so parameterize it.
+        ResultSet results = statement.executeQuery();
 
         if (results != null && results.first()) {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception in getPassword method", sqle); // Replaced printStackTrace
-        // do nothing
+        log.error("Database error while retrieving password: {}", sqle.getMessage()); // Log securely
       }
     } catch (Exception e) {
-      log.error("Exception in getPassword method", e); // Replaced printStackTrace
-      // do nothing
+      log.error("An unexpected error occurred while retrieving password: {}", e.getMessage()); // Log securely
     }
-    return (password);
+    return password; // Return null if not found or error, instead of hardcoded 'dave'
   }
 }
