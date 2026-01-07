@@ -31,19 +31,16 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-
-            // Use a pre-compiled, linear-time-safe regex for lesson URL detection
-            var lessonUrlRegex = /\.lesson(?:\/(\d{1,4}))?$/;
-
-            this.set('lessonUrl', document.URL.replace(lessonUrlRegex, '.lesson'));
-
-            var pageMatch = lessonUrlRegex.exec(document.URL);
-            if (pageMatch && pageMatch[1]) {
+            this.set(
+                'lessonUrl',
+                document.URL.replace(/\.lesson(?:\/.*)?$/, '.lesson')
+            );
+            var pageMatch = document.URL.match(/[^?]*\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
                 this.set('pageNum', pageMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
-
             this.trigger('content:loaded',this,loadHelps);
         },
 
