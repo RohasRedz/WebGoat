@@ -19,9 +19,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.slf4j.Logger; // FIX: Added import for Logger
+import org.slf4j.LoggerFactory; // FIX: Added import for LoggerFactory
 
 @RestController
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
+  private static final Logger log = LoggerFactory.getLogger(SqlInjectionLesson6b.class); // FIX: Added logger instance
   private final LessonDataSource dataSource;
 
   public SqlInjectionLesson6b(LessonDataSource dataSource) {
@@ -52,11 +55,11 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        System.err.println("An SQL error occurred during password retrieval."); // FIX: Replaced printStackTrace with generic error message
+        log.error("SQL Exception during password retrieval: {}", sqle.getMessage(), sqle); // FIX: Replaced printStackTrace with secure logging
         // do nothing
       }
     } catch (Exception e) {
-      System.err.println("An unexpected error occurred during password retrieval."); // FIX: Replaced printStackTrace with generic error message
+      log.error("General Exception during password retrieval: {}", e.getMessage(), e); // FIX: Replaced printStackTrace with secure logging
       // do nothing
     }
     return (password);
