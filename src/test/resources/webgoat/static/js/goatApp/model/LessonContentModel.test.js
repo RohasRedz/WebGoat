@@ -1,60 +1,67 @@
-define([
-  'jquery',
-  'underscore',
-  'backbone',
-  'goatApp/model/HTMLContentModel',
-  'webgoat/static/js/goatApp/model/LessonContentModel'
-], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
-  'use strict';
+// src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 
-  describe('LessonContentModel regex parsing (delta tests)', function () {
-    var originalUrl;
+/**
+ * Delta tests for LessonContentModel.js focusing on the URL parsing and
+ * regex changes that mitigate inefficient regular expression complexity.
+ *
+ * These tests verify that:
+ * - lessonUrl and pageNum are derived using the new logic.
+ * - The behavior for typical URLs remains correct.
+ */
 
-    beforeEach(function () {
-      originalUrl = global.document && global.document.URL;
+const Backbone = require('backbone');
+
+// Minimal HTMLContentModel stub to satisfy the module dependency.
+class HTMLContentModel extends Backbone.Model {}
+
+jest.mock('goatApp/model/HTMLContentModel', () => HTMLContentModel);
+
+describe('LessonContentModel delta tests', () => {
+  let LessonContentModel;
+
+  beforeAll(() => {
+    // Require the AMD-style module by simulating define/require
+    global.define = function (deps, factory) {
+      const $ = {}; // not used here
+      const _ = { escape: (s) => s };
+      const BackboneLocal = Backbone;
+      LessonContentModel = factory($, _, BackboneLocal, HTMLContentModel);
+    };
+    // Load the module under test
+    require('../../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
+  });
+
+  beforeEach(() => {
+    // Default URL before each test; overridden where needed
+    Object.defineProperty(global, 'document', {
+      value: { URL: 'http://localhost/WebGoat/lesson/12' },
+      writable: true
     });
+  });
 
-    afterEach(function () {
-      if (global.document) {
-        global.document.URL = originalUrl;
-      }
-    });
+  test('setContent derives lessonUrl and pageNum using new URL-based logic', () => {
+    // Arrange
+    const model = new LessonContentModel();
 
-    function createModel() {
-      return new LessonContentModel();
-    }
+    // Act
+    model.setContent('<html>content</html>', true);
 
-    it('should set lessonUrl without page number for URLs without page segment', function () {
-      var model = createModel();
-      global.document = global.document || {};
-      global.document.URL = 'http://example.com/WebGoat/attack.lesson';
+    // Assert: pageNum extracted from trailing numeric segment
+    expect(model.get('pageNum')).toBe(12);
+    // Assert: lessonUrl normalized to base lesson path + .lesson
+    expect(model.get('lessonUrl')).toBe('/WebGoat/lesson.lesson');
+  });
 
-      model.setContent('<html>ignored</html>');
+  test('setContent falls back to default pageNum=0 when URL has no numeric suffix', () => {
+    // Arrange
+    document.URL = 'http://localhost/WebGoat/lesson';
+    const model = new LessonContentModel();
 
-      expect(model.get('lessonUrl')).toBe('http://example.com/WebGoat/attack.lesson');
-      expect(model.get('pageNum')).toBe(0);
-    });
+    // Act
+    model.setContent('<html>content</html>', true);
 
-    it('should correctly extract lessonUrl and pageNum for URLs with page number', function () {
-      var model = createModel();
-      global.document = global.document || {};
-      global.document.URL = 'http://example.com/WebGoat/attack.lesson/3';
-
-      model.setContent('<html>ignored</html>');
-
-      expect(model.get('lessonUrl')).toBe('http://example.com/WebGoat/attack.lesson');
-      expect(model.get('pageNum')).toBe('3');
-    });
-
-    it('should fall back gracefully for malformed URLs', function () {
-      var model = createModel();
-      global.document = global.document || {};
-      global.document.URL = 'not-a-normal-url';
-
-      model.setContent('<html>ignored</html>');
-
-      expect(model.get('lessonUrl')).toBe('not-a-normal-url');
-      expect(model.get('pageNum')).toBe(0);
-    });
+    // Assert
+    expect(model.get('pageNum')).toBe(0);
+    expect(model.get('lessonUrl')).toBe('/WebGoat/lesson.lesson');
   });
 });

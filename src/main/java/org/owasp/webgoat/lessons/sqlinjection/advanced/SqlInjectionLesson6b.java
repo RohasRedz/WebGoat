@@ -15,6 +15,8 @@ import java.sql.Statement;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
+  private static final Logger log = LoggerFactory.getLogger(SqlInjectionLesson6b.class);
   private final LessonDataSource dataSource;
 
   public SqlInjectionLesson6b(LessonDataSource dataSource) {
@@ -39,8 +42,7 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    // Remediation: Remove hard-coded default password. Initialize to a safe, non-sensitive value.
-    String password = ""; // Changed from "dave" to ""
+    String password = "dave";
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -53,13 +55,11 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        // Remediation: Removed printStackTrace to prevent information exposure through logs.
-        // In a real application, use a secure logging framework (e.g., SLF4J) to log errors
-        // without exposing sensitive details or stack traces to external systems/users.
+        log.error("SQL Exception in getPassword: {}", sqle.getMessage(), sqle);
         // do nothing
       }
     } catch (Exception e) {
-      // Remediation: Removed printStackTrace to prevent information exposure through logs.
+      log.error("Exception in getPassword: {}", e.getMessage(), e);
       // do nothing
     }
     return (password);

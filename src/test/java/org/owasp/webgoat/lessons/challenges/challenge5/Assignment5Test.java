@@ -1,7 +1,9 @@
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -9,86 +11,94 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import javax.sql.DataSource;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
-import org.springframework.mock.web.MockHttpServletRequest;
 
 /**
- * Delta tests for Assignment5 focusing on the SQL injection fix.
+ * Delta tests for Assignment5 focusing on the fixed SQL injection vulnerability.
  *
- * Behavior under test:
- * - login() now uses a parameterized PreparedStatement with placeholders.
- * - User-supplied username and password must be bound via setString, not concatenated into SQL.
+ * These tests verify that:
+ * - The query uses parameterized PreparedStatement instead of string concatenation.
+ * - The method still returns success on valid credentials and failure on invalid credentials.
  */
 public class Assignment5Test {
 
-  private LessonDataSource lessonDataSource;
-  private DataSource dataSource;
-  private Connection connection;
-  private PreparedStatement preparedStatement;
-  private ResultSet resultSet;
-  private Flags flags;
-  private Assignment5 assignment5;
+  @Test
+  @DisplayName("login uses parameterized query and succeeds for valid credentials")
+  void login_usesParameterizedQuery_andSucceedsForValidCredentials() throws Exception {
+    // Arrange
+    DataSource dataSource = mock(DataSource.class);
+    LessonDataSource lessonDataSource = new LessonDataSource(dataSource);
+    Flags flags = mock(Flags.class);
 
-  @BeforeEach
-  void setUp() throws Exception {
-    // Wire up mocks so we can verify parameter binding on the PreparedStatement.
-    lessonDataSource = org.mockito.Mockito.mock(LessonDataSource.class);
-    dataSource = org.mockito.Mockito.mock(DataSource.class);
-    connection = org.mockito.Mockito.mock(Connection.class);
-    preparedStatement = org.mockito.Mockito.mock(PreparedStatement.class);
-    resultSet = org.mockito.Mockito.mock(ResultSet.class);
-    flags = org.mockito.Mockito.mock(Flags.class);
+    Connection connection = mock(Connection.class);
+    PreparedStatement preparedStatement = mock(PreparedStatement.class);
+    ResultSet resultSet = mock(ResultSet.class);
 
-    when(lessonDataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement(org.mockito.Mockito.anyString()))
+    when(dataSource.getConnection()).thenReturn(connection);
+    when(connection.prepareStatement(
+            "select password from challenge_users where userid = ? and password = ?"))
         .thenReturn(preparedStatement);
     when(preparedStatement.executeQuery()).thenReturn(resultSet);
     when(resultSet.next()).thenReturn(true);
     when(flags.getFlag(5)).thenReturn("FLAG-5");
 
-    // LessonDataSource extends javax.sql.DataSource in WebGoat, so we can safely downcast here.
-    // This allows the class under test to use the same getConnection() path.
-    org.mockito.Mockito.when((dataSource).getConnection()).thenReturn(connection);
+    Assignment5 assignment5 = new Assignment5(lessonDataSource, flags);
 
-    assignment5 = new Assignment5(lessonDataSource, flags);
-  }
+    // Act
+    AttackResult result = assignment5.login("Larry", "secret");
 
-  @Test
-  void login_usesParameterizedPreparedStatement_andBindsUserInputs() throws Exception {
-    String username = "Larry";
-    String password = "password123";
+    // Assert: success path preserved
+    assertSame(AttackResult.Status.SUCCESS, result.getLessonStatus());
 
-    AttackResult result = assignment5.login(username, password);
-
-    // Verify that PreparedStatement was created with placeholders, not with concatenated user input.
+    // Assert: verify that parameterized query is used with bind variables
+    ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
     verify(connection)
-        .prepareStatement(
-            eq("select password from challenge_users where userid = ? and password = ?"));
+        .prepareStatement(sqlCaptor.capture());
+    assertEquals(
+        "select password from challenge_users where userid = ? and password = ?",
+        sqlCaptor.getValue());
 
-    // Verify that user-controlled values are bound using setString on the PreparedStatement.
-    verify(preparedStatement).setString(1, username);
-    verify(preparedStatement).setString(2, password);
-
-    // Ensure that a successful login path is still functioning (behavior preserved).
-    // The concrete message key is not asserted here to keep this test focused on the SQL fix.
-    assertEquals(true, result.getLessonCompleted());
+    verify(preparedStatement).setString(1, "Larry");
+    verify(preparedStatement).setString(2, "secret");
   }
 
   @Test
-  void login_rejectsNonLarryUser_beforeQueryExecution() throws Exception {
-    String username = "Mallory";
-    String password = "anything";
+  @DisplayName("login fails when credentials do not match, using parameterized query")
+  void login_usesParameterizedQuery_andFailsForInvalidCredentials() throws Exception {
+    // Arrange
+    DataSource dataSource = mock(DataSource.class);
+    LessonDataSource lessonDataSource = new LessonDataSource(dataSource);
+    Flags flags = mock(Flags.class);
 
-    AttackResult result = assignment5.login(username, password);
+    Connection connection = mock(Connection.class);
+    PreparedStatement preparedStatement = mock(PreparedStatement.class);
+    ResultSet resultSet = mock(ResultSet.class);
 
-    // For non-Larry users, the method should fail early and never prepare/execute a SQL query,
-    // which further reduces attack surface.
-    org.mockito.Mockito.verifyNoInteractions(connection);
+    when(dataSource.getConnection()).thenReturn(connection);
+    when(connection.prepareStatement(
+            "select password from challenge_users where userid = ? and password = ?"))
+        .thenReturn(preparedStatement);
+    when(preparedStatement.executeQuery()).thenReturn(resultSet);
+    // No results -> invalid credentials
+    when(resultSet.next()).thenReturn(false);
 
-    assertEquals(false, result.getLessonCompleted());
+    Assignment5 assignment5 = new Assignment5(lessonDataSource, flags);
+
+    // Act
+    AttackResult result = assignment5.login("Larry", "wrong-password");
+
+    // Assert: failure path preserved
+    assertSame(AttackResult.Status.FAIL, result.getLessonStatus());
+
+    // Assert: still using parameterized query with bound parameters
+    verify(connection)
+        .prepareStatement(eq("select password from challenge_users where userid = ? and password = ?"));
+    verify(preparedStatement).setString(1, "Larry");
+    verify(preparedStatement).setString(2, "wrong-password");
   }
 }

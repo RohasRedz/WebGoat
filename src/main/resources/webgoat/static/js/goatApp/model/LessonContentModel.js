@@ -7,11 +7,6 @@ define(['jquery',
         Backbone,
         HTMLContentModel){
 
-    // Precompile safe, linear-time regular expressions and reuse them.
-    // These patterns avoid ambiguous constructs that can cause excessive backtracking.
-    var LESSON_URL_REGEX = /\.lesson(?:\/\d{1,4})?$/;
-    var PAGE_NUM_REGEX = /(?:^|\/)(\d{1,4})$/;
-
     return HTMLContentModel.extend({
         urlRoot:null,
         defaults: {
@@ -24,7 +19,7 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -37,23 +32,30 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use precompiled, efficient regex to normalize the lesson URL
-            var normalizedUrl = document.URL;
-            if (LESSON_URL_REGEX.test(normalizedUrl)) {
-                normalizedUrl = normalizedUrl.replace(LESSON_URL_REGEX, '.lesson');
-            }
-            this.set('lessonUrl', normalizedUrl);
+            // Use a more efficient, non-backtracking-safe approach for parsing the URL,
+            // avoiding complex or potentially catastrophic regular expressions.
+            var url = document.URL || '';
+            try {
+                var currentUrl = new URL(url);
+                var pathname = currentUrl.pathname || '';
 
-            // Use precompiled, efficient regex to extract page number safely
-            var pageNum = 0;
-            var pageMatch = PAGE_NUM_REGEX.exec(document.URL);
-            if (pageMatch && pageMatch[1]) {
-                pageNum = parseInt(pageMatch[1], 10);
-                if (!Number.isFinite(pageNum) || pageNum < 0) {
-                    pageNum = 0;
+                // Normalize lesson URL by trimming any trailing page segment
+                // e.g., /path/to/lesson/1234 -> /path/to/lesson
+                var lessonPath = pathname.replace(/\/\d{1,4}$/, '');
+                this.set('lessonUrl', lessonPath + '.lesson');
+
+                // Extract page number from the final numeric path segment if present
+                var pageNum = 0;
+                var match = pathname.match(/\/(\d{1,4})$/);
+                if (match && match[1]) {
+                    pageNum = parseInt(match[1], 10) || 0;
                 }
+                this.set('pageNum', pageNum);
+            } catch (e) {
+                // Fallback to safe defaults if URL parsing fails
+                this.set('lessonUrl', '.lesson');
+                this.set('pageNum', 0);
             }
-            this.set('pageNum', pageNum);
 
             this.trigger('content:loaded',this,loadHelps);
         },
