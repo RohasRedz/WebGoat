@@ -1,108 +1,128 @@
-// Assuming package based on source file location.
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.mock;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
+import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 import org.springframework.util.StringUtils;
 
 /**
- * Delta tests for Assignment5 focusing on the change from string-concatenated SQL
- * to a parameterized PreparedStatement. These tests verify that:
- * - The happy-path login still works when the correct credentials are provided.
- * - Injection-style credentials no longer cause unintended success.
- *
- * NOTE: We do NOT assert on SQL text directly; instead we rely on behavior:
- * the updated code uses parameters and should only succeed when the bound values match.
+ * Delta unit tests for Assignment5 focusing only on the changed behavior:
+ * - SQL is now parameterized using placeholders.
+ * - Parameters are bound via PreparedStatement#setString in the correct order.
+ * - Functional behavior for valid/invalid credentials is preserved.
  */
-public class Assignment5Test {
+class Assignment5Test {
 
-    @Test
-    @DisplayName("login should succeed for correct Larry credentials (behavior preserved with prepared statement)")
-    void loginSucceedsWithCorrectCredentials() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Connection connection = mock(Connection.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        ResultSet resultSet = mock(ResultSet.class);
-        Flags flags = mock(Flags.class);
+  private LessonDataSource dataSource;
+  private Flags flags;
+  private Assignment5 assignment5;
 
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(
-                "select password from challenge_users where userid = ? and password = ?"))
-                .thenReturn(preparedStatement);
+  private Connection connection;
+  private PreparedStatement preparedStatement;
+  private ResultSet resultSet;
 
-        // Simulate a row found for the given parameters
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        when(resultSet.next()).thenReturn(true);
-        when(flags.getFlag(5)).thenReturn("FLAG-5");
+  @BeforeEach
+  void setUp() throws Exception {
+    dataSource = org.mockito.Mockito.mock(LessonDataSource.class);
+    flags = org.mockito.Mockito.mock(Flags.class);
+    assignment5 = new Assignment5(dataSource, flags);
 
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
+    connection = org.mockito.Mockito.mock(Connection.class);
+    preparedStatement = org.mockito.Mockito.mock(PreparedStatement.class);
+    resultSet = org.mockito.Mockito.mock(ResultSet.class);
 
-        // Act
-        AttackResult result = assignment5.login("Larry", "correct-password");
+    when(dataSource.getConnection()).thenReturn(connection);
+    when(connection.prepareStatement(org.mockito.ArgumentMatchers.anyString()))
+        .thenReturn(preparedStatement);
+    when(preparedStatement.executeQuery()).thenReturn(resultSet);
+  }
 
-        // Assert
-        // If the prepared statement is used correctly with parameters, this path should succeed.
-        assertEquals(true, result.isSuccessful(), "Expected login to succeed for valid Larry credentials");
-    }
+  @Test
+  void login_usesParameterizedQuery_andBindsParametersInOrder() throws Exception {
+    String username = "Larry";
+    String password = "secret-password";
 
-    @Test
-    @DisplayName("login should NOT succeed when password contains SQL injection pattern")
-    void loginFailsForSqlInjectionPassword() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Connection connection = mock(Connection.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        ResultSet resultSet = mock(ResultSet.class);
-        Flags flags = mock(Flags.class);
+    // Arrange valid user so that query is executed
+    when(resultSet.next()).thenReturn(false);
 
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(
-                "select password from challenge_users where userid = ? and password = ?"))
-                .thenReturn(preparedStatement);
+    assignment5.login(username, password);
 
-        // For an injection attempt, the prepared statement should bind the exact string,
-        // and the query should behave as if the data is not matching any row.
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        when(resultSet.next()).thenReturn(false);
+    // Capture SQL used to prepare the statement
+    ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+    verify(connection).prepareStatement(sqlCaptor.capture());
+    String actualSql = sqlCaptor.getValue();
 
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
+    // Assert SQL uses placeholders instead of direct concatenation
+    // The exact string is known from the fixed implementation
+    assertEquals(
+        "select password from challenge_users where userid = ? and password = ?",
+        actualSql,
+        "SQL query should use parameter placeholders for username and password");
 
-        String injectionPassword = "anything' OR '1'='1";
+    // Assert parameters are bound correctly and in the right order
+    verify(preparedStatement).setString(1, username);
+    verify(preparedStatement).setString(2, password);
+  }
 
-        // Act
-        AttackResult result = assignment5.login("Larry", injectionPassword);
+  @Test
+  void login_returnsSuccessWhenCredentialsMatch() throws Exception {
+    String username = "Larry";
+    String password = "secret-password";
 
-        // Assert
-        // With the fix, this must NOT succeed anymore.
-        assertEquals(false, result.isSuccessful(),
-                "Login must fail when password contains SQL injection pattern even for Larry");
-    }
+    when(resultSet.next()).thenReturn(true);
+    AttackResult expectedSuccess =
+        org.owasp.webgoat.container.assignments.AttackResultBuilder
+            .success(assignment5)
+            .build();
+    // We cannot easily reconstruct the exact internal AttackResult content,
+    // but we can assert on the success flag.
+    AttackResult result = assignment5.login(username, password);
 
-    @Test
-    @DisplayName("login should fail when username is not Larry (unchanged behavior)")
-    void loginFailsForNonLarryUser() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Flags flags = mock(Flags.class);
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
+    // Assert the result represents a successful attack resolution
+    // (behavior preserved while using parameterized SQL)
+    org.junit.jupiter.api.Assertions.assertTrue(
+        result.getLessonCompleted(),
+        "Login should report success when the query returns a row");
+  }
 
-        // Act
-        AttackResult result = assignment5.login("Alice", "some-password");
+  @Test
+  void login_returnsFailureWhenCredentialsDoNotMatch() throws Exception {
+    String username = "Larry";
+    String password = "wrong-password";
 
-        // Assert
-        assertEquals(false, result.isSuccessful(),
-                "Non-Larry usernames must still be rejected after the SQL fix");
-    }
+    when(resultSet.next()).thenReturn(false);
+
+    AttackResult result = assignment5.login(username, password);
+
+    org.junit.jupiter.api.Assertions.assertFalse(
+        result.getLessonCompleted(),
+        "Login should report failure when the query does not return a row");
+  }
+
+  @Test
+  void login_shortCircuitsOnEmptyInput_beforeHittingDatabase() throws Exception {
+    // This test ensures behavior for empty input is preserved
+    String username = "";
+    String password = "some-pass";
+
+    AttackResult result = assignment5.login(username, password);
+
+    org.junit.jupiter.api.Assertions.assertFalse(
+        result.getLessonCompleted(),
+        "Empty username should fail before DB interaction");
+    // Verify connection was never requested (no SQL executed)
+    org.mockito.Mockito.verifyNoInteractions(connection);
+  }
 }
