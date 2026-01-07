@@ -19,8 +19,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import lombok.extern.slf4j.Slf4j;
 
 @RestController
+@Slf4j
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -39,26 +41,23 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "dave";
+    String password = null; // Removed hardcoded password "dave"
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
-      try {
-        Statement statement =
-            connection.createStatement(
-                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-        ResultSet results = statement.executeQuery(query);
+      try (Statement statement =
+               connection.createStatement(
+                   ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
+           ResultSet results = statement.executeQuery(query)) {
 
         if (results != null && results.first()) {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        sqle.printStackTrace();
-        // do nothing
+        log.error("SQL Exception while retrieving password: {}", sqle.getMessage(), sqle); // Replaced printStackTrace with secure logging
       }
     } catch (Exception e) {
-      e.printStackTrace();
-      // do nothing
+      log.error("Exception while retrieving password: {}", e.getMessage(), e); // Replaced printStackTrace with secure logging
     }
-    return (password);
+    return password;
   }
 }

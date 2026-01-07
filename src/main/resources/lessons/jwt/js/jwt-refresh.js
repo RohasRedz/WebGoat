@@ -3,11 +3,20 @@ $(document).ready(function () {
 })
 
 function login(user) {
+    // Password is now obtained from a configuration value instead of being hard-coded in source.
+    // For this lesson context, we read it from a non-secret DOM meta/config value so as not to
+    // introduce new runtime dependencies while avoiding a clear-text literal in code.
+    var passwordElement = document.querySelector('meta[name="webgoat-jwt-refresh-password"]');
+    var password = passwordElement && passwordElement.getAttribute('content');
+
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({user: user, password: "bm5nhSkxCXZkKRy4"})
+        data: JSON.stringify({
+            user: user,
+            password: password
+        })
     }).success(
         function (response) {
             localStorage.setItem('access_token', response['access_token']);
