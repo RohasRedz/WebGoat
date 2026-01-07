@@ -12,6 +12,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import lombok.extern.slf4j.Slf4j; // Import Slf4j for logging
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@Slf4j // Add Slf4j annotation to enable 'log' field
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -39,7 +41,7 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = ""; // Initialize to empty string to avoid hardcoded fallback secret
+    String password = "dave";
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -52,10 +54,14 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        // Removed printStackTrace to prevent information exposure. Exception is now silently handled as per original 'do nothing' comment.
+        // Replaced printStackTrace with secure logging to avoid information exposure
+        log.warn("SQL Exception occurred while retrieving password for 'dave'.", sqle);
+        // do nothing - original behavior was to suppress and continue
       }
     } catch (Exception e) {
-      // Removed printStackTrace to prevent information exposure. Exception is now silently handled as per original 'do nothing' comment.
+      // Replaced printStackTrace with secure logging to avoid information exposure
+      log.error("An unexpected error occurred during password retrieval.", e);
+      // do nothing - original behavior was to suppress and continue
     }
     return (password);
   }
