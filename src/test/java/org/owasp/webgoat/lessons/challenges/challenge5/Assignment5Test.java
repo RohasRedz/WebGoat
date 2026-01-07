@@ -1,92 +1,80 @@
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.*;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 
-/**
- * Delta tests for Assignment5 focusing only on the SQL injection fix:
- * - Ensure a PreparedStatement with parameter placeholders is used.
- * - Ensure user input is bound via setString rather than concatenated into the SQL.
- */
-public class Assignment5Test {
+class Assignment5Test {
 
-  private LessonDataSource dataSource;
-  private Flags flags;
-  private Assignment5 assignment5;
+    private LessonDataSource dataSource;
+    private Flags flags;
+    private Assignment5 assignment5;
 
-  private Connection connection;
-  private PreparedStatement preparedStatement;
-  private ResultSet resultSet;
+    private Connection connection;
+    private PreparedStatement preparedStatement;
+    private ResultSet resultSet;
 
-  @BeforeEach
-  void setUp() throws Exception {
-    dataSource = Mockito.mock(LessonDataSource.class);
-    flags = Mockito.mock(Flags.class);
-    assignment5 = new Assignment5(dataSource, flags);
+    @BeforeEach
+    void setUp() throws Exception {
+        dataSource = mock(LessonDataSource.class);
+        flags = mock(Flags.class);
+        assignment5 = new Assignment5(dataSource, flags);
 
-    connection = Mockito.mock(Connection.class);
-    preparedStatement = Mockito.mock(PreparedStatement.class);
-    resultSet = Mockito.mock(ResultSet.class);
+        connection = mock(Connection.class);
+        preparedStatement = mock(PreparedStatement.class);
+        resultSet = mock(ResultSet.class);
 
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
-    when(preparedStatement.executeQuery()).thenReturn(resultSet);
-  }
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(
+                "select password from challenge_users where userid = ? and password = ?"))
+                .thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
 
-  @Test
-  void login_usesParameterizedQueryAndBindsUserInput() throws Exception {
-    // Arrange
-    String username = "Larry";
-    String password = "p@ssw0rd";
-    when(resultSet.next()).thenReturn(true);
+        when(flags.getFlag(5)).thenReturn("FLAG-5");
+    }
 
-    // Act
-    AttackResult result = assignment5.login(username, password);
+    @Test
+    void login_withValidCredentials_returnsSuccess() throws Exception {
+        when(resultSet.next()).thenReturn(true);
 
-    // Assert: PreparedStatement is created with parameter placeholders (no direct concatenation)
-    ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-    verify(connection).prepareStatement(sqlCaptor.capture());
-    String usedSql = sqlCaptor.getValue();
-    // The exact SQL text may evolve, but it must use placeholders for both userid and password.
-    org.junit.jupiter.api.Assertions.assertTrue(
-        usedSql.toLowerCase().contains("userid = ?") && usedSql.toLowerCase().contains("password = ?"),
-        "SQL should use parameter placeholders instead of concatenating user input");
+        AttackResult result = assignment5.login("Larry", "secret");
 
-    // Assert: user input is provided via setString bindings (defense against injection)
-    verify(preparedStatement).setString(1, username);
-    verify(preparedStatement).setString(2, password);
+        assertEquals("success", result.getLessonStatus().name().toLowerCase());
+    }
 
-    // Sanity: successful login still works for normal credentials
-    org.junit.jupiter.api.Assertions.assertTrue(result.isSuccess());
-  }
+    @Test
+    void login_withInvalidCredentials_returnsFailure() throws Exception {
+        when(resultSet.next()).thenReturn(false);
 
-  @Test
-  void login_rejectsSqlInjectionPayloadInsteadOfTreatingItAsSql() throws Exception {
-    // Arrange: attacker attempts to inject via password parameter
-    String username = "Larry";
-    String maliciousPassword = "' OR '1'='1";
-    when(resultSet.next()).thenReturn(false); // no row should be matched
+        AttackResult result = assignment5.login("Larry", "wrong");
 
-    // Act
-    AttackResult result = assignment5.login(username, maliciousPassword);
+        assertEquals("failed", result.getLessonStatus().name().toLowerCase());
+    }
 
-    // Assert: parameters are bound exactly as provided (no SQL-level effect)
-    verify(preparedStatement).setString(1, username);
-    verify(preparedStatement).setString(2, maliciousPassword);
+    @Test
+    void login_withSqlInjectionPayload_doesNotBypassAuthentication() throws Exception {
+        when(resultSet.next()).thenReturn(false);
 
-    // The attack should not succeed; the lesson should treat it as an invalid login
-    org.junit.jupiter.api.Assertions.assertFalse(result.isSuccess());
-  }
+        AttackResult result = assignment5.login("Larry", "' OR '1'='1");
+
+        assertEquals("failed", result.getLessonStatus().name().toLowerCase());
+        verify(preparedStatement).setString(1, "Larry");
+        verify(preparedStatement).setString(2, "' OR '1'='1");
+    }
+
+    @Test
+    void login_withMissingParameters_returnsRequiredFeedback() throws Exception {
+        AttackResult result = assignment5.login("", "");
+
+        assertEquals("failed", result.getLessonStatus().name().toLowerCase());
+    }
 }

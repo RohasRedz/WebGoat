@@ -1,75 +1,78 @@
-jest.mock('jquery', () => {
-    const original = jest.requireActual('jquery');
-    const $ = (...args) => original(...args);
-    $.ajax = jest.fn().mockReturnValue({
-        success: function (cb) {
-            cb({
-                access_token: 'access-token',
-                refresh_token: 'refresh-token'
-            });
-            return this;
-        }
-    });
-    return $;
-});
+/**
+ * NOTE: These tests assume the updated jwt-refresh.js uses getConfiguredPassword()
+ * and reads window.webgoat.config.jwtRefreshPassword when present.
+ */
 
-const $ = require('jquery');
+describe('jwt-refresh security fixes', () => {
+  let originalWebgoat;
+  let $ajaxSpy;
 
-require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+  beforeEach(() => {
+    originalWebgoat = global.webgoat;
+    global.webgoat = {
+      customjs: {},
+      config: {}
+    };
 
-describe('jwt-refresh login (delta tests for hard-coded password removal)', () => {
-    let originalPassword;
-
-    beforeEach(() => {
-        $.ajax.mockClear();
-        global.localStorage = (function () {
-            let store = {};
-            return {
-                getItem: (key) => store[key],
-                setItem: (key, value) => {
-                    store[key] = value;
-                },
-                clear: () => {
-                    store = {};
-                }
-            };
-        })();
-        originalPassword = global.WEBGOAT_JWT_PASSWORD;
-        delete global.WEBGOAT_JWT_PASSWORD;
+    $ajaxSpy = jest.fn().mockReturnValue({
+      success: (cb) => {
+        cb({ access_token: 'access', refresh_token: 'refresh' });
+      }
     });
 
-    afterEach(() => {
-        if (originalPassword !== undefined) {
-            global.WEBGOAT_JWT_PASSWORD = originalPassword;
-        } else {
-            delete global.WEBGOAT_JWT_PASSWORD;
-        }
-        if (global.localStorage && global.localStorage.clear) {
-            global.localStorage.clear();
-        }
-    });
+    global.$ = { ajax: $ajaxSpy };
+    global.localStorage = {
+      store: {},
+      setItem(key, value) { this.store[key] = value; },
+      getItem(key) { return this.store[key]; }
+    };
 
-    it('does not send a login request when WEBGOAT_JWT_PASSWORD is missing', () => {
-        global.login('Jerry');
+    // Load module under test after globals are prepared
+    jest.resetModules();
+    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+  });
 
-        expect($.ajax).not.toHaveBeenCalled();
-    });
+  afterEach(() => {
+    global.webgoat = originalWebgoat;
+    jest.resetModules();
+  });
 
-    it('sends a login request with the configured password when WEBGOAT_JWT_PASSWORD is defined', () => {
-        global.WEBGOAT_JWT_PASSWORD = 'secure-runtime-password';
+  test('getConfiguredPassword returns configured value when present', () => {
+    webgoat.config.jwtRefreshPassword = 'configured-secret';
 
-        global.login('Jerry');
+    // getConfiguredPassword is not exported, but login uses it internally.
+    // We verify via the AJAX payload that the configured value is used.
+    jest.resetModules();
+    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
 
-        expect($.ajax).toHaveBeenCalledTimes(1);
-        const call = $.ajax.mock.calls[0][0];
-        expect(call.type).toBe('POST');
-        expect(call.url).toBe('JWT/refresh/login');
-        expect(call.contentType).toBe('application/json');
-        const body = JSON.parse(call.data);
-        expect(body.user).toBe('Jerry');
-        expect(body.password).toBe('secure-runtime-password');
+    // trigger login
+    const callArgs = $ajaxSpy.mock.calls[0][0];
+    const data = JSON.parse(callArgs.data);
 
-        expect(global.localStorage.getItem('access_token')).toBe('access-token');
-        expect(global.localStorage.getItem('refresh_token')).toBe('refresh-token');
-    });
+    expect(data.password).toBe('configured-secret');
+  });
+
+  test('getConfiguredPassword falls back to empty string when config missing', () => {
+    delete webgoat.config.jwtRefreshPassword;
+
+    jest.resetModules();
+    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+
+    const callArgs = $ajaxSpy.mock.calls[0][0];
+    const data = JSON.parse(callArgs.data);
+
+    expect(data.password).toBe('');
+  });
+
+  test('login uses password value from configuration accessor (no hard-coded literal)', () => {
+    webgoat.config.jwtRefreshPassword = 'dynamic-secret';
+
+    jest.resetModules();
+    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+
+    const callArgs = $ajaxSpy.mock.calls[0][0];
+    const data = JSON.parse(callArgs.data);
+
+    expect(data.password).toBe('dynamic-secret');
+  });
 });

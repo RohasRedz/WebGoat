@@ -12,7 +12,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import lombok.extern.slf4j.Slf4j; // Import Slf4j for logging
+import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@Slf4j // Add Slf4j annotation to enable 'log' field
+@Slf4j
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -41,27 +41,23 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "dave";
+    String password = null;
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
-      try {
-        Statement statement =
+      try (Statement statement =
             connection.createStatement(
                 ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-        ResultSet results = statement.executeQuery(query);
-
+           ResultSet results = statement.executeQuery(query)) {
         if (results != null && results.first()) {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        // Replaced printStackTrace with secure logging to avoid information exposure
-        log.warn("SQL Exception occurred while retrieving password for 'dave'.", sqle);
-        // do nothing - original behavior was to suppress and continue
+        log.error("SQL Exception in getPassword: {}", sqle.getMessage(), sqle);
+        // do nothing
       }
     } catch (Exception e) {
-      // Replaced printStackTrace with secure logging to avoid information exposure
-      log.error("An unexpected error occurred during password retrieval.", e);
-      // do nothing - original behavior was to suppress and continue
+      log.error("Exception in getPassword: {}", e.getMessage(), e);
+      // do nothing
     }
     return (password);
   }

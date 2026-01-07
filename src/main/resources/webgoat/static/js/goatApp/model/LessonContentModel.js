@@ -31,30 +31,13 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-
-            var currentUrl = document.URL;
-            // Derive lesson base URL without using complex or potentially backtracking-prone regexes
-            var lessonIndex = currentUrl.indexOf('.lesson');
-            var lessonUrl;
-            if (lessonIndex !== -1) {
-                lessonUrl = currentUrl.substring(0, lessonIndex + '.lesson'.length);
+            this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
+            var pageMatch = document.URL.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
             } else {
-                lessonUrl = currentUrl;
+                this.set('pageNum', 0);
             }
-            this.set('lessonUrl', lessonUrl);
-
-            // Safely extract page number by simple parsing instead of heavy regex
-            var pageNum = 0;
-            // Expecting URLs like: something.lesson/12 or something.lesson/3
-            var lessonSuffix = currentUrl.split('.lesson/')[1];
-            if (lessonSuffix) {
-                var candidate = lessonSuffix.split(/[^\d]/)[0]; // take leading digits only
-                if (candidate && /^\d{1,4}$/.test(candidate)) {
-                    pageNum = parseInt(candidate, 10);
-                }
-            }
-            this.set('pageNum', pageNum);
-
             this.trigger('content:loaded',this,loadHelps);
         },
 

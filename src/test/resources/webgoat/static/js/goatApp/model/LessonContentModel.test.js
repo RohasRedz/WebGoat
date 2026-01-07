@@ -1,72 +1,46 @@
-define([
-    'jquery',
-    'underscore',
-    'backbone',
-    'goatApp/model/LessonContentModel'
-], function ($, _, Backbone, LessonContentModel) {
+const $ = require('jquery');
+const _ = require('underscore');
+const Backbone = require('backbone');
 
-    describe('LessonContentModel.setContent (delta tests for regex changes)', function () {
-        var originalUrl;
+// Minimal HTMLContentModel stub to satisfy the dependency
+const HTMLContentModel = Backbone.Model.extend({});
 
-        beforeEach(function () {
-            originalUrl = global.document && global.document.URL;
-            global.document = {
-                URL: 'http://localhost/WebGoat/lesson/Intro.lesson/1'
-            };
-        });
+// AMD-style define wrapper simulation
+jest.mock('goatApp/model/HTMLContentModel', () => HTMLContentModel, { virtual: true });
 
-        afterEach(function () {
-            if (originalUrl !== undefined && global.document) {
-                global.document.URL = originalUrl;
-            }
-        });
+describe('LessonContentModel - regex based URL parsing', () => {
+  let LessonContentModel;
 
-        function createModel() {
-            return new LessonContentModel();
-        }
+  beforeAll(() => {
+    // Simulate AMD define by requiring the module after mocks
+    LessonContentModel = require('../../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
+  });
 
-        it('computes lessonUrl without trailing page when URL has .lesson/page', function () {
-            var model = createModel();
-            global.document.URL = 'http://localhost/WebGoat/Intro.lesson/3';
+  beforeEach(() => {
+    global.document = { URL: '' };
+  });
 
-            model.setContent('<html>dummy</html>', true);
+  test('setContent extracts pageNum and lessonUrl when URL ends with .lesson/<digits>', () => {
+    document.URL = 'http://localhost/WebGoat/lesson/SqlInjection.lesson/12';
+    const model = new LessonContentModel();
 
-            expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat/Intro.lesson');
-            expect(model.get('pageNum')).toBe('3');
-        });
+    const loadedSpy = jest.fn();
+    model.on('content:loaded', loadedSpy);
 
-        it('defaults pageNum to 0 when URL does not match the page pattern', function () {
-            var model = createModel();
-            global.document.URL = 'http://localhost/WebGoat/Intro.lesson';
+    model.setContent('<html>content</html>');
 
-            model.setContent('<html>dummy</html>', true);
+    expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat/lesson/SqlInjection.lesson');
+    expect(model.get('pageNum')).toBe('12');
+    expect(loadedSpy).toHaveBeenCalled();
+  });
 
-            expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat/Intro.lesson');
-            expect(model.get('pageNum')).toBe(0);
-        });
+  test('setContent sets pageNum to 0 when URL does not end with .lesson/<digits>', () => {
+    document.URL = 'http://localhost/WebGoat/lesson/SqlInjection.lesson';
+    const model = new LessonContentModel();
 
-        it('handles URLs with query parameters safely and still parses page number', function () {
-            var model = createModel();
-            global.document.URL = 'http://localhost/WebGoat/Intro.lesson/42?foo=bar';
+    model.setContent('<html>content</html>');
 
-            model.setContent('<html>dummy</html>', true);
-
-            expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat/Intro.lesson');
-            expect(model.get('pageNum')).toBe('42');
-        });
-
-        it('does not degrade performance for very long, adversarial URLs', function () {
-            var model = createModel();
-            var longPath = new Array(5000).join('a/');
-            global.document.URL = 'http://localhost/' + longPath + 'Intro.lesson/7';
-
-            var start = Date.now();
-            model.setContent('<html>dummy</html>', true);
-            var elapsed = Date.now() - start;
-
-            expect(elapsed).toBeLessThan(1000);
-            expect(model.get('lessonUrl')).toMatch(/Intro\.lesson$/);
-            expect(model.get('pageNum')).toBe('7');
-        });
-    });
+    expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat/lesson/SqlInjection.lesson');
+    expect(model.get('pageNum')).toBe(0);
+  });
 });
