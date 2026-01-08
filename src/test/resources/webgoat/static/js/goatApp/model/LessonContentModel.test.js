@@ -1,44 +1,74 @@
-// Derived from:
-//   Source : src/main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js
-//   Test   : src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+// Derived test path (per instructions):
+// src/main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js
+// -> src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 
-jest.mock('backbone', () => {
-  const original = jest.requireActual('backbone');
-  return {
-    ...original,
-    Model: class MockModel {
-      fetch(options) {
-        if (this.__fetchImpl) {
-          return this.__fetchImpl(options);
-        }
-        return Promise.resolve({});
-      }
+define([
+  'jquery',
+  'underscore',
+  'backbone',
+  'goatApp/model/HTMLContentModel'
+], function ($, _, Backbone, HTMLContentModel) {
+  'use strict';
+
+  // Minimal test harness using Jasmine-style expectations, which Jest supports.
+  // These tests focus only on the changed URL parsing and page number logic
+  // in setContent.
+
+  describe('LessonContentModel delta tests', function () {
+    var LessonContentModel;
+
+    beforeAll(function () {
+      // Re-require the module under test using the same AMD path
+      LessonContentModel = require('../../../../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
+    });
+
+    function createModel() {
+      // HTMLContentModel is extended; for delta testing, we only need
+      // Backbone.Model behavior for set/get/trigger.
+      return new LessonContentModel();
     }
-  };
-});
 
-jest.mock('goatApp/model/HTMLContentModel', () => {
-  const Backbone = require('backbone');
-  return Backbone.Model;
-});
+    it('derives lessonUrl and pageNum correctly for URL with page number', function () {
+      // Arrange
+      var model = createModel();
+      var originalHref = global.window && global.window.location ? global.window.location.href : 'http://localhost/WebGoat/lesson/SqlInjectionAdvanced.lesson/3';
 
-// NOTE: The actual import path may vary depending on bundler setup.
-// This assumes a Node-resolvable path equivalent to the source path.
-// In the WebGoat build, tests are typically run in a browser-like environment.
-// TODO: Adjust module resolution if necessary in the real test runner.
-const LessonContentModelFactory = require('../../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
+      delete global.window;
+      global.window = {
+        location: {
+          href: 'http://localhost/WebGoat/lesson/SqlInjectionAdvanced.lesson/3'
+        }
+      };
+      global.document = { URL: global.window.location.href };
 
-describe('LessonContentModel delta tests', () => {
-  it('should build urlRoot using encodeURIComponent without underscore escaping', () => {
-    const LessonContentModel = LessonContentModelFactory;
-    const model = new LessonContentModel();
+      // Act
+      model.setContent('<html>test</html>', true);
 
-    const fetchMock = jest.fn().mockResolvedValue({});
-    model.__fetchImpl = fetchMock;
+      // Assert
+      expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat/lesson/SqlInjectionAdvanced.lesson');
+      expect(model.get('pageNum')).toBe(3);
 
-    model.loadData({ name: 'Lesson 1: Intro & Basics' });
+      // Restore
+      global.window.location.href = originalHref;
+    });
 
-    expect(model.urlRoot).toBe(encodeURIComponent('Lesson 1: Intro & Basics') + '.lesson');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    it('falls back to pageNum 0 when URL has no page number', function () {
+      // Arrange
+      var model = createModel();
+      delete global.window;
+      global.window = {
+        location: {
+          href: 'http://localhost/WebGoat/lesson/SqlInjectionAdvanced.lesson'
+        }
+      };
+      global.document = { URL: global.window.location.href };
+
+      // Act
+      model.setContent('<html>test</html>', true);
+
+      // Assert
+      expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat/lesson/SqlInjectionAdvanced.lesson');
+      expect(model.get('pageNum')).toBe(0);
+    });
   });
 });
