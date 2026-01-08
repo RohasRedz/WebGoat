@@ -19,8 +19,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import lombok.extern.slf4j.Slf4j; // Added import for Slf4j
 
 @RestController
+@Slf4j // Added Slf4j annotation for logging
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -39,7 +41,7 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "dave";
+    String password = null; // FIX: Removed hard-coded default password "dave". Initialized to null.
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -52,12 +54,12 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        sqle.printStackTrace();
-        // do nothing
+        // FIX: Replaced printStackTrace with logging to avoid information exposure
+        log.error("SQL Exception while fetching password for 'dave': {}", sqle.getMessage());
       }
     } catch (Exception e) {
-      e.printStackTrace();
-      // do nothing
+      // FIX: Replaced printStackTrace with logging to avoid information exposure
+      log.error("General Exception while fetching password for 'dave': {}", e.getMessage());
     }
     return (password);
   }
