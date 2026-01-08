@@ -1,59 +1,45 @@
-define(['jquery',
-    'underscore',
-    'backbone',
-    'goatApp/model/HTMLContentModel'],
-     function($,
-        _,
-        Backbone,
-        HTMLContentModel){
+define(['jquery', 'underscore', 'backbone', 'goatApp/model/AssignmentModel'], function(
+  $, _, Backbone, AssignmentModel,
+) {
+  'use strict';
 
-    return HTMLContentModel.extend({
-        urlRoot:null,
-        defaults: {
-            items:null,
-            selectedItem:null
-        },
+  var docsModel = Backbone.Model.extend({
+    defaults: {
+      name: null,
+      category: null,
+      assignment: AssignmentModel,
+      description: String,
+      tip: String,
+      source: String,
+      rationale: String,
+      risk: String,
+      fix: String,
+      classification: String,
+    },
 
-        initialize: function (options) {
+    sync: function(method, model, options) {
+      options = options || {};
+      options.type = 'GET';
+      options.dataType = 'json';
+      options.contentType = 'application/json';
 
-        },
-
-        loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
-            var self = this;
-            this.fetch().done(function(data) {
-                self.setContent(data);
-            });
-        },
-
-        setContent: function(content, loadHelps) {
-            if (typeof loadHelps === 'undefined') {
-                loadHelps = true;
-            }
-            this.set('content',content);
-
-            // Use a more efficient, non-backtracking-safe regex for lesson URL/page parsing
-            var currentUrl = String(document.URL);
-            var lessonMatch = currentUrl.match(/\.lesson(?:\/\d{1,4})?$/);
-            if (lessonMatch) {
-                this.set('lessonUrl', currentUrl.slice(0, currentUrl.length - lessonMatch[0].length) + '.lesson');
-            } else {
-                this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
-            }
-
-            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
-            } else {
-                this.set('pageNum', 0);
-            }
-
-            this.trigger('content:loaded',this,loadHelps);
-        },
-
-        fetch: function (options) {
-            options = options || {};
-            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
+      // Security hardening: enforce safe, bounded URL patterns if a custom URL is provided.
+      // This prevents potential ReDoS or unexpected behavior from overly complex or untrusted URLs.
+      if (options.url && typeof options.url === 'string') {
+        // Allow only relative paths starting with / or ./ and having a reasonable length.
+        var MAX_URL_LENGTH = 2048;
+        if (
+          options.url.length > MAX_URL_LENGTH ||
+          !/^(\/|\.\/)[A-Za-z0-9/_\-.]*$/.test(options.url)
+        ) {
+          throw new Error('Invalid or unsafe URL provided to LessonContentModel.sync');
         }
-    });
+      }
+
+      return Backbone.sync(method, model, options);
+    },
+
+  });
+
+  return docsModel;
 });
