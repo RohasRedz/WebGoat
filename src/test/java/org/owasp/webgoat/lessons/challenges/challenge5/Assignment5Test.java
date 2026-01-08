@@ -1,80 +1,88 @@
+// File path: src/test/java/org/owasp/webgoat/lessons/challenges/challenge5/Assignment5Test.java
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-
-import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 
-/**
- * Delta tests for Assignment5 focusing on the fixed SQL injection behavior:
- * - Valid credentials use parameterized query and succeed.
- * - SQL injection payload in password does not bypass authentication.
- */
 class Assignment5Test {
 
-  @Test
-  @DisplayName("login should succeed for valid Larry credentials using parameterized query")
-  void loginShouldSucceedForValidLarryCredentials() throws Exception {
-    // Arrange
-    LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
-    Flags flags = Mockito.mock(Flags.class);
-    Connection connection = Mockito.mock(Connection.class);
-    PreparedStatement preparedStatement = Mockito.mock(PreparedStatement.class);
-    ResultSet resultSet = Mockito.mock(ResultSet.class);
+  private LessonDataSource dataSource;
+  private Flags flags;
+  private Assignment5 assignment5;
+
+  private Connection connection;
+  private PreparedStatement preparedStatement;
+  private ResultSet resultSet;
+
+  @BeforeEach
+  void setup() throws Exception {
+    dataSource = mock(LessonDataSource.class);
+    flags = mock(Flags.class);
+    assignment5 = new Assignment5(dataSource, flags);
+
+    connection = mock(Connection.class);
+    preparedStatement = mock(PreparedStatement.class);
+    resultSet = mock(ResultSet.class);
 
     when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement(
-            "select password from challenge_users where userid = ? and password = ?"))
-        .thenReturn(preparedStatement);
+    when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
     when(preparedStatement.executeQuery()).thenReturn(resultSet);
-    when(resultSet.next()).thenReturn(true);
     when(flags.getFlag(5)).thenReturn("FLAG-5");
-
-    Assignment5 assignment5 = new Assignment5(dataSource, flags);
-
-    // Act
-    AttackResult result = assignment5.login("Larry", "safePassword");
-
-    // Assert
-    // If the prepared statement was not used with parameters, result would not be success
-    assertEquals("success", result.getType());
   }
 
   @Test
-  @DisplayName("login should not be bypassed by SQL injection payload in password")
-  void loginShouldRejectSqlInjectionInPassword() throws Exception {
+  void login_shouldUseParameterizedQueryAndAuthenticateValidLarry() throws Exception {
     // Arrange
-    LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
-    Flags flags = Mockito.mock(Flags.class);
-    Connection connection = Mockito.mock(Connection.class);
-    PreparedStatement preparedStatement = Mockito.mock(PreparedStatement.class);
-    ResultSet resultSet = Mockito.mock(ResultSet.class);
-
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement(
-            "select password from challenge_users where userid = ? and password = ?"))
-        .thenReturn(preparedStatement);
-    when(preparedStatement.executeQuery()).thenReturn(resultSet);
-    // Simulate that even with injection payload no row is returned because query is parameterized
-    when(resultSet.next()).thenReturn(false);
-
-    Assignment5 assignment5 = new Assignment5(dataSource, flags);
-
-    String injectionPassword = "' OR '1'='1";
+    String username = "Larry";
+    String password = "secret";
+    when(resultSet.next()).thenReturn(true);
 
     // Act
-    AttackResult result = assignment5.login("Larry", injectionPassword);
+    AttackResult result = assignment5.login(username, password);
 
     // Assert
-    assertEquals("failed", result.getType());
+    verify(connection)
+        .prepareStatement(
+            eq("select password from challenge_users where userid = ? and password = ?"));
+    verify(preparedStatement).setString(1, username);
+    verify(preparedStatement).setString(2, password);
+    verify(preparedStatement).executeQuery();
+
+    // Ensure a successful result is returned when DB reports a matching row
+    assertEquals(true, result.getLessonCompleted());
+  }
+
+  @Test
+  void login_shouldFailForSqlInjectionLikePasswordEvenIfRowNotReturned() throws Exception {
+    // Arrange
+    String username = "Larry";
+    String injectionPassword = "' OR '1'='1";
+    // Simulate no matching row returned by DB despite injection attempt
+    when(resultSet.next()).thenReturn(false);
+
+    // Act
+    AttackResult result = assignment5.login(username, injectionPassword);
+
+    // Assert: still using parameterized query, not concatenation
+    verify(connection)
+        .prepareStatement(
+            eq("select password from challenge_users where userid = ? and password = ?"));
+    verify(preparedStatement).setString(1, username);
+    verify(preparedStatement).setString(2, injectionPassword);
+    verify(preparedStatement).executeQuery();
+
+    // No lesson completion since DB rejects the injected password
+    assertEquals(false, result.getLessonCompleted());
   }
 }

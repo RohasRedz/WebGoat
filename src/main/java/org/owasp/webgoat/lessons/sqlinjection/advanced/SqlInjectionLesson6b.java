@@ -12,6 +12,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -19,10 +20,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
-import lombok.extern.slf4j.Slf4j; // Added import for Slf4j
 
 @RestController
-@Slf4j // Added Slf4j annotation for logging
+@Slf4j
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -41,7 +41,7 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = null; // FIX: Removed hard-coded default password "dave". Initialized to null.
+    String password = "dave";
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -54,12 +54,12 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        // FIX: Replaced printStackTrace with logging to avoid information exposure
-        log.error("SQL Exception while fetching password for 'dave': {}", sqle.getMessage());
+        log.error("SQL Exception while fetching password: {}", sqle.getMessage());
+        // do nothing
       }
     } catch (Exception e) {
-      // FIX: Replaced printStackTrace with logging to avoid information exposure
-      log.error("General Exception while fetching password for 'dave': {}", e.getMessage());
+      log.error("General Exception while fetching password: {}", e.getMessage());
+      // do nothing
     }
     return (password);
   }

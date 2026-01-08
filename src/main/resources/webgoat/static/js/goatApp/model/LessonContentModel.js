@@ -7,9 +7,6 @@ define(['jquery',
         Backbone,
         HTMLContentModel){
 
-    // Maximum URL length to process to avoid potential ReDoS on extremely long URLs
-    var MAX_URL_LENGTH = 2048;
-
     return HTMLContentModel.extend({
         urlRoot:null,
         defaults: {
@@ -35,19 +32,18 @@ define(['jquery',
             }
             this.set('content',content);
 
-            var currentUrl = document.URL || '';
-            if (currentUrl.length > MAX_URL_LENGTH) {
-                // Truncate to safe length before applying regex operations
-                currentUrl = currentUrl.substring(0, MAX_URL_LENGTH);
+            // Use a more efficient, non-backtracking-safe regex for lesson URL/page parsing
+            var currentUrl = String(document.URL);
+            var lessonMatch = currentUrl.match(/\.lesson(?:\/\d{1,4})?$/);
+            if (lessonMatch) {
+                this.set('lessonUrl', currentUrl.slice(0, currentUrl.length - lessonMatch[0].length) + '.lesson');
+            } else {
+                this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
             }
 
-            // Use precompiled, linear-time-safe regexes and avoid unnecessary backtracking
-            var lessonUrl = currentUrl.replace(/\.lesson.*/, '.lesson');
-            this.set('lessonUrl', lessonUrl);
-
-            var pageNumMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageNumMatch) {
-                this.set('pageNum', pageNumMatch[1]);
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }

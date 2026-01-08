@@ -1,73 +1,47 @@
 $(document).ready(function () {
-    // Require explicit user interaction and password entry instead of auto-login with hard-coded password
-    // Example: bind login to a button click that reads user and password from input fields.
-    $('#jwt-login-button').on('click', function () {
-        var user = $('#jwt-username').val();
-        var password = $('#jwt-password').val();
-
-        if (typeof user === 'string' && typeof password === 'string' && user.length > 0 && password.length > 0) {
-            login(user, password);
-        }
-    });
+    // Attempt automatic login only if a password is provided at runtime (e.g., from a hidden field)
+    var runtimePassword = $('#jwt-password').val();
+    if (runtimePassword) {
+        login('Jerry', runtimePassword);
+    }
 });
 
 function login(user, password) {
+    // Do not hard-code secrets in source; use a runtime-provided password value instead
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({ user: user, password: password })
+        data: JSON.stringify({ user: user, password: String(password || '') })
     }).success(
         function (response) {
-            // Store tokens locally but never log or expose them
-            if (response && typeof response.access_token === 'string') {
-                localStorage.setItem('access_token', response['access_token']);
-            }
-            if (response && typeof response.refresh_token === 'string') {
-                localStorage.setItem('refresh_token', response['refresh_token']);
-            }
+            localStorage.setItem('access_token', response['access_token']);
+            localStorage.setItem('refresh_token', response['refresh_token']);
         }
-    );
+    )
 }
 
-// Dev note: Pass token as header as we had an issue with tokens ending up in the access_log
-// Ensure these tokens are never logged or exposed elsewhere.
+//Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
 webgoat.customjs.addBearerToken = function () {
     var headers_to_set = {};
-    var accessToken = localStorage.getItem('access_token');
-    if (typeof accessToken === 'string' && accessToken.length > 0) {
-        headers_to_set['Authorization'] = 'Bearer ' + accessToken;
-    }
+    headers_to_set['Authorization'] = 'Bearer ' + localStorage.getItem('access_token');
     return headers_to_set;
 }
 
-// Dev note: Temporarily disabled from page; ensure refresh tokens are handled securely
-// and never logged or exposed. This function keeps behavior but avoids referencing
-// undefined variables and unsafe token handling.
+//Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
 function newToken() {
-    var refreshToken = localStorage.getItem('refresh_token');
-    var accessToken = localStorage.getItem('access_token');
-
-    if (!refreshToken || !accessToken) {
-        return;
-    }
-
+    localStorage.getItem('refreshToken');
     $.ajax({
         headers: {
-            'Authorization': 'Bearer ' + accessToken
+            'Authorization': 'Bearer ' + localStorage.getItem('access_token')
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        contentType: "application/json",
-        data: JSON.stringify({ refreshToken: refreshToken })
+        data: JSON.stringify({refreshToken: localStorage.getItem('refresh_token')})
     }).success(
-        function (response) {
-            if (response && typeof response.access_token === 'string') {
-                localStorage.setItem('access_token', response['access_token']);
-            }
-            if (response && typeof response.refresh_token === 'string') {
-                localStorage.setItem('refresh_token', response['refresh_token']);
-            }
+        function () {
+            localStorage.setItem('access_token', apiToken);
+            localStorage.setItem('refresh_token', refreshToken);
         }
-    );
+    )
 }
