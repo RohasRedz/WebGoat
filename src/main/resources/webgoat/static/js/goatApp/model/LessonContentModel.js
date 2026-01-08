@@ -1,45 +1,49 @@
-define(['jquery', 'underscore', 'backbone', 'goatApp/model/AssignmentModel'], function(
-  $, _, Backbone, AssignmentModel,
-) {
-  'use strict';
+define(['jquery',
+    'underscore',
+    'backbone',
+    'goatApp/model/HTMLContentModel'],
+     function($,
+        _,
+        Backbone,
+        HTMLContentModel){
 
-  var docsModel = Backbone.Model.extend({
-    defaults: {
-      name: null,
-      category: null,
-      assignment: AssignmentModel,
-      description: String,
-      tip: String,
-      source: String,
-      rationale: String,
-      risk: String,
-      fix: String,
-      classification: String,
-    },
+    return HTMLContentModel.extend({
+        urlRoot:null,
+        defaults: {
+            items:null,
+            selectedItem:null
+        },
 
-    sync: function(method, model, options) {
-      options = options || {};
-      options.type = 'GET';
-      options.dataType = 'json';
-      options.contentType = 'application/json';
+        initialize: function (options) {
 
-      // Security hardening: enforce safe, bounded URL patterns if a custom URL is provided.
-      // This prevents potential ReDoS or unexpected behavior from overly complex or untrusted URLs.
-      if (options.url && typeof options.url === 'string') {
-        // Allow only relative paths starting with / or ./ and having a reasonable length.
-        var MAX_URL_LENGTH = 2048;
-        if (
-          options.url.length > MAX_URL_LENGTH ||
-          !/^(\/|\.\/)[A-Za-z0-9/_\-.]*$/.test(options.url)
-        ) {
-          throw new Error('Invalid or unsafe URL provided to LessonContentModel.sync');
+        },
+
+        loadData: function(options) {
+            // Keep server-side safety (encodeURIComponent) but avoid unnecessary underscore escaping
+            this.urlRoot = encodeURIComponent(options.name) + '.lesson';
+            var self = this;
+            this.fetch().done(function(data) {
+                self.setContent(data);
+            });
+        },
+
+        setContent: function(content, loadHelps) {
+            if (typeof loadHelps === 'undefined') {
+                loadHelps = true;
+            }
+            this.set('content',content);
+            this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
+            if (/.*\.lesson\/(\d{1,4})$/.test(document.URL)) {
+                this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
+            } else {
+                this.set('pageNum',0);
+            }
+            this.trigger('content:loaded',this,loadHelps);
+        },
+
+        fetch: function (options) {
+            options = options || {};
+            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
         }
-      }
-
-      return Backbone.sync(method, model, options);
-    },
-
-  });
-
-  return docsModel;
+    });
 });

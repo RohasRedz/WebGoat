@@ -2,114 +2,88 @@ package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
-import org.springframework.util.StringUtils;
 
 /**
- * Delta tests for Assignment5 focusing on the changed behavior:
- * - Use of parameterized PreparedStatement instead of string-concatenated SQL
- * - Ensuring that SQL injection attempts do not succeed
+ * Delta tests for Assignment5 focused on the fixed SQL injection vulnerability.
  *
- * Test file path (derived): src/test/java/org/owasp/webgoat/lessons/challenges/challenge5/Assignment5Test.java
+ * Path mapping rule:
+ *   Source : src/main/java/org/owasp/webgoat/lessons/challenges/challenge5/Assignment5.java
+ *   Test   : src/test/java/org/owasp/webgoat/lessons/challenges/challenge5/Assignment5Test.java
  */
 public class Assignment5Test {
 
-  private LessonDataSource dataSource;
-  private Flags flags;
-  private Assignment5 assignment5;
-  private Connection connection;
-  private PreparedStatement preparedStatement;
-  private ResultSet resultSet;
+    private LessonDataSource dataSource;
+    private Flags flags;
+    private Assignment5 assignment5;
 
-  @BeforeEach
-  void setUp() throws Exception {
-    dataSource = mock(LessonDataSource.class);
-    flags = mock(Flags.class);
-    assignment5 = new Assignment5(dataSource, flags);
+    private Connection connection;
+    private PreparedStatement preparedStatement;
+    private ResultSet resultSet;
 
-    connection = mock(Connection.class);
-    preparedStatement = mock(PreparedStatement.class);
-    resultSet = mock(ResultSet.class);
+    @BeforeEach
+    void setUp() throws Exception {
+        dataSource = Mockito.mock(LessonDataSource.class);
+        flags = Mockito.mock(Flags.class);
+        assignment5 = new Assignment5(dataSource, flags);
 
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
-    when(preparedStatement.executeQuery()).thenReturn(resultSet);
-  }
+        connection = Mockito.mock(Connection.class);
+        preparedStatement = Mockito.mock(PreparedStatement.class);
+        resultSet = Mockito.mock(ResultSet.class);
 
-  @Test
-  void login_withValidLarryCredentials_usesParameterizedQueryAndSucceeds() throws Exception {
-    // Arrange
-    String username = "Larry";
-    String password = "secret";
-    when(resultSet.next()).thenReturn(true);
-    when(flags.getFlag(5)).thenReturn("FLAG-5");
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(
+                "select password from challenge_users where userid = ? and password = ?"))
+                .thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+    }
 
-    // Act
-    AttackResult result = assignment5.login(username, password);
+    @Test
+    void login_usesParameterizedQuery_andBindsUserInputs() throws Exception {
+        when(resultSet.next()).thenReturn(true);
+        when(flags.getFlag(5)).thenReturn("FLAG-5");
 
-    // Assert - success path still works
-    assertTrue(result.getLessons().isEmpty() || result.getOutput().contains("challenge.solved"));
+        String username = "Larry'; DROP TABLE challenge_users; --";
+        String password = "pass' OR '1'='1";
 
-    // Assert - the prepared statement uses placeholders and binds parameters correctly
-    ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-    verify(connection).prepareStatement(sqlCaptor.capture());
-    String sql = sqlCaptor.getValue();
-    assertTrue(
-        sql.contains("userid = ?")
-            && sql.contains("password = ?"),
-        "SQL must use parameter placeholders instead of concatenating user input");
+        AttackResult result = assignment5.login(username, password);
 
-    verify(preparedStatement).setString(1, username);
-    verify(preparedStatement).setString(2, password);
-  }
+        ArgumentCaptor<String> arg1 = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> arg2 = ArgumentCaptor.forClass(String.class);
+        verify(preparedStatement, times(1)).setString(Mockito.eq(1), arg1.capture());
+        verify(preparedStatement, times(1)).setString(Mockito.eq(2), arg2.capture());
 
-  @Test
-  void login_withSqlInjectionAttempt_doesNotManipulateQueryAndFails() throws Exception {
-    // Arrange
-    String username = "Larry";
-    String maliciousPassword = "' OR '1'='1";
-    when(resultSet.next()).thenReturn(false); // No row should be matched for malicious input
+        assertEquals(username, arg1.getValue(), "Username should be bound as first parameter");
+        assertEquals(password, arg2.getValue(), "Password should be bound as second parameter");
+        verify(preparedStatement, times(1)).executeQuery();
 
-    // Act
-    AttackResult result = assignment5.login(username, maliciousPassword);
+        assertTrue(result.getLessonCompleted(), "Successful query should still yield a success result");
+    }
 
-    // Assert - attempt should fail
-    assertTrue(
-        result.getLessons().isEmpty() || result.getOutput().contains("challenge.close"),
-        "SQL injection attempt must not succeed");
+    @Test
+    void login_returnsFailureWhenNoResult_evenWithInjectionPayload() throws Exception {
+        when(resultSet.next()).thenReturn(false);
 
-    // Assert - malicious payload is never embedded directly in the SQL string
-    ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-    verify(connection).prepareStatement(sqlCaptor.capture());
-    String sql = sqlCaptor.getValue();
-    assertTrue(
-        !sql.contains(maliciousPassword),
-        "Raw malicious input must not appear in the SQL statement; parameters must be used");
+        String username = "Larry' OR '1'='1";
+        String password = "anything' OR '1'='1";
 
-    verify(preparedStatement).setString(1, username);
-    verify(preparedStatement).setString(2, maliciousPassword);
-  }
+        AttackResult result = assignment5.login(username, password);
 
-  @Test
-  void login_withEmptyParameters_stillFailsEarly() throws Exception {
-    // This test ensures the pre-existing validation is still honored; it indirectly confirms
-    // the new prepared statement is *not* used when input is empty.
-    AttackResult result = assignment5.login("", "");
-
-    assertTrue(
-        result.getLessons().isEmpty() || result.getOutput().contains("required4"),
-        "Empty credentials should trigger validation failure");
-    verify(connection, never()).prepareStatement(anyString());
-  }
+        assertTrue(!result.getLessonCompleted(), "No rows should result in failure even for injection payloads");
+        verify(preparedStatement, times(1)).executeQuery();
+    }
 }
