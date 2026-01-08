@@ -9,6 +9,7 @@ import static org.owasp.webgoat.container.assignments.AttackResultBuilder.succes
 
 import java.io.IOException;
 import java.sql.Connection;
+import java.sql.PreparedStatement; // Added import for PreparedStatement
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -22,7 +23,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@Slf4j // Added annotation for Slf4j
+@Slf4j // Added Slf4j annotation for logging
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -41,25 +42,22 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "dave";
+    String password = null; // FIX: Removed hardcoded fallback password "dave"
     try (Connection connection = dataSource.getConnection()) {
-      String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
-      try {
-        Statement statement =
-            connection.createStatement(
-                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-        ResultSet results = statement.executeQuery(query);
+      // FIX: Converted to PreparedStatement to prevent unsafe SQL pattern and ensure parameterization
+      String query = "SELECT password FROM user_system_data WHERE user_name = ?";
+      try (PreparedStatement statement = connection.prepareStatement(query)) {
+        statement.setString(1, "dave"); // Parameterizing the fixed username
+        ResultSet results = statement.executeQuery();
 
         if (results != null && results.first()) {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception occurred during password retrieval: {}", sqle.getMessage()); // Replaced printStackTrace with secure logging
-        // do nothing
+        log.error("SQL error while fetching password", sqle); // FIX: Replaced printStackTrace with secure logging
       }
     } catch (Exception e) {
-      log.error("General Exception occurred during password retrieval: {}", e.getMessage()); // Replaced printStackTrace with secure logging
-      // do nothing
+      log.error("Error while fetching password", e); // FIX: Replaced printStackTrace with secure logging
     }
     return (password);
   }
