@@ -32,18 +32,21 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use simpler, linear-time-safe patterns to avoid inefficient regex behavior
-            var url = document.URL;
-            var lessonUrl = url.replace(/\.lesson(?:\/.*/)?$/, '.lesson');
-            this.set('lessonUrl', lessonUrl);
+            // Use simple, efficient, non-backtracking-safe expressions and bound the URL length
+            var currentUrl = document.URL;
+            if (typeof currentUrl === 'string') {
+                // Bound length to mitigate ReDoS-style abuse on extremely long URLs
+                currentUrl = currentUrl.slice(0, 2048);
+            }
 
-            var pageMatch = url.match(/\.lesson\/(\d{1,4})$/);
+            this.set('lessonUrl', currentUrl.replace(/\.lesson[^/]*.*/,'\.lesson'));
+
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
             if (pageMatch) {
                 this.set('pageNum', pageMatch[1]);
             } else {
-                this.set('pageNum', 0);
+                this.set('pageNum',0);
             }
-
             this.trigger('content:loaded',this,loadHelps);
         },
 
