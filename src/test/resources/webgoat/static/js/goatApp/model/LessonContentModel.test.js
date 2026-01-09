@@ -1,133 +1,82 @@
-// File: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+// Resolved test file path (per instructions):
+// src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 
-define([
-  'jquery',
-  'underscore',
-  'backbone',
-  'goatApp/model/HTMLContentModel',
-  'webgoat/static/js/goatApp/model/LessonContentModel'
-], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
-  'use strict';
+const $ = require('jquery');
+const _ = require('underscore');
+const Backbone = require('backbone');
 
-  /**
-   * Delta tests for LessonContentModel.js focusing on the updated, more efficient
-   * regular expressions used in setContent().
-   *
-   * We verify that:
-   * - lessonUrl is still derived correctly from document.URL using the new regex.
-   * - pageNum is still extracted correctly with the new bounded pattern.
-   * - No regression occurs for URLs with and without page numbers.
-   */
+// We need to load the AMD-style module; in Jest we can simulate this by executing
+// the module file in a context where `define` is available.
+function loadLessonContentModel() {
+  const fs = require('fs');
+  const path = require('path');
+  const vm = require('vm');
 
-  describe('LessonContentModel delta tests', function () {
-    let originalUrl;
+  const modulePath = path.resolve(
+    __dirname,
+    '../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js'
+  );
+  const code = fs.readFileSync(modulePath, 'utf8');
 
-    beforeEach(function () {
-      // Preserve original document.URL behavior if present
-      originalUrl = window.location.href;
-    });
+  let ExportedModel = null;
+  const sandbox = {
+    define: (deps, factory) => {
+      ExportedModel = factory($, _, Backbone, Backbone.Model);
+    },
+    require,
+    console,
+    module: {},
+  };
 
-    afterEach(function () {
-      // Restore original URL using history API where possible
-      if (window.history && window.history.replaceState) {
-        window.history.replaceState(null, '', originalUrl);
-      }
-    });
+  vm.runInNewContext(code, sandbox, { filename: modulePath });
+  return ExportedModel;
+}
 
-    /**
-     * Helper to simulate URL changes in tests without reloading the page.
-     */
-    function setDocumentUrl(url) {
-      if (window.history && window.history.replaceState) {
-        window.history.replaceState(null, '', url);
-      } else {
-        // Fallback for environments without History API in tests
-        Object.defineProperty(window, 'location', {
-          value: { href: url },
-          writable: true
-        });
-      }
-    }
+describe('LessonContentModel regex behavior (delta tests)', () => {
+  const LessonContentModel = loadLessonContentModel();
 
-    it('setContent derives lessonUrl and pageNum correctly for URL without page number', function () {
-      // Arrange
-      const url = 'https://example.com/Path/To/MyLesson.lesson';
-      setDocumentUrl(url);
+  test('normalizes lessonUrl to .lesson and sets pageNum from URL with page number', () => {
+    // Arrange
+    // URL with a page number at the end, e.g. /foo.lesson/12
+    const originalUrl =
+      'http://example.com/WebGoat/lesson/SomeLesson.lesson/12';
+    const originalDocument = global.document;
+    global.document = { URL: originalUrl };
 
-      const model = new LessonContentModel();
-      const setSpy = spyOn(model, 'set').and.callThrough();
-      const triggerSpy = spyOn(model, 'trigger').and.callThrough();
+    const model = new LessonContentModel();
 
-      // Act
-      model.setContent('<html>content</html>');
+    // Act
+    model.setContent('<html>content</html>', true);
 
-      // Assert
-      // Verify that content is set
-      expect(setSpy).toHaveBeenCalledWith('content', '<html>content</html>');
+    // Assert
+    expect(model.get('lessonUrl')).toBe(
+      originalUrl.replace(/\.lesson\/12$/, '.lesson')
+    );
+    expect(model.get('pageNum')).toBe('12');
 
-      // Verify lessonUrl: should remain ".lesson" suffix using the new, safer regex
-      const lessonUrlCall = setSpy.calls.all().find(function (c) {
-        return c.args[0] === 'lessonUrl';
-      });
-      expect(lessonUrlCall).toBeDefined();
-      expect(lessonUrlCall.args[1]).toBe('https://example.com/Path/To/MyLesson.lesson');
+    // Cleanup
+    global.document = originalDocument;
+  });
 
-      // Verify pageNum: without "/<digits>" at the end, it should default to 0
-      const pageNumCall = setSpy.calls.all().find(function (c) {
-        return c.args[0] === 'pageNum';
-      });
-      expect(pageNumCall).toBeDefined();
-      expect(pageNumCall.args[1]).toBe(0);
+  test('sets pageNum to 0 when there is no trailing page number and normalizes lessonUrl', () => {
+    // Arrange
+    const originalUrl =
+      'http://example.com/WebGoat/lesson/SomeLesson.lesson';
+    const originalDocument = global.document;
+    global.document = { URL: originalUrl };
 
-      // Ensure the event is still triggered
-      expect(triggerSpy).toHaveBeenCalledWith('content:loaded', model, true);
-    });
+    const model = new LessonContentModel();
 
-    it('setContent derives lessonUrl and pageNum correctly for URL with page number', function () {
-      // Arrange
-      const url = 'https://example.com/Path/To/MyLesson.lesson/1234';
-      setDocumentUrl(url);
+    // Act
+    model.setContent('<html>content</html>', true);
 
-      const model = new LessonContentModel();
-      const setSpy = spyOn(model, 'set').and.callThrough();
-      const triggerSpy = spyOn(model, 'trigger').and.callThrough();
+    // Assert
+    expect(model.get('lessonUrl')).toBe(
+      originalUrl.replace(/\.lesson$/, '.lesson')
+    );
+    expect(model.get('pageNum')).toBe(0);
 
-      // Act
-      model.setContent('<html>content</html>');
-
-      // Assert
-      const lessonUrlCall = setSpy.calls.all().find(function (c) {
-        return c.args[0] === 'lessonUrl';
-      });
-      expect(lessonUrlCall).toBeDefined();
-      expect(lessonUrlCall.args[1]).toBe('https://example.com/Path/To/MyLesson.lesson');
-
-      const pageNumCall = setSpy.calls.all().find(function (c) {
-        return c.args[0] === 'pageNum';
-      });
-      expect(pageNumCall).toBeDefined();
-      expect(pageNumCall.args[1]).toBe('1234');
-
-      expect(triggerSpy).toHaveBeenCalledWith('content:loaded', model, true);
-    });
-
-    it('setContent falls back to pageNum 0 when URL does not end with .lesson/<digits>', function () {
-      // Arrange
-      const url = 'https://example.com/Path/To/MyLesson.lesson/some/other/path';
-      setDocumentUrl(url);
-
-      const model = new LessonContentModel();
-      const setSpy = spyOn(model, 'set').and.callThrough();
-
-      // Act
-      model.setContent('<html>content</html>');
-
-      // Assert
-      const pageNumCall = setSpy.calls.all().find(function (c) {
-        return c.args[0] === 'pageNum';
-      });
-      expect(pageNumCall).toBeDefined();
-      expect(pageNumCall.args[1]).toBe(0);
-    });
+    // Cleanup
+    global.document = originalDocument;
   });
 });

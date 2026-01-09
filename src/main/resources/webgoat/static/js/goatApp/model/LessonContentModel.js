@@ -32,20 +32,11 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a more efficient and bounded regular expression to avoid
-            // excessive backtracking and potential ReDoS-like behavior.
+            // Use an efficient, anchored regex without greedy wildcards
             var currentUrl = document.URL;
+            this.set('lessonUrl', currentUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson'));
 
-            // Derive lessonUrl: replace a single ".lesson" suffix with ".lesson"
-            // (kept for backward-compatibility with original behavior but with a
-            // safer, bounded regex).
-            this.set(
-                'lessonUrl',
-                currentUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson')
-            );
-
-            // Extract page number: expect ".lesson/<1-4 digits>" at the end.
-            // This regex is simple and non-ambiguous, avoiding nested repetition.
+            // Efficiently capture an optional page number at the end of the URL
             var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
             if (pageMatch) {
                 this.set('pageNum', pageMatch[1]);
