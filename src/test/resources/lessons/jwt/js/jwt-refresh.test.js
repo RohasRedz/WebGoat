@@ -1,64 +1,70 @@
-/**
- * Delta tests for jwt-refresh.js focusing on removal of hardcoded password and
- * using getUserPassword() as the source for the login password field.
- */
+// Delta tests for jwt-refresh.js focusing on hard-coded password removal:
+// - Verifies that the password is taken from window.WEBGOAT_JWT_PASSWORD when set.
+// - Verifies that the password falls back to an empty string when not configured.
 
-describe('jwt-refresh login payload', () => {
-  let originalAjax;
-  let originalGetUserPassword;
-  let ajaxCalls;
+const $ = require('jquery');
 
+// Require the script to attach login and other functions to global scope.
+// TODO: Adjust path if bundling/transpilation is used in the actual project.
+require('../../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+
+describe('jwt-refresh login password handling (delta tests)', () => {
   beforeEach(() => {
-    // Mock jQuery ajax
-    originalAjax = global.$ && global.$.ajax;
-    ajaxCalls = [];
-    global.$ = global.$ || {};
-    global.$.ajax = jest.fn((options) => {
-      ajaxCalls.push(options);
-      return { success: (cb) => cb({ access_token: 'a', refresh_token: 'r' }) };
+    // Reset globals before each test
+    global.window = {};
+    global.localStorage = {
+      _data: {},
+      setItem(key, value) {
+        this._data[key] = value;
+      },
+      getItem(key) {
+        return this._data[key];
+      }
+    };
+
+    jest.spyOn($, 'ajax').mockImplementation((options) => {
+      // Simulate immediate success callback
+      if (typeof options.success === 'function') {
+        options.success({ access_token: 'acc', refresh_token: 'ref' });
+      }
+      return { success: (cb) => cb({}) };
     });
-
-    // Provide a deterministic implementation of getUserPassword
-    originalGetUserPassword = global.getUserPassword;
-    global.getUserPassword = jest.fn(() => 'secure-from-hook');
-
-    // Load the module under test after mocks are in place
-    // eslint-disable-next-line global-require
-    require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
   });
 
   afterEach(() => {
-    // Restore ajax
-    if (originalAjax) {
-      global.$.ajax = originalAjax;
-    }
-
-    // Restore getUserPassword
-    if (originalGetUserPassword !== undefined) {
-      global.getUserPassword = originalGetUserPassword;
-    } else {
-      delete global.getUserPassword;
-    }
-
-    // Clear module cache so that require re-evaluates the script per test
-    jest.resetModules();
+    jest.restoreAllMocks();
   });
 
-  test('login uses getUserPassword value instead of hardcoded literal', () => {
+  test('login uses window.WEBGOAT_JWT_PASSWORD when configured', () => {
     // Arrange
-    const login = global.login;
-    expect(typeof login).toBe('function');
+    global.window.WEBGOAT_JWT_PASSWORD = 'runtime-secret';
 
     // Act
-    login('Jerry');
+    // login is defined in jwt-refresh.js and attached to global scope
+    global.login('Jerry');
 
     // Assert
-    expect(global.getUserPassword).toHaveBeenCalled();
-    expect(ajaxCalls.length).toBe(1);
-    const payload = JSON.parse(ajaxCalls[0].data);
-    expect(payload.user).toBe('Jerry');
-    expect(payload.password).toBe('secure-from-hook');
-    // Ensure that the previous hardcoded value is not accidentally present
-    expect(payload.password).not.toBe('bm5nhSkxCXZkKRy4');
+    expect($.ajax).toHaveBeenCalledTimes(1);
+    const callArgs = $.ajax.mock.calls[0][0];
+    const body = JSON.parse(callArgs.data);
+
+    expect(body.user).toBe('Jerry');
+    expect(body.password).toBe('runtime-secret');
+  });
+
+  test('login falls back to empty password when window.WEBGOAT_JWT_PASSWORD is undefined', () => {
+    // Arrange
+    delete global.window.WEBGOAT_JWT_PASSWORD;
+
+    // Act
+    global.login('Jerry');
+
+    // Assert
+    expect($.ajax).toHaveBeenCalledTimes(1);
+    const callArgs = $.ajax.mock.calls[0][0];
+    const body = JSON.parse(callArgs.data);
+
+    expect(body.user).toBe('Jerry');
+    expect(body.password).toBe('');
   });
 });

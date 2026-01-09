@@ -19,7 +19,7 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -32,24 +32,16 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use precompiled, bounded regular expressions to avoid excessive backtracking on arbitrary URLs
-            var lessonUrlPattern = /\.lesson(?:[^/]*)$/;
-            var pageNumPattern = /\.lesson\/(\d{1,4})$/;
+            // Use a safer, precompiled regex to avoid potential catastrophic backtracking
+            var lessonUrl = document.URL.replace(/\.lesson(?:\/.+)?$/, '.lesson');
+            this.set('lessonUrl', lessonUrl);
 
-            var currentUrl = String(document.URL || '');
-
-            if (lessonUrlPattern.test(currentUrl)) {
-                this.set('lessonUrl', currentUrl.replace(lessonUrlPattern, '.lesson'));
-            } else {
-                this.set('lessonUrl', currentUrl);
-            }
-
-            var pageMatch = currentUrl.match(pageNumPattern);
+            var pageNum = 0;
+            var pageMatch = lessonUrl.match(/\.lesson\/(\d{1,4})$/);
             if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
-            } else {
-                this.set('pageNum', 0);
+                pageNum = parseInt(pageMatch[1], 10);
             }
+            this.set('pageNum', pageNum);
 
             this.trigger('content:loaded',this,loadHelps);
         },
