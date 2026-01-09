@@ -1,51 +1,102 @@
-// Assuming Jest test environment and AMD-compatible loading are configured in the project.
-// Test file path (derived from source): src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+// File path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 
-define([
-  'jquery',
-  'underscore',
-  'backbone',
-  'goatApp/model/LessonContentModel'
-], function ($, _, Backbone, LessonContentModel) {
-  describe('LessonContentModel URL normalization (delta tests)', function () {
-    let model;
-    const originalUrl = global.document ? document.URL : 'http://example.com';
+// NOTE: This test focuses only on the changed behavior around URL parsing and pageNum derivation
+// in LessonContentModel.js to ensure the hardened regex/logic behaves correctly and safely.
 
-    beforeEach(function () {
-      // Minimal document mock to control URL behavior
-      global.document = {
-        URL: 'http://webgoat.local/SomeLesson.lesson'
-      };
-      model = new LessonContentModel();
+const Backbone = require('backbone');
+const _ = require('underscore');
+
+// The AMD module under test: we approximate the AMD loading by requiring the produced module.
+// In the actual environment this may be wired via RequireJS; here we simulate the exported model.
+// TODO: Adjust path if AMD bundling exports under a different module path.
+const LessonContentModel = require('../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
+
+describe('LessonContentModel URL parsing and pageNum derivation (delta tests)', () => {
+  let originalDocumentUrl;
+
+  beforeAll(() => {
+    // Preserve original document.URL if present
+    if (typeof document !== 'undefined' && document.URL) {
+      originalDocumentUrl = document.URL;
+    }
+  });
+
+  afterAll(() => {
+    // Restore original document.URL after tests
+    if (typeof document !== 'undefined' && originalDocumentUrl) {
+      Object.defineProperty(document, 'URL', {
+        value: originalDocumentUrl,
+        configurable: true,
+        writable: false
+      });
+    }
+  });
+
+  function createModel() {
+    // Minimal Backbone model instantiation; HTMLContentModel behavior is not under test.
+    return new LessonContentModel();
+  }
+
+  function setDocumentUrl(url) {
+    // Redefine document.URL for testing; jsdom allows overriding this as a property.
+    Object.defineProperty(document, 'URL', {
+      value: url,
+      configurable: true,
+      writable: false
     });
+  }
 
-    afterEach(function () {
-      // Restore default document if needed
-      global.document = { URL: originalUrl };
-    });
+  test('should derive lessonUrl ending with .lesson and pageNum 0 when URL has no page number', () => {
+    // Arrange
+    setDocumentUrl('http://localhost/WebGoat/lesson/SomeLesson.lesson?param=value');
+    const model = createModel();
 
-    it('normalizes URLs ending with .lesson to .lesson without trailing parts', function () {
-      document.URL = 'http://webgoat.local/SomeLesson.lesson';
-      model.setContent('<html></html>');
+    // Act
+    model.setContent('<html></html>');
 
-      expect(model.get('lessonUrl')).toBe('http://webgoat.local/SomeLesson.lesson');
-      expect(model.get('pageNum')).toBe(0);
-    });
+    // Assert
+    expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat/lesson/SomeLesson.lesson');
+    expect(model.get('pageNum')).toBe(0);
+  });
 
-    it('normalizes URLs ending with .lesson/<digits> to base .lesson and extracts pageNum', function () {
-      document.URL = 'http://webgoat.local/SomeLesson.lesson/12';
-      model.setContent('<html></html>');
+  test('should correctly extract numeric pageNum from URL with .lesson/<page>', () => {
+    // Arrange
+    setDocumentUrl('http://localhost/WebGoat/lesson/SomeLesson.lesson/42');
+    const model = createModel();
 
-      expect(model.get('lessonUrl')).toBe('http://webgoat.local/SomeLesson.lesson');
-      expect(model.get('pageNum')).toBe('12');
-    });
+    // Act
+    model.setContent('<html></html>');
 
-    it('sets pageNum to 0 when URL does not end with .lesson/<digits>', function () {
-      document.URL = 'http://webgoat.local/SomeLesson.lesson/foo';
-      model.setContent('<html></html>');
+    // Assert
+    expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat/lesson/SomeLesson.lesson');
+    expect(model.get('pageNum')).toBe('42');
+  });
 
-      expect(model.get('lessonUrl')).toBe('http://webgoat.local/SomeLesson.lesson');
-      expect(model.get('pageNum')).toBe(0);
-    });
+  test('should fall back to pageNum 0 when URL does not contain .lesson segment', () => {
+    // Arrange
+    setDocumentUrl('http://localhost/WebGoat/other/SomeOtherPage');
+    const model = createModel();
+
+    // Act
+    model.setContent('<html></html>');
+
+    // Assert
+    expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat/other/SomeOtherPage');
+    expect(model.get('pageNum')).toBe(0);
+  });
+
+  test('should handle long or unusual URLs without throwing (stress previous regex behavior)', () => {
+    // Arrange
+    const longPath = 'a'.repeat(5000);
+    setDocumentUrl(`http://localhost/WebGoat/${longPath}/SomeLesson.lesson/${longPath}`);
+    const model = createModel();
+
+    // Act & Assert: the call should succeed and set some consistent values
+    expect(() => model.setContent('<html></html>')).not.toThrow();
+
+    // It should still identify the .lesson segment and set pageNum based on the trailing digits if any
+    expect(model.get('lessonUrl')).toContain('.lesson');
+    // trailing part has no pure numeric page, so pageNum should be 0
+    expect(model.get('pageNum')).toBe(0);
   });
 });

@@ -19,7 +19,7 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -32,15 +32,21 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // FIX: Use a simple, length‑bounded pattern for page extraction to avoid ReDoS‑prone regex.
-            var currentUrl = String(document.URL || '');
-            // Ensure the URL ends with `.lesson` before stripping the suffix
-            this.set('lessonUrl', currentUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson'));
+            // Hardened URL parsing with safer, precompiled regex patterns
+            var currentUrl = document.URL;
 
-            // Extract trailing page number (1–4 digits) without complex backtracking
-            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
+            // Use a simple, non-backtracking-prone pattern for the lesson URL
+            var lessonUrlMatch = currentUrl.match(/\.lesson/);
+            if (lessonUrlMatch) {
+                this.set('lessonUrl', currentUrl.substring(0, lessonUrlMatch.index + '.lesson'.length));
+            } else {
+                this.set('lessonUrl', currentUrl);
+            }
+
+            // Use a safe, bounded regex for page number extraction
+            var pageNumMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageNumMatch) {
+                this.set('pageNum', pageNumMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
