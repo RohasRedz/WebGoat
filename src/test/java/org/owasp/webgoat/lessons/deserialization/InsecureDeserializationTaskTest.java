@@ -1,65 +1,65 @@
 package org.owasp.webgoat.lessons.deserialization;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.ObjectOutputStream;
-import java.util.Base64;
-import org.dummy.insecure.framework.VulnerableTaskHolder;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.owasp.webgoat.container.assignments.AttackResult;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Delta tests for InsecureDeserializationTask focusing on the ObjectInputFilter:
- * - verifies that allowed types (VulnerableTaskHolder) still work.
- * - verifies that disallowed types (e.g., java.lang.Integer) are rejected by the filter.
+ * Delta tests for InsecureDeserializationTask focusing on the vulnerability fix:
+ * constraining deserialization via ObjectInputFilter to allowed classes only.
  */
-public class InsecureDeserializationTaskTest {
+class InsecureDeserializationTaskTest {
 
-  private String serializeToWebToken(Object obj) throws Exception {
-    ByteArrayOutputStream bos = new ByteArrayOutputStream();
-    try (ObjectOutputStream oos = new ObjectOutputStream(bos)) {
-      oos.writeObject(obj);
+    /**
+     * Verifies that an allowed class instance can still be deserialized successfully,
+     * ensuring that legitimate behavior is preserved.
+     */
+    @Test
+    void deserializeAllowedClassSucceeds() throws IOException, ClassNotFoundException {
+        InsecureDeserializationTask.AllowedClass allowed = new InsecureDeserializationTask.AllowedClass();
+        byte[] serialized = serialize(allowed);
+
+        InsecureDeserializationTask task = new InsecureDeserializationTask();
+
+        Object result = task.deserialize(serialized);
+
+        assertNotNull(result, "Deserialization result should not be null for allowed class");
+        assertTrue(result instanceof InsecureDeserializationTask.AllowedClass,
+                "Result should be instance of allowed class");
     }
-    String base64 = Base64.getEncoder().encodeToString(bos.toByteArray());
-    // Mirror the token transformation in the controller (replace '+' and '/')
-    return base64.replace('+', '-').replace('/', '_');
-  }
 
-  @Test
-  @DisplayName("completed should succeed when deserializing an allowed VulnerableTaskHolder object")
-  void completed_allowsVulnerableTaskHolder() throws Exception {
-    // Arrange
-    InsecureDeserializationTask task = new InsecureDeserializationTask();
-    VulnerableTaskHolder holder = new VulnerableTaskHolder("test");
-    String token = serializeToWebToken(holder);
+    /**
+     * Verifies that a non-whitelisted class is rejected by the filter.
+     * Expected behavior: either a ClassNotFoundException, IOException, or some other checked exception path.
+     * The exact exception type may vary by JDK implementation; we primarily assert that it does not succeed.
+     */
+    @Test
+    void deserializeDisallowedClassFails() throws IOException {
+        Disallowed disallowed = new Disallowed();
+        byte[] serialized = serialize(disallowed);
 
-    // Act
-    AttackResult result = task.completed(token);
+        InsecureDeserializationTask task = new InsecureDeserializationTask();
 
-    // Assert: the exercise logic still works for the allowed type;
-    // success indicates that the filter did not block VulnerableTaskHolder.
-    assertTrue(result.getLessonCompleted(), "Deserialization of allowed type should succeed");
-  }
+        assertThrows(Exception.class, () -> task.deserialize(serialized),
+                "Deserializing a non-allowed class should fail due to ObjectInputFilter restrictions");
+    }
 
-  @Test
-  @DisplayName("completed should fail when deserializing a disallowed type due to ObjectInputFilter")
-  void completed_rejectsDisallowedType() throws Exception {
-    // Arrange
-    InsecureDeserializationTask task = new InsecureDeserializationTask();
-    Integer maliciousObject = 42; // not in the allowlist
-    String token = serializeToWebToken(maliciousObject);
+    private byte[] serialize(Object obj) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
+            oos.writeObject(obj);
+        }
+        return baos.toByteArray();
+    }
 
-    // Act
-    AttackResult result = task.completed(token);
-
-    // Assert: the ObjectInputFilter should prevent successful deserialization
-    // of a type that is not in the allowlist, leading to a failed result.
-    assertFalse(
-        result.getLessonCompleted(),
-        "Deserialization of disallowed type should not complete the lesson"
-    );
-  }
+    /**
+     * Helper class not referenced by the filter pattern and therefore should be rejected.
+     */
+    private static class Disallowed implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+    }
 }
