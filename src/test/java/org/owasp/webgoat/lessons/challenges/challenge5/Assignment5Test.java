@@ -1,93 +1,84 @@
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.when;
-
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
-import org.owasp.webgoat.container.LessonDataSource;
-import org.owasp.webgoat.container.assignments.AttackResult;
-import org.owasp.webgoat.lessons.challenges.Flags;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 
-/**
- * Delta unit tests for Assignment5 focusing on the SQL injection fix.
- *
- * This test class is intended to reside at:
- * src/test/java/org/owasp/webgoat/lessons/challenges/challenge5/Assignment5Test.java
- * derived from the source path:
- * src/main/java/org/owasp/webgoat/lessons/challenges/challenge5/Assignment5.java
- */
-public class Assignment5Test {
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.owasp.webgoat.container.LessonDataSource;
+import org.owasp.webgoat.container.assignments.AttackResult;
+import org.owasp.webgoat.lessons.challenges.Flags;
+import org.springframework.web.bind.annotation.RequestParam;
+
+class Assignment5Test {
 
     @Test
-    @DisplayName("login should not be vulnerable to SQL injection and only succeed for valid credentials")
-    void login_shouldResistSqlInjection() throws Exception {
+    @DisplayName("login() should use parameterized query and set user inputs as parameters")
+    void login_usesParameterizedQuery_preventsSqlInjection() throws Exception {
         // Arrange
-        LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
-        Flags flags = Mockito.mock(Flags.class);
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
-
-        Connection connection = Mockito.mock(Connection.class);
-        PreparedStatement preparedStatement = Mockito.mock(PreparedStatement.class);
-        ResultSet resultSetValid = Mockito.mock(ResultSet.class);
-        ResultSet resultSetInjection = Mockito.mock(ResultSet.class);
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
+        Connection connection = mock(Connection.class);
+        PreparedStatement preparedStatement = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
 
         when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(
-                "select password from challenge_users where userid = ? and password = ?"))
-                .thenReturn(preparedStatement);
-
-        // For a valid login attempt we expect one row
-        when(preparedStatement.executeQuery())
-                .thenReturn(resultSetValid)   // first call (valid credentials)
-                .thenReturn(resultSetInjection); // second call (injection payload)
-
-        when(resultSetValid.next()).thenReturn(true);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
         when(flags.getFlag(5)).thenReturn("FLAG-5");
 
-        // For an injection attempt with wrong password, even if crafted to try injection,
-        // the parameterized query should not allow bypass; result set should be empty.
-        when(resultSetInjection.next()).thenReturn(false);
+        Assignment5 assignment5 = new Assignment5(dataSource, flags);
+
+        String username = "Larry' OR '1'='1";
+        String password = "anything";
 
         // Act
-        AttackResult validResult =
-                assignment5.login("Larry", "correct-password");
-
-        AttackResult injectionResult =
-                assignment5.login("Larry", "wrong-password' OR '1'='1");
+        AttackResult result = assignment5.login(username, password);
 
         // Assert
-        // Valid credentials should succeed
-        assertEquals(AttackResult.Status.SUCCESS, validResult.getLessonStatus(),
-                "Expected successful login for correct credentials");
+        // Verify prepared statement is created with placeholders instead of concatenated input
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sqlCaptor.capture());
+        String sql = sqlCaptor.getValue();
+        // Ensure the SQL contains placeholders and not raw user input
+        org.junit.jupiter.api.Assertions.assertTrue(
+                sql.contains("where userid = ? and password = ?"),
+                "SQL must use parameter placeholders");
+        org.junit.jupiter.api.Assertions.assertFalse(
+                sql.contains(username),
+                "SQL must not contain raw username value");
+        org.junit.jupiter.api.Assertions.assertFalse(
+                sql.contains(password),
+                "SQL must not contain raw password value");
 
-        // Injection attempt with incorrect password must fail, proving the query
-        // is parameterized and no longer interprets the payload as SQL
-        assertEquals(AttackResult.Status.FAIL, injectionResult.getLessonStatus(),
-                "SQL injection payload must not bypass authentication");
+        // Verify that setString is used to bind parameters in correct order
+        verify(preparedStatement).setString(1, username);
+        verify(preparedStatement).setString(2, password);
+
+        // Also ensure business logic still works (success path)
+        org.junit.jupiter.api.Assertions.assertTrue(result.getLessonCompleted());
     }
 
     @Test
-    @DisplayName("login should fail when username is not Larry, even with SQL injection payload")
-    void login_shouldFailForNonLarryEvenWithInjection() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
-        Flags flags = Mockito.mock(Flags.class);
+    @DisplayName("login() should fail when required parameters are missing")
+    void login_missingParameters_returnsFailure() throws Exception {
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Flags flags = mock(Flags.class);
         Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-        // Act
-        AttackResult result =
-                assignment5.login("Mallory' OR '1'='1", "anything");
+        AttackResult result1 = assignment5.login("", "password");
+        AttackResult result2 = assignment5.login("Larry", "");
 
-        // Assert
-        // This exercises the pre-condition check before any DB call and confirms
-        // that injection in the username is not used to bypass the "Larry" check.
-        assertEquals(AttackResult.Status.FAIL, result.getLessonStatus(),
-                "Non-Larry user with injection payload must not bypass username check");
+        org.junit.jupiter.api.Assertions.assertFalse(result1.getLessonCompleted());
+        org.junit.jupiter.api.Assertions.assertFalse(result2.getLessonCompleted());
+
+        // No DB interaction should occur when required parameters are missing
+        verifyNoInteractions(dataSource);
     }
 }

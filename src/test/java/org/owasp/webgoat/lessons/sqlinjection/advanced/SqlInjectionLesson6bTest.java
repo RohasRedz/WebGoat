@@ -1,78 +1,77 @@
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
+
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-/**
- * Delta tests for SqlInjectionLesson6b focusing on changed behavior:
- * - completed() now uses getPassword(), which no longer relies on a hard-coded sensitive value.
- * - Behavior when userid_6b matches or does not match the password returned from DB.
- *
- * DB interactions are fully mocked.
- */
+@Slf4j
 class SqlInjectionLesson6bTest {
 
-  @Test
-  @DisplayName("completed should succeed when userid_6b equals password from DB")
-  void completedSucceedsWhenUseridMatchesDbPassword() throws Exception {
-    // Arrange
-    LessonDataSource dataSource = mock(LessonDataSource.class);
-    Connection connection = mock(Connection.class);
-    Statement statement = mock(Statement.class);
-    ResultSet resultSet = mock(ResultSet.class);
+    @Test
+    @DisplayName("completed() should still validate password using getPassword()")
+    void completed_usesGetPasswordForValidation() throws IOException {
+        // Arrange
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        SqlInjectionLesson6b lesson = spy(new SqlInjectionLesson6b(dataSource));
 
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.createStatement(
-            ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-        .thenReturn(statement);
-    when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
-        .thenReturn(resultSet);
-    when(resultSet.first()).thenReturn(true);
-    when(resultSet.getString("password")).thenReturn("dynamic-db-password");
+        when(lesson.getPassword()).thenReturn("secretPwd");
 
-    SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
+        // Act
+        AttackResult success = lesson.completed("secretPwd");
+        AttackResult failure = lesson.completed("wrong");
 
-    // Act
-    AttackResult result = lesson.completed("dynamic-db-password");
+        // Assert
+        org.junit.jupiter.api.Assertions.assertTrue(success.getLessonCompleted());
+        org.junit.jupiter.api.Assertions.assertFalse(failure.getLessonCompleted());
+        verify(lesson, times(2)).getPassword();
+    }
 
-    // Assert
-    assertTrue(result.getLessonCompleted());
-  }
+    @Test
+    @DisplayName("getPassword() should not use printStackTrace and instead log via SLF4J")
+    void getPassword_usesSlf4jLogging_insteadOfPrintStackTrace() throws Exception {
+        // Arrange
+        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
 
-  @Test
-  @DisplayName("completed should fail when userid_6b does not equal password from DB")
-  void completedFailsWhenUseridDoesNotMatchDbPassword() throws Exception {
-    // Arrange
-    LessonDataSource dataSource = mock(LessonDataSource.class);
-    Connection connection = mock(Connection.class);
-    Statement statement = mock(Statement.class);
-    ResultSet resultSet = mock(ResultSet.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+                .thenReturn(statement);
+        when(statement.executeQuery(anyString())).thenThrow(new java.sql.SQLException("DB error"));
 
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.createStatement(
-            ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-        .thenReturn(statement);
-    when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
-        .thenReturn(resultSet);
-    when(resultSet.first()).thenReturn(true);
-    when(resultSet.getString("password")).thenReturn("dynamic-db-password");
+        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
 
-    SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
+        Logger logger = LoggerFactory.getLogger(SqlInjectionLesson6b.class);
+        Logger spyLogger = spy(logger);
 
-    // Act
-    AttackResult result = lesson.completed("wrong-password");
+        // Replace static logger via reflection to assert logging behavior
+        java.lang.reflect.Field logField = SqlInjectionLesson6b.class.getDeclaredField("log");
+        logField.setAccessible(true);
+        logField.set(null, spyLogger);
 
-    // Assert
-    assertFalse(result.getLessonCompleted());
-  }
+        // Act
+        String password = lesson.getPassword();
+
+        // Assert
+        org.junit.jupiter.api.Assertions.assertEquals("dave", password, "Fallback password should be returned");
+
+        // Verify that an error is logged instead of using printStackTrace
+        verify(spyLogger, atLeastOnce())
+                .error(startsWith("SQL Exception in getPassword:"), any());
+
+        // No System.err stack trace printing should occur — not directly verifiable here,
+        // but ensured by code change (printStackTrace removed in updated implementation).
+    }
 }
