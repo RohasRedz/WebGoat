@@ -1,82 +1,126 @@
-// Resolved test file path (per instructions):
-// src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+// Test file path derived from:
+// src/main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js
+// -> src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 
-const $ = require('jquery');
-const _ = require('underscore');
-const Backbone = require('backbone');
+// NOTE: This test assumes an AMD loader or build step that exposes the module as a CommonJS require.
+// If that is not the case in the real project setup, adjust the import accordingly.
+const { JSDOM } = require('jsdom');
 
-// We need to load the AMD-style module; in Jest we can simulate this by executing
-// the module file in a context where `define` is available.
-function loadLessonContentModel() {
-  const fs = require('fs');
-  const path = require('path');
-  const vm = require('vm');
+// Minimal AMD-style loader shim to obtain the module under test.
+// In a real setup, this would be handled by RequireJS or the project's bundler.
+const fs = require('fs');
+const vm = require('vm');
+const path = require('path');
 
-  const modulePath = path.resolve(
+function loadLessonContentModelModule() {
+  const filePath = path.join(
     __dirname,
-    '../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js'
+    '../../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js'
   );
-  const code = fs.readFileSync(modulePath, 'utf8');
+  const code = fs.readFileSync(filePath, 'utf8');
 
-  let ExportedModel = null;
   const sandbox = {
     define: (deps, factory) => {
-      ExportedModel = factory($, _, Backbone, Backbone.Model);
+      // Very small shim: resolve only the dependencies actually used in tests.
+      const $ = {};
+      const _ = {
+        escape: (s) => s, // not relevant for regex tests
+      };
+      const Backbone = {
+        Model: function () {},
+      };
+      Backbone.Model.prototype.fetch = function () {
+        return {
+          done: (cb) => cb('<html></html>'),
+        };
+      };
+
+      const HTMLContentModel = Backbone.Model.extend
+        ? Backbone.Model
+        : Backbone.Model; // placeholder; tests use only setContent behavior
+
+      module.exports = factory($, _, Backbone, HTMLContentModel);
     },
-    require,
-    console,
-    module: {},
+    module: { exports: {} },
   };
 
-  vm.runInNewContext(code, sandbox, { filename: modulePath });
-  return ExportedModel;
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox, { filename: filePath });
+
+  return sandbox.module.exports || module.exports;
 }
 
-describe('LessonContentModel regex behavior (delta tests)', () => {
-  const LessonContentModel = loadLessonContentModel();
+describe('LessonContentModel.setContent regex behavior (delta tests)', () => {
+  let LessonContentModel;
+  let model;
 
-  test('normalizes lessonUrl to .lesson and sets pageNum from URL with page number', () => {
-    // Arrange
-    // URL with a page number at the end, e.g. /foo.lesson/12
-    const originalUrl =
-      'http://example.com/WebGoat/lesson/SomeLesson.lesson/12';
-    const originalDocument = global.document;
-    global.document = { URL: originalUrl };
-
-    const model = new LessonContentModel();
-
-    // Act
-    model.setContent('<html>content</html>', true);
-
-    // Assert
-    expect(model.get('lessonUrl')).toBe(
-      originalUrl.replace(/\.lesson\/12$/, '.lesson')
-    );
-    expect(model.get('pageNum')).toBe('12');
-
-    // Cleanup
-    global.document = originalDocument;
+  beforeAll(() => {
+    LessonContentModel = loadLessonContentModelModule();
   });
 
-  test('sets pageNum to 0 when there is no trailing page number and normalizes lessonUrl', () => {
-    // Arrange
-    const originalUrl =
-      'http://example.com/WebGoat/lesson/SomeLesson.lesson';
-    const originalDocument = global.document;
-    global.document = { URL: originalUrl };
+  beforeEach(() => {
+    // Provide a minimal Backbone-like model API for testing
+    const attributes = {};
+    model = new LessonContentModel();
+    model.set = (key, value) => {
+      attributes[key] = value;
+    };
+    model.get = (key) => attributes[key];
+    model.trigger = jest.fn();
+  });
 
-    const model = new LessonContentModel();
+  test('setContent sets lessonUrl and pageNum=0 when URL has no page number', () => {
+    const dom = new JSDOM(`<!DOCTYPE html><p>Hello</p>`, {
+      url: 'http://example.com/SomeLesson.lesson',
+    });
+    global.document = dom.window.document;
 
-    // Act
-    model.setContent('<html>content</html>', true);
+    model.setContent('<html/>');
 
-    // Assert
     expect(model.get('lessonUrl')).toBe(
-      originalUrl.replace(/\.lesson$/, '.lesson')
+      'http://example.com/SomeLesson.lesson'
     );
     expect(model.get('pageNum')).toBe(0);
+    expect(model.trigger).toHaveBeenCalledWith(
+      'content:loaded',
+      model,
+      true
+    );
+  });
 
-    // Cleanup
-    global.document = originalDocument;
+  test('setContent sets lessonUrl and pageNum when URL ends with page number', () => {
+    const dom = new JSDOM(
+      `<!DOCTYPE html><p>Hello</p>`,
+      {
+        url: 'http://example.com/SomeLesson.lesson/42',
+      }
+    );
+    global.document = dom.window.document;
+
+    model.setContent('<html/>');
+
+    expect(model.get('lessonUrl')).toBe(
+      'http://example.com/SomeLesson.lesson'
+    );
+    expect(model.get('pageNum')).toBe('42');
+  });
+
+  test('setContent uses efficient regex and does not over-consume URL suffix', () => {
+    const longSuffix =
+      '/very/long/path/with/many/segments/that/previously/could/be/overmatched';
+    const dom = new JSDOM(
+      `<!DOCTYPE html><p>Hello</p>`,
+      {
+        url: 'http://example.com/SomeLesson.lesson' + longSuffix,
+      }
+    );
+    global.document = dom.window.document;
+
+    model.setContent('<html/>');
+
+    // The fixed regex should normalize to ".lesson" and not keep the long suffix.
+    expect(model.get('lessonUrl')).toBe(
+      'http://example.com/SomeLesson.lesson'
+    );
   });
 });

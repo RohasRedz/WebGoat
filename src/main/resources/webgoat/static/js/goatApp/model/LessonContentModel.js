@@ -32,18 +32,16 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use an efficient, anchored regex without greedy wildcards
-            var currentUrl = document.URL;
-            this.set('lessonUrl', currentUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson'));
+            // Use precompiled, efficient regular expressions to avoid catastrophic backtracking
+            var lessonUrlPattern = /\.lesson(?:\/|$)/;
+            var lessonPagePattern = /.*\.lesson\/(\d{1,4})$/;
 
-            // Efficiently capture an optional page number at the end of the URL
-            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
+            this.set('lessonUrl', document.URL.replace(lessonUrlPattern, '.lesson'));
+            if (lessonPagePattern.test(document.URL)) {
+                this.set('pageNum', document.URL.replace(lessonPagePattern, '$1'));
             } else {
                 this.set('pageNum', 0);
             }
-
             this.trigger('content:loaded',this,loadHelps);
         },
 

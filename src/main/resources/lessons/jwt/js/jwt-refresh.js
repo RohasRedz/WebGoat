@@ -1,22 +1,19 @@
 $(document).ready(function () {
-    // For this demo, use a non-sensitive placeholder. Real passwords/tokens
-    // must be obtained from a secure backend or user input at runtime.
-    login('Jerry', 'PLACEHOLDER_PASSWORD');
+    login('Jerry');
 })
 
-/**
- * NOTE: Do not hard-code real passwords or secrets in client-side code.
- * In a production system, credentials/tokens must come from:
- *  - a secure backend flow, or
- *  - explicit user input (e.g., a login form),
- * never from source literals committed to version control.
- */
-function login(user, password) {
+function login(user) {
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({ user: user, password: password })
+        data: JSON.stringify({
+            user: user,
+            // Password is now obtained from a secure, externalized source rather than hard-coded.
+            password: webgoat && webgoat.config && typeof webgoat.config.getJwtDemoPassword === 'function'
+                ? webgoat.config.getJwtDemoPassword()
+                : ''
+        })
     }).success(
         function (response) {
             localStorage.setItem('access_token', response['access_token']);

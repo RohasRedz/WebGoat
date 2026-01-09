@@ -1,77 +1,110 @@
-// Resolved test file path (per instructions):
-// src/test/resources/lessons/jwt/js/jwt-refresh.test.js
+// Test file path derived from:
+// src/main/resources/lessons/jwt/js/jwt-refresh.js
+// -> src/test/resources/lessons/jwt/js/jwt-refresh.test.js
 
 /**
- * Delta tests for jwt-refresh.js focusing on the removal of a hard-coded password:
- * - Verifies that login(user, password) sends the provided password value in the
- *   AJAX payload, not a compiled-in literal.
+ * Delta tests for jwt-refresh.js to verify:
+ * - login() no longer uses a hard-coded password literal.
+ * - Password is read dynamically from configuration when available.
  */
 
-const $ = require('jquery');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
 
-// Load the script so that it attaches login(...) to the global scope.
-beforeAll(() => {
-  const fs = require('fs');
-  const path = require('path');
-  const vm = require('vm');
-
-  const scriptPath = path.resolve(
+function loadJwtRefreshInSandbox(extraGlobals = {}) {
+  const filePath = path.join(
     __dirname,
-    '../../../../main/resources/lessons/jwt/js/jwt-refresh.js'
+    '../../../../../main/resources/lessons/jwt/js/jwt-refresh.js'
   );
-  const code = fs.readFileSync(scriptPath, 'utf8');
+  const code = fs.readFileSync(filePath, 'utf8');
 
   const sandbox = {
-    $, 
-    webgoat: { customjs: {} },
+    window: {},
+    document: {},
     localStorage: {
-      storage: {},
+      _store: {},
       setItem(key, value) {
-        this.storage[key] = value;
+        this._store[key] = value;
       },
       getItem(key) {
-        return this.storage[key];
+        return this._store[key];
       },
     },
-    document: {},
+    $: {
+      ajax: jest.fn().mockReturnValue({
+        success: function () {
+          return this;
+        },
+      }),
+    },
+    webgoat: {
+      customjs: {},
+      config: {
+        getJwtDemoPassword: jest.fn().mockReturnValue('dynamic-password'),
+      },
+    },
     console,
+    ...extraGlobals,
   };
 
-  vm.runInNewContext(code, sandbox, { filename: scriptPath });
-  global.login = sandbox.login;
-  global.webgoat = sandbox.webgoat;
-  global.localStorage = sandbox.localStorage;
-});
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox, { filename: filePath });
 
-describe('jwt-refresh login payload (delta tests)', () => {
-  test('login uses provided password argument in AJAX payload', () => {
-    // Arrange
-    const ajaxSpy = jest.spyOn($, 'ajax').mockImplementation((options) => {
-      // Immediately call success callback for test purposes
-      if (typeof options === 'object' && typeof options.success === 'function') {
-        options.success({ access_token: 'access', refresh_token: 'refresh' });
-      }
-      return { success: (cb) => cb({}) };
+  return sandbox;
+}
+
+describe('jwt-refresh login behavior (delta tests)', () => {
+  test('login uses dynamic password from configuration (no hard-coded secret)', () => {
+    const sandbox = loadJwtRefreshInSandbox();
+    const $ajaxMock = sandbox.$.ajax;
+
+    // Call login explicitly to avoid relying on document.ready timing.
+    sandbox.login('Jerry');
+
+    expect($ajaxMock).toHaveBeenCalledTimes(1);
+    const ajaxConfig = $ajaxMock.mock.calls[0][0];
+
+    expect(ajaxConfig.type).toBe('POST');
+    expect(ajaxConfig.url).toBe('JWT/refresh/login');
+
+    const payload = JSON.parse(ajaxConfig.data);
+    expect(payload.user).toBe('Jerry');
+    // Ensure the value used is the dynamic one from configuration
+    expect(payload.password).toBe('dynamic-password');
+
+    // Ensure we did in fact call into the configuration hook
+    expect(sandbox.webgoat.config.getJwtDemoPassword).toHaveBeenCalled();
+  });
+
+  test('login does not contain the original hard-coded password literal in source', () => {
+    const filePath = path.join(
+      __dirname,
+      '../../../../../main/resources/lessons/jwt/js/jwt-refresh.js'
+    );
+    const code = fs.readFileSync(filePath, 'utf8');
+
+    // The old hard-coded value must not appear in the updated source
+    expect(code).not.toContain('bm5nhSkxCXZkKRy4');
+  });
+
+  test('login falls back to empty password if configuration function is missing', () => {
+    const sandbox = loadJwtRefreshInSandbox({
+      webgoat: {
+        customjs: {},
+        config: {},
+      },
     });
+    const $ajaxMock = sandbox.$.ajax;
 
-    const user = 'Jerry';
-    const suppliedPassword = 'test-password-123';
+    sandbox.login('Jerry');
 
-    // Act
-    global.login(user, suppliedPassword);
+    const ajaxConfig = $ajaxMock.mock.calls[0][0];
+    const payload = JSON.parse(ajaxConfig.data);
 
-    // Assert
-    expect(ajaxSpy).toHaveBeenCalledTimes(1);
-    const callArg = ajaxSpy.mock.calls[0][0];
-    const payload = JSON.parse(callArg.data);
-
-    expect(payload.user).toBe(user);
-    expect(payload.password).toBe(suppliedPassword);
-
-    // The fixed implementation must not revert to the old hard-coded value.
-    expect(payload.password).not.toBe('bm5nhSkxCXZkKRy4');
-
-    // Cleanup
-    ajaxSpy.mockRestore();
+    expect(payload.user).toBe('Jerry');
+    // Without getJwtDemoPassword(), the fallback should be an empty string,
+    // not a new hard-coded secret.
+    expect(payload.password).toBe('');
   });
 });
