@@ -1,71 +1,51 @@
-// Assumed logical Jest test location for WebGoat JS resources:
-// src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+// Assuming Jest test environment and AMD-compatible loading are configured in the project.
+// Test file path (derived from source): src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 
-const $ = require('jquery');
-const _ = require('underscore');
-const Backbone = require('backbone');
+define([
+  'jquery',
+  'underscore',
+  'backbone',
+  'goatApp/model/LessonContentModel'
+], function ($, _, Backbone, LessonContentModel) {
+  describe('LessonContentModel URL normalization (delta tests)', function () {
+    let model;
+    const originalUrl = global.document ? document.URL : 'http://example.com';
 
-// Minimal HTMLContentModel stub to satisfy the AMD dependency used in LessonContentModel.js
-class HTMLContentModel extends Backbone.Model {}
-
-// Load the module under test using a simple AMD-like shim.
-// In the real project, RequireJS or a similar loader would be used.
-describe('LessonContentModel - delta tests for URL regex handling', () => {
-    let LessonContentModel;
-
-    beforeAll(() => {
-        // Simulate the AMD define used by LessonContentModel.js
-        global.define = function (deps, factory) {
-            LessonContentModel = factory($, _, Backbone, HTMLContentModel);
-        };
-        // Require the updated LessonContentModel implementation
-        // NOTE: path mirrors resolved main path with /main/ -> /test/ replacement convention.
-        require('../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
-        delete global.define;
+    beforeEach(function () {
+      // Minimal document mock to control URL behavior
+      global.document = {
+        URL: 'http://webgoat.local/SomeLesson.lesson'
+      };
+      model = new LessonContentModel();
     });
 
-    test('setContent should derive lessonUrl by stripping anything after .lesson', () => {
-        // Arrange
-        const model = new LessonContentModel();
-        const originalUrl = 'http://localhost/WebGoat/lesson/SqlInjectionAdvanced.lesson/3';
-        delete global.document;
-        global.document = { URL: originalUrl };
-
-        // Act
-        model.setContent('<html>content</html>', false);
-
-        // Assert
-        const lessonUrl = model.get('lessonUrl');
-        expect(lessonUrl).toBe('http://localhost/WebGoat/lesson/SqlInjectionAdvanced.lesson');
+    afterEach(function () {
+      // Restore default document if needed
+      global.document = { URL: originalUrl };
     });
 
-    test('setContent should correctly extract numeric pageNum when URL ends with .lesson/<digits>', () => {
-        // Arrange
-        const model = new LessonContentModel();
-        const originalUrl = 'http://localhost/WebGoat/lesson/SqlInjectionAdvanced.lesson/42';
-        delete global.document;
-        global.document = { URL: originalUrl };
+    it('normalizes URLs ending with .lesson to .lesson without trailing parts', function () {
+      document.URL = 'http://webgoat.local/SomeLesson.lesson';
+      model.setContent('<html></html>');
 
-        // Act
-        model.setContent('<html>content</html>');
-
-        // Assert
-        const pageNum = model.get('pageNum');
-        expect(pageNum).toBe('42');
+      expect(model.get('lessonUrl')).toBe('http://webgoat.local/SomeLesson.lesson');
+      expect(model.get('pageNum')).toBe(0);
     });
 
-    test('setContent should set pageNum to 0 when URL does not match expected pattern', () => {
-        // Arrange
-        const model = new LessonContentModel();
-        const originalUrl = 'http://localhost/WebGoat/lesson/SqlInjectionAdvanced.lesson?page=5';
-        delete global.document;
-        global.document = { URL: originalUrl };
+    it('normalizes URLs ending with .lesson/<digits> to base .lesson and extracts pageNum', function () {
+      document.URL = 'http://webgoat.local/SomeLesson.lesson/12';
+      model.setContent('<html></html>');
 
-        // Act
-        model.setContent('<html>content</html>');
-
-        // Assert
-        const pageNum = model.get('pageNum');
-        expect(pageNum).toBe(0);
+      expect(model.get('lessonUrl')).toBe('http://webgoat.local/SomeLesson.lesson');
+      expect(model.get('pageNum')).toBe('12');
     });
+
+    it('sets pageNum to 0 when URL does not end with .lesson/<digits>', function () {
+      document.URL = 'http://webgoat.local/SomeLesson.lesson/foo';
+      model.setContent('<html></html>');
+
+      expect(model.get('lessonUrl')).toBe('http://webgoat.local/SomeLesson.lesson');
+      expect(model.get('pageNum')).toBe(0);
+    });
+  });
 });

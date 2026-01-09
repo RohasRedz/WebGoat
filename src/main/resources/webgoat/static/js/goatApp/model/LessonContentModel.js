@@ -31,17 +31,11 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-
-            // Use precompiled, linear-time regex patterns to avoid catastrophic backtracking
-            var lessonUrlRegex = \/\.lesson.*/;
-            var pageNumRegex = \/.*\.lesson\/(\d{1,4})$/;
-
-            this.set('lessonUrl', document.URL.replace(lessonUrlRegex, '.lesson'));
-
-            if (pageNumRegex.test(document.URL)) {
-                this.set('pageNum', document.URL.replace(pageNumRegex, '$1'));
+            this.set('lessonUrl',document.URL.replace(/\.lesson(?:\/\d+)?$/, '.lesson'));
+            if (/\.lesson\/(\d{1,4})$/.test(document.URL)) {
+                this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
             } else {
-                this.set('pageNum', 0);
+                this.set('pageNum',0);
             }
             this.trigger('content:loaded',this,loadHelps);
         },
