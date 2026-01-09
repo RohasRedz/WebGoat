@@ -1,0 +1,1 @@
+/* delta unit test verifying ObjectInputFilter allowlist behavior */
