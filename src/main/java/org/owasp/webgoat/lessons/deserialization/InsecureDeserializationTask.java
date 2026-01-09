@@ -42,11 +42,10 @@ public class InsecureDeserializationTask implements AssignmentEndpoint {
 
     try (ObjectInputStream ois =
         new ObjectInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(b64token)))) {
-      // Apply a serialization filter to restrict allowed classes during deserialization
-      ois.setObjectInputFilter(ObjectInputFilter.Config.createFilter(
+      // Apply a deserialization filter to restrict allowed classes
+      ois.setObjectInputFilter(ObjectInputFilter.Config.createSerializationFilter(
           "org.dummy.insecure.framework.VulnerableTaskHolder;java.lang.String;!*"
       ));
-
       before = System.currentTimeMillis();
       Object o = ois.readObject();
       if (!(o instanceof VulnerableTaskHolder)) {

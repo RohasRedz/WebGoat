@@ -1,63 +1,65 @@
 package org.owasp.webgoat.lessons.deserialization;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectOutputStream;
 import java.util.Base64;
 import org.dummy.insecure.framework.VulnerableTaskHolder;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.owasp.webgoat.container.assignments.AttackResult;
 
 /**
- * Delta tests for InsecureDeserializationTask focusing on:
- * - Deserialization filter restricting allowed classes.
- * - Ensuring valid VulnerableTaskHolder payloads are still accepted.
+ * Delta tests for InsecureDeserializationTask focusing on the ObjectInputFilter:
+ * - verifies that allowed types (VulnerableTaskHolder) still work.
+ * - verifies that disallowed types (e.g., java.lang.Integer) are rejected by the filter.
  */
-class InsecureDeserializationTaskTest {
+public class InsecureDeserializationTaskTest {
 
-  private String toWebSafeBase64(byte[] bytes) {
-    String b64 = Base64.getEncoder().encodeToString(bytes);
-    return b64.replace('+', '-').replace('/', '_');
+  private String serializeToWebToken(Object obj) throws Exception {
+    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+    try (ObjectOutputStream oos = new ObjectOutputStream(bos)) {
+      oos.writeObject(obj);
+    }
+    String base64 = Base64.getEncoder().encodeToString(bos.toByteArray());
+    // Mirror the token transformation in the controller (replace '+' and '/')
+    return base64.replace('+', '-').replace('/', '_');
   }
 
   @Test
-  void completed_acceptsValidVulnerableTaskHolderPayload() throws Exception {
+  @DisplayName("completed should succeed when deserializing an allowed VulnerableTaskHolder object")
+  void completed_allowsVulnerableTaskHolder() throws Exception {
     // Arrange
     InsecureDeserializationTask task = new InsecureDeserializationTask();
-    VulnerableTaskHolder holder = new VulnerableTaskHolder();
-
-    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-    try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
-      oos.writeObject(holder);
-    }
-    String token = toWebSafeBase64(baos.toByteArray());
+    VulnerableTaskHolder holder = new VulnerableTaskHolder("test");
+    String token = serializeToWebToken(holder);
 
     // Act
     AttackResult result = task.completed(token);
 
-    // Assert
-    assertThat(result.getLessonCompleted()).isNotNull();
+    // Assert: the exercise logic still works for the allowed type;
+    // success indicates that the filter did not block VulnerableTaskHolder.
+    assertTrue(result.getLessonCompleted(), "Deserialization of allowed type should succeed");
   }
 
   @Test
-  void completed_rejectsDisallowedClassThroughFilter() throws Exception {
+  @DisplayName("completed should fail when deserializing a disallowed type due to ObjectInputFilter")
+  void completed_rejectsDisallowedType() throws Exception {
     // Arrange
     InsecureDeserializationTask task = new InsecureDeserializationTask();
-    String maliciousObject = "malicious-string";
-
-    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-    try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
-      oos.writeObject(maliciousObject);
-    }
-    String token = toWebSafeBase64(baos.toByteArray());
+    Integer maliciousObject = 42; // not in the allowlist
+    String token = serializeToWebToken(maliciousObject);
 
     // Act
     AttackResult result = task.completed(token);
 
-    // Assert
-    // Expect that the filter or subsequent type checks cause failure, not success.
-    assertThat(result.getLessonCompleted()).isFalse();
+    // Assert: the ObjectInputFilter should prevent successful deserialization
+    // of a type that is not in the allowlist, leading to a failed result.
+    assertFalse(
+        result.getLessonCompleted(),
+        "Deserialization of disallowed type should not complete the lesson"
+    );
   }
 }
