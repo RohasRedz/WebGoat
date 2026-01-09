@@ -32,19 +32,20 @@ define(['jquery',
             }
             this.set('content',content);
 
-            var currentUrl = String(document.URL || '');
-            // Safe, bounded regex for `.lesson` suffix replacement
-            this.set(
-                'lessonUrl',
-                currentUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson')
-            );
+            // Use a more constrained and efficient pattern to strip the .lesson suffix
+            // Instead of /.lesson.*/, explicitly match the .lesson suffix at the end if present
+            var currentUrl = document.URL;
+            this.set('lessonUrl', currentUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson'));
 
-            // Use a concise, non-backtracking pattern with explicit capture
-            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            // Use a stricter, linear-time friendly pattern to capture the page number
+            // - Anchor the pattern to the end of the string
+            // - Avoid a leading greedy .*
+            // - Restrict the path characters before ".lesson" to non-space characters
+            var pageMatch = currentUrl.match(/\/[^/\s]+\.lesson\/(\d{1,4})$/);
             if (pageMatch) {
                 this.set('pageNum', pageMatch[1]);
             } else {
-                this.set('pageNum', 0);
+                this.set('pageNum',0);
             }
 
             this.trigger('content:loaded',this,loadHelps);

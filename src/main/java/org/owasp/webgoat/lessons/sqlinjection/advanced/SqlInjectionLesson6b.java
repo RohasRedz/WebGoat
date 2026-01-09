@@ -54,11 +54,11 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception in getPassword method", sqle);
+        log.error("SQL Exception in getPassword: {}", sqle.getMessage());
         // do nothing
       }
     } catch (Exception e) {
-      log.error("General Exception in getPassword method", e);
+      log.error("General Exception in getPassword: {}", e.getMessage());
       // do nothing
     }
     return (password);
