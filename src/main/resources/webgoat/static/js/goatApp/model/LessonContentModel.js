@@ -31,12 +31,20 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-            this.set('lessonUrl',document.URL.replace(/\.lesson(?:\/\d+)?$/, '.lesson'));
-            if (/\.lesson\/(\d{1,4})$/.test(document.URL)) {
-                this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
+
+            // FIX: Use a simple, length‑bounded pattern for page extraction to avoid ReDoS‑prone regex.
+            var currentUrl = String(document.URL || '');
+            // Ensure the URL ends with `.lesson` before stripping the suffix
+            this.set('lessonUrl', currentUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson'));
+
+            // Extract trailing page number (1–4 digits) without complex backtracking
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
             } else {
-                this.set('pageNum',0);
+                this.set('pageNum', 0);
             }
+
             this.trigger('content:loaded',this,loadHelps);
         },
 

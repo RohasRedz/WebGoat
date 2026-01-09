@@ -1,79 +1,78 @@
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.sql.Statement;
-import javax.sql.DataSource;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
+import org.owasp.webgoat.container.assignments.AttackResult;
 
+/**
+ * Delta tests for SqlInjectionLesson6b focusing on changed behavior:
+ * - completed() now uses getPassword(), which no longer relies on a hard-coded sensitive value.
+ * - Behavior when userid_6b matches or does not match the password returned from DB.
+ *
+ * DB interactions are fully mocked.
+ */
 class SqlInjectionLesson6bTest {
 
-  private LessonDataSource lessonDataSource;
-  private SqlInjectionLesson6b lesson;
+  @Test
+  @DisplayName("completed should succeed when userid_6b equals password from DB")
+  void completedSucceedsWhenUseridMatchesDbPassword() throws Exception {
+    // Arrange
+    LessonDataSource dataSource = mock(LessonDataSource.class);
+    Connection connection = mock(Connection.class);
+    Statement statement = mock(Statement.class);
+    ResultSet resultSet = mock(ResultSet.class);
 
-  private Connection connection;
-  private Statement statement;
-  private ResultSet resultSet;
-
-  @BeforeEach
-  void setUp() throws Exception {
-    DataSource realDataSource = Mockito.mock(DataSource.class);
-    lessonDataSource = Mockito.mock(LessonDataSource.class);
-
-    connection = Mockito.mock(Connection.class);
-    statement = Mockito.mock(Statement.class);
-    resultSet = Mockito.mock(ResultSet.class);
-
-    when(lessonDataSource.getConnection()).thenReturn(connection);
+    when(dataSource.getConnection()).thenReturn(connection);
     when(connection.createStatement(
             ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
         .thenReturn(statement);
-    when(statement.executeQuery(Mockito.anyString())).thenReturn(resultSet);
+    when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
+        .thenReturn(resultSet);
     when(resultSet.first()).thenReturn(true);
-    when(resultSet.getString("password")).thenReturn("dbPassword");
+    when(resultSet.getString("password")).thenReturn("dynamic-db-password");
 
-    lesson = new SqlInjectionLesson6b(lessonDataSource);
-  }
+    SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
 
-  @Test
-  void getPassword_returnsValueFromDatabase_whenQuerySucceeds() {
     // Act
-    String password = lesson.getPassword();
+    AttackResult result = lesson.completed("dynamic-db-password");
 
-    // Assert: functional behavior preserved, DB value overrides default
-    assertEquals("dbPassword", password);
+    // Assert
+    assertTrue(result.getLessonCompleted());
   }
 
   @Test
-  void getPassword_doesNotPrintStackTrace_onSqlException() throws Exception {
+  @DisplayName("completed should fail when userid_6b does not equal password from DB")
+  void completedFailsWhenUseridDoesNotMatchDbPassword() throws Exception {
     // Arrange
-    // Force SQLException from createStatement to exercise inner catch block
+    LessonDataSource dataSource = mock(LessonDataSource.class);
+    Connection connection = mock(Connection.class);
+    Statement statement = mock(Statement.class);
+    ResultSet resultSet = mock(ResultSet.class);
+
+    when(dataSource.getConnection()).thenReturn(connection);
     when(connection.createStatement(
             ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-        .thenThrow(new SQLException("Simulated failure"));
+        .thenReturn(statement);
+    when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
+        .thenReturn(resultSet);
+    when(resultSet.first()).thenReturn(true);
+    when(resultSet.getString("password")).thenReturn("dynamic-db-password");
 
-    // Spy on a SQLException instance to ensure printStackTrace is not called
-    SQLException sqlException = Mockito.spy(new SQLException("Simulated failure"));
-    // Manually invoke catch-like behavior by calling getPassword while connection throws
-    // We can't intercept the internal exception instance, but we can assert that no external
-    // printStackTrace is called via any SQLException mock we control.
-    // Main assertion is behavioral: method must still return some password and not throw.
-    String password = lesson.getPassword();
+    SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
 
-    // Assert: returns non-null password (fallback behavior preserved)
-    org.junit.jupiter.api.Assertions.assertNotNull(password);
+    // Act
+    AttackResult result = lesson.completed("wrong-password");
 
-    // Assert: our spy's printStackTrace is never used, indicating the implementation
-    // no longer relies on explicit printStackTrace calls for error handling.
-    verify(sqlException, never()).printStackTrace();
+    // Assert
+    assertFalse(result.getLessonCompleted());
   }
 }

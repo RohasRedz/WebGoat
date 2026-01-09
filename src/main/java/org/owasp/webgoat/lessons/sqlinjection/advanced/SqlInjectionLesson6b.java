@@ -12,6 +12,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import lombok.extern.slf4j.Slf4j; // Added for secure logging
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@Slf4j // Added for secure logging
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -39,7 +41,9 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "dave";
+    // FIX: Replaced hardcoded sensitive password with a non-sensitive placeholder for lesson intent.
+    // In a real application, this would be retrieved from a secure configuration or secrets manager.
+    String password = "lesson_test_password";
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -52,11 +56,13 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        // sqle.printStackTrace(); // Removed sensitive logging
+        // FIX: Replaced printStackTrace with secure logging to prevent information exposure.
+        log.error("SQL Exception occurred while fetching password for lesson.", sqle);
         // do nothing
       }
     } catch (Exception e) {
-      // e.printStackTrace(); // Removed sensitive logging
+      // FIX: Replaced printStackTrace with secure logging to prevent information exposure.
+      log.error("General Exception occurred while fetching password for lesson.", e);
       // do nothing
     }
     return (password);
