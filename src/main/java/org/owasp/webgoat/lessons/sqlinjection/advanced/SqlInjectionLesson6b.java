@@ -39,7 +39,7 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "dave"; // Default password if lookup fails or is not found
+    String password = "dave";
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -52,14 +52,14 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        // Log the exception securely without exposing stack trace or sensitive data
-        // For a lesson, we might just return the default password
-        // In a real application, proper logging (e.g., using SLF4J) would be used
+        // Log the exception details securely without exposing stack trace
         // log.error("Database error during password retrieval: {}", sqle.getMessage());
-      } // No need for a general Exception catch here, SQLException is sufficient for DB issues
-    } catch (Exception e) {
-      // Catching general Exception for connection issues, but avoid printStackTrace
-      // log.error("Error getting database connection: {}", e.getMessage());
+        // do nothing
+      } catch (Exception e) {
+        // Log the exception details securely without exposing stack trace
+        // log.error("Unexpected error during password retrieval: {}", e.getMessage());
+        // do nothing
+      }
     }
     return (password);
   }

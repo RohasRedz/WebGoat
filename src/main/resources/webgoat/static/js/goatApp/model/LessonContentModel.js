@@ -19,7 +19,7 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -31,18 +31,16 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
+            this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
 
-            // Use a safer, precompiled regex to avoid potential catastrophic backtracking
-            var lessonUrl = document.URL.replace(/\.lesson(?:\/.+)?$/, '.lesson');
-            this.set('lessonUrl', lessonUrl);
-
-            var pageNum = 0;
-            var pageMatch = lessonUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
-                pageNum = parseInt(pageMatch[1], 10);
+            // Use a precompiled, bounded regular expression to avoid inefficient backtracking (ReDoS)
+            var lessonPagePattern = /^.*\.lesson\/(\d{1,4})$/;
+            var match = lessonPagePattern.exec(document.URL);
+            if (match) {
+                this.set('pageNum', match[1]);
+            } else {
+                this.set('pageNum',0);
             }
-            this.set('pageNum', pageNum);
-
             this.trigger('content:loaded',this,loadHelps);
         },
 
