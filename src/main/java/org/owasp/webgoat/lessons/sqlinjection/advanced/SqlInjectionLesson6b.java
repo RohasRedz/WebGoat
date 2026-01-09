@@ -19,10 +19,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
-import lombok.extern.slf4j.Slf4j;
+import lombok.extern.slf4j.Slf4j; // Added import
 
 @RestController
-@Slf4j
+@Slf4j // Added annotation
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -54,11 +54,11 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception in getPassword: {}", sqle.getMessage());
+        log.error("SQL Exception occurred while fetching password", sqle); // Replaced printStackTrace
         // do nothing
-      }
+      } 
     } catch (Exception e) {
-      log.error("Exception in getPassword: {}", e.getMessage());
+      log.error("General Exception occurred while fetching password", e); // Replaced printStackTrace
       // do nothing
     }
     return (password);

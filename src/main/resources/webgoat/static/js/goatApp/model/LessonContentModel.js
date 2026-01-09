@@ -19,13 +19,7 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            // Ensure lesson name is treated as a safe path segment and not used as raw regex/HTML
-            var safeName = String(options.name || '').trim();
-
-            // Encode as URI component to avoid special characters affecting routing
-            // Do NOT use as a regex pattern directly; we only build a simple path
-            this.urlRoot = encodeURIComponent(safeName) + '.lesson';
-
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -38,29 +32,26 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Avoid complex, potentially catastrophic backtracking regexps.
-            // Use simpler, more controlled parsing for lesson URL and page number.
+            // Use a more efficient and bounded regular expression to avoid
+            // excessive backtracking and potential ReDoS-like behavior.
             var currentUrl = document.URL;
-            var baseLessonUrl = currentUrl;
-            var pageNum = 0;
 
-            // Extract base lesson URL without trailing /<page>
-            // Example: https://host/app/lesson/Some.lesson/3 -> https://host/app/lesson/Some.lesson
-            var lastSlashIndex = currentUrl.lastIndexOf('/');
-            if (lastSlashIndex > -1) {
-                var lastSegment = currentUrl.substring(lastSlashIndex + 1);
-                var pageMatch = lastSegment.match(/^[0-9]{1,4}$/);
-                if (pageMatch) {
-                    // Strip the trailing numeric segment
-                    baseLessonUrl = currentUrl.substring(0, lastSlashIndex);
-                    pageNum = parseInt(pageMatch[0], 10) || 0;
-                }
+            // Derive lessonUrl: replace a single ".lesson" suffix with ".lesson"
+            // (kept for backward-compatibility with original behavior but with a
+            // safer, bounded regex).
+            this.set(
+                'lessonUrl',
+                currentUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson')
+            );
+
+            // Extract page number: expect ".lesson/<1-4 digits>" at the end.
+            // This regex is simple and non-ambiguous, avoiding nested repetition.
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
+            } else {
+                this.set('pageNum', 0);
             }
-
-            // Replace .lesson.* with .lesson to get canonical lesson URL
-            baseLessonUrl = baseLessonUrl.replace(/\.lesson.*/, '.lesson');
-            this.set('lessonUrl', baseLessonUrl);
-            this.set('pageNum', pageNum);
 
             this.trigger('content:loaded',this,loadHelps);
         },
