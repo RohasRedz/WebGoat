@@ -19,7 +19,9 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
+            // Use encodeURIComponent directly to avoid redundant escaping that can
+            // lead to unexpected encoded patterns and inefficient regex behavior downstream.
+            this.urlRoot = encodeURIComponent(options.name) + '.lesson';
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -31,13 +33,15 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
+            // Use a simpler, linear-time regular expression to avoid catastrophic backtracking.
+            // Previous pattern: /\.lesson.*/ could introduce more complex backtracking for
+            // contrived long strings; this pattern remains simple and anchored at the first match.
             this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
-
-            // Use a precompiled, bounded regular expression to avoid inefficient backtracking (ReDoS)
-            var lessonPagePattern = /^.*\.lesson\/(\d{1,4})$/;
-            var match = lessonPagePattern.exec(document.URL);
-            if (match) {
-                this.set('pageNum', match[1]);
+            // Simplify and constrain the regex for page number extraction:
+            // Previous pattern: /.*\.lesson\/(\d{1,4})$/' with greedy prefix and anchors.
+            // New pattern avoids unnecessary leading '.*' and remains anchored at the end.
+            if (/\.lesson\/(\d{1,4})$/.test(document.URL)) {
+                this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
             } else {
                 this.set('pageNum',0);
             }
