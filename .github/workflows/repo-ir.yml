@@ -1,0 +1,45 @@
+name: Build Repo IR (feature/actions)
+ 
+on:
+  push:
+    branches:
+      - feature/actions
+  workflow_dispatch:
+ 
+permissions:
+  contents: read
+  actions: read
+ 
+concurrency:
+  group: repo-ir-feature-actions
+  cancel-in-progress: true
+ 
+jobs:
+  build-repo-ir:
+    runs-on: ubuntu-latest
+ 
+    steps:
+      - name: Checkout feature/actions
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+ 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+ 
+      - name: Install dependencies
+        run: |
+          pip install -r scripts/requirements.txt
+ 
+      - name: Build Repo IR
+        run: |
+          python scripts/build_repo_ir.py --out repo_ir.json
+ 
+      - name: Upload Repo IR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-ir-${{ github.sha }}
+          path: repo_ir.json
+          retention-days: 30
