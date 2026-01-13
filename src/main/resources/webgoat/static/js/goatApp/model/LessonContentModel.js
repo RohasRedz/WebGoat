@@ -31,9 +31,16 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-            this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
-            if (/.*\.lesson\/(\d{1,4})$/.test(document.URL)) {
-                this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
+
+            const currentUrl = document.URL;
+
+            // Use a simpler, non-backtracking-prone pattern for the lesson URL
+            this.set('lessonUrl', currentUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson'));
+
+            // Use a safer, linear-time pattern for page number extraction
+            const pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum',pageMatch[1]);
             } else {
                 this.set('pageNum',0);
             }
