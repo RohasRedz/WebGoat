@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
  
-from tree_sitter_languages import get_parser
+from tree_sitter_languages import get_parser, get_language
  
  
 # -----------------------------
@@ -23,10 +23,9 @@ SUPPORTED_EXTENSIONS = {
     ".tsx": "javascript",
 }
  
-# Explicit exclusions (infra + tooling)
 EXCLUDED_DIRS = {
     ".git",
-    "scripts",        # IMPORTANT: exclude repo-IR infra
+    "scripts",        # exclude infra
     "node_modules",
     "build",
     "dist",
@@ -41,50 +40,24 @@ EXCLUDED_DIRS = {
 # -----------------------------
  
 JAVA_QUERY = r"""
-(package_declaration (scoped_identifier) @package)
-(import_declaration (scoped_identifier) @import)
- 
 (class_declaration name: (identifier) @class_name) @class_decl
- 
-(method_declaration
-  name: (identifier) @method_name
-  parameters: (formal_parameters) @method_params
-) @method_decl
- 
-(constructor_declaration
-  name: (identifier) @ctor_name
-  parameters: (formal_parameters) @ctor_params
-) @ctor_decl
- 
+(method_declaration name: (identifier) @method_name) @method_decl
+(constructor_declaration name: (identifier) @ctor_name) @ctor_decl
 (method_invocation name: (identifier) @call_name) @call
 (object_creation_expression type: (type_identifier) @new_type) @newexpr
-(type_identifier) @type_use
 """
  
 PY_QUERY = r"""
-(import_statement name: (dotted_name) @import)
-(import_from_statement module_name: (dotted_name) @from_module)
-(import_from_statement name: (dotted_name) @from_name)
- 
 (class_definition name: (identifier) @class_name) @class_decl
-(function_definition
-  name: (identifier) @func_name
-  parameters: (parameters) @func_params
-) @func_decl
- 
-(call function: (identifier) @call_name) @call_simple
-(call function: (attribute attribute: (identifier) @call_attr)) @call_attr
+(function_definition name: (identifier) @func_name) @func_decl
+(call function: (identifier) @call_name) @call
 """
  
 JS_QUERY = r"""
-(import_statement source: (string) @import_src)
- 
 (class_declaration name: (identifier) @class_name) @class_decl
 (function_declaration name: (identifier) @func_name) @func_decl
 (method_definition name: (property_identifier) @method_name) @method_decl
- 
-(call_expression function: (identifier) @call_name) @call_simple
-(call_expression function: (member_expression property: (property_identifier) @call_prop)) @call_member
+(call_expression function: (identifier) @call_name) @call
 (new_expression constructor: (identifier) @new_ctor) @newexpr
 """
  
@@ -124,16 +97,16 @@ def should_exclude_dir(path: str) -> bool:
     return any(p in EXCLUDED_DIRS for p in parts)
  
 def iter_source_files(root=".") -> List[str]:
-    files = []
+    out = []
     for dirpath, dirnames, filenames in os.walk(root):
         if should_exclude_dir(dirpath):
             dirnames[:] = []
             continue
         for f in filenames:
-            full = os.path.join(dirpath, f)
-            if detect_language(full):
-                files.append(full)
-    return files
+            p = os.path.join(dirpath, f)
+            if detect_language(p):
+                out.append(p)
+    return out
  
 # -----------------------------
 # Data models
@@ -144,11 +117,8 @@ class Symbol:
     id: str
     kind: str
     name: str
-    qname: str
     file: str
     range: List[int]
-    container: Optional[str]
-    arity: Optional[int]
  
 @dataclass
 class Ref:
@@ -157,7 +127,6 @@ class Ref:
     name: str
     file: str
     range: List[int]
-    in_symbol: Optional[str]
     candidates: List[str]
  
 # -----------------------------
@@ -166,14 +135,12 @@ class Ref:
  
 def extract_file(path: str, lang: str, src: bytes):
     parser = get_parser(lang)
-    assert parser.language is not None, "Tree-sitter language not initialized"
+    language = get_language(lang)
  
     tree = parser.parse(src)
     root = tree.root_node
  
-    # ✅ FIX: queries must be created from Language, not Node
-    language_obj = parser.language
-    query = language_obj.query(
+    query = language.query(
         JAVA_QUERY if lang == "java"
         else PY_QUERY if lang == "python"
         else JS_QUERY
@@ -183,72 +150,32 @@ def extract_file(path: str, lang: str, src: bytes):
  
     symbols: List[Symbol] = []
     refs: List[Ref] = []
-    sym_spans: List[Tuple[List[int], str]] = []
- 
-    def enclosing_symbol(rng):
-        for srng, sid in sym_spans:
-            if srng[0] <= rng[0] and srng[2] >= rng[2]:
-                return sid
-        return None
- 
-    # ---- Symbols ----
-    for node, cap in captures:
-        if cap in ("class_decl", "method_decl", "func_decl", "ctor_decl"):
-            name = None
-            params = None
- 
-            for c in node.children:
-                if c.type in ("identifier", "property_identifier"):
-                    name = node_text(src, c)
-                if c.type in ("formal_parameters", "parameters"):
-                    params = node_text(src, c)
- 
-            kind = (
-                "class" if cap == "class_decl"
-                else "constructor" if cap == "ctor_decl"
-                else "method" if cap == "method_decl"
-                else "function"
-            )
- 
-            arity = params.count(",") + 1 if params and params != "()" else 0
-            rng = to_range(node)
-            qname = f"{path}:{name}"
- 
-            sid = stable_id("s", path, kind, name or "", str(rng))
-            sym = Symbol(
-                sid, kind, name or "<anon>", qname, path, rng, None, arity
-            )
- 
-            symbols.append(sym)
-            sym_spans.append((rng, sid))
  
     name_index: Dict[str, List[str]] = {}
-    for s in symbols:
-        name_index.setdefault(s.name, []).append(s.id)
  
-    # ---- References ----
     for node, cap in captures:
-        if cap.startswith("call") or cap in ("newexpr", "type_use"):
-            name = None
-            for c in node.children:
-                if c.type in ("identifier", "property_identifier", "type_identifier"):
-                    name = node_text(src, c)
-                    break
-            if not name:
+        if cap.endswith("_decl"):
+            name_node = node.child_by_field_name("name")
+            if not name_node:
                 continue
- 
+            name = node_text(src, name_node)
             rng = to_range(node)
+ 
+            sid = stable_id("s", path, name, str(rng))
+            symbols.append(Symbol(sid, cap.replace("_decl", ""), name, path, rng))
+            name_index.setdefault(name, []).append(sid)
+ 
+    for node, cap in captures:
+        if cap == "call" or cap == "newexpr":
+            name_node = node.child_by_field_name("name")
+            if not name_node:
+                continue
+            name = node_text(src, name_node)
+            rng = to_range(node)
+ 
             rid = stable_id("r", path, name, str(rng))
             refs.append(
-                Ref(
-                    rid,
-                    "call" if cap.startswith("call") else "type",
-                    name,
-                    path,
-                    rng,
-                    enclosing_symbol(rng),
-                    name_index.get(name, []),
-                )
+                Ref(rid, "call", name, path, rng, name_index.get(name, []))
             )
  
     return {
@@ -267,12 +194,17 @@ def main():
     ap.add_argument("--out", default="repo_ir.json")
     args = ap.parse_args()
  
-    commit = git(["rev-parse", "HEAD"])
-    repo = os.path.basename(os.getcwd())
- 
-    files_ir = {}
-    global_symbols = {}
-    symbols_by_name = {}
+    repo_ir = {
+        "version": "0.3",
+        "repo": {
+            "name": os.path.basename(os.getcwd()),
+            "commit": git(["rev-parse", "HEAD"]),
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+        },
+        "files": {},
+        "symbols": {},
+        "indexes": {"symbols_by_name": {}},
+    }
  
     for path in iter_source_files("."):
         lang = detect_language(path)
@@ -281,31 +213,16 @@ def main():
  
         entry, symbols = extract_file(path, lang, src)
         norm = path.replace("\\", "/").lstrip("./")
-        entry["path"] = norm
-        files_ir[norm] = entry
+        repo_ir["files"][norm] = entry
  
         for s in symbols:
-            global_symbols[s.id] = s.__dict__
-            symbols_by_name.setdefault(s.name, []).append(s.id)
- 
-    repo_ir = {
-        "version": "0.2",
-        "repo": {
-            "name": repo,
-            "commit": commit,
-            "generated_at": datetime.utcnow().isoformat() + "Z",
-        },
-        "indexes": {
-            "symbols_by_name": symbols_by_name,
-        },
-        "symbols": global_symbols,
-        "files": files_ir,
-    }
+            repo_ir["symbols"][s.id] = s.__dict__
+            repo_ir["indexes"]["symbols_by_name"].setdefault(s.name, []).append(s.id)
  
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(repo_ir, f, indent=2)
  
-    print(f"[repo-ir] files={len(files_ir)} symbols={len(global_symbols)}")
+    print(f"[repo-ir] files={len(repo_ir['files'])} symbols={len(repo_ir['symbols'])}")
  
 if __name__ == "__main__":
     main()
