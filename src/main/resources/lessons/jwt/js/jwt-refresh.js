@@ -1,19 +1,26 @@
 $(document).ready(function () {
     login('Jerry');
-})
+});
 
 function login(user) {
+    // Obtain password from a non-hardcoded source (e.g., configuration API or injected config object).
+    // For this context, we assume `webgoat.customjs.getJwtPassword()` is provided by the environment
+    // or configuration and does NOT embed secrets directly in client code.
+    var password = (webgoat.customjs && typeof webgoat.customjs.getJwtPassword === 'function')
+        ? webgoat.customjs.getJwtPassword()
+        : undefined;
+
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({user: user, password: "bm5nhSkxCXZkKRy4"})
+        data: JSON.stringify({ user: user, password: password })
     }).success(
         function (response) {
             localStorage.setItem('access_token', response['access_token']);
             localStorage.setItem('refresh_token', response['refresh_token']);
         }
-    )
+    );
 }
 
 //Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
@@ -21,7 +28,7 @@ webgoat.customjs.addBearerToken = function () {
     var headers_to_set = {};
     headers_to_set['Authorization'] = 'Bearer ' + localStorage.getItem('access_token');
     return headers_to_set;
-}
+};
 
 //Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
 function newToken() {
@@ -32,11 +39,11 @@ function newToken() {
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        data: JSON.stringify({refreshToken: localStorage.getItem('refresh_token')})
+        data: JSON.stringify({ refreshToken: localStorage.getItem('refresh_token') })
     }).success(
         function () {
             localStorage.setItem('access_token', apiToken);
             localStorage.setItem('refresh_token', refreshToken);
         }
-    )
+    );
 }

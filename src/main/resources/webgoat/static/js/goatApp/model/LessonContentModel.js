@@ -32,8 +32,10 @@ define(['jquery',
             }
             this.set('content',content);
             this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
-            if (/.*\.lesson\/(\d{1,4})$/.test(document.URL)) {
-                this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
+            // Use a safer, less backtracking‑prone regex and avoid repeated evaluation
+            var pageNumMatch = document.URL.match(/\.lesson\/(\d{1,4})$/);
+            if (pageNumMatch) {
+                this.set('pageNum', pageNumMatch[1]);
             } else {
                 this.set('pageNum',0);
             }
