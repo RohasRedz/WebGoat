@@ -10,9 +10,9 @@ from typing import Dict, List, Optional, Tuple
 from tree_sitter_languages import get_parser
  
  
-# -----------------------------
+# ----------------------------
 # Configuration
-# -----------------------------
+# ----------------------------
  
 SUPPORTED_EXTENSIONS = {
     ".java": "java",
