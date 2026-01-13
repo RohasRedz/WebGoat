@@ -10,9 +10,9 @@ from typing import Dict, List, Optional, Tuple
 from tree_sitter_languages import get_parser
  
  
-# ----------------------------
+# -----------------------------
 # Configuration
-# ----------------------------
+# -----------------------------
  
 SUPPORTED_EXTENSIONS = {
     ".java": "java",
@@ -23,9 +23,10 @@ SUPPORTED_EXTENSIONS = {
     ".tsx": "javascript",
 }
  
+# Explicit exclusions (infra + tooling)
 EXCLUDED_DIRS = {
     ".git",
-    "scripts",        # <-- explicitly excluded
+    "scripts",        # IMPORTANT: exclude repo-IR infra
     "node_modules",
     "build",
     "dist",
@@ -36,7 +37,7 @@ EXCLUDED_DIRS = {
 }
  
 # -----------------------------
-# Tree-sitter queries (minimal)
+# Tree-sitter queries
 # -----------------------------
  
 JAVA_QUERY = r"""
@@ -165,10 +166,14 @@ class Ref:
  
 def extract_file(path: str, lang: str, src: bytes):
     parser = get_parser(lang)
+    assert parser.language is not None, "Tree-sitter language not initialized"
+ 
     tree = parser.parse(src)
     root = tree.root_node
  
-    query = root.language.query(
+    # ✅ FIX: queries must be created from Language, not Node
+    language_obj = parser.language
+    query = language_obj.query(
         JAVA_QUERY if lang == "java"
         else PY_QUERY if lang == "python"
         else JS_QUERY
@@ -186,6 +191,7 @@ def extract_file(path: str, lang: str, src: bytes):
                 return sid
         return None
  
+    # ---- Symbols ----
     for node, cap in captures:
         if cap in ("class_decl", "method_decl", "func_decl", "ctor_decl"):
             name = None
@@ -209,15 +215,18 @@ def extract_file(path: str, lang: str, src: bytes):
             qname = f"{path}:{name}"
  
             sid = stable_id("s", path, kind, name or "", str(rng))
-            sym = Symbol(sid, kind, name or "<anon>", qname, path, rng, None, arity)
+            sym = Symbol(
+                sid, kind, name or "<anon>", qname, path, rng, None, arity
+            )
  
             symbols.append(sym)
             sym_spans.append((rng, sid))
  
-    name_index = {}
+    name_index: Dict[str, List[str]] = {}
     for s in symbols:
         name_index.setdefault(s.name, []).append(s.id)
  
+    # ---- References ----
     for node, cap in captures:
         if cap.startswith("call") or cap in ("newexpr", "type_use"):
             name = None
