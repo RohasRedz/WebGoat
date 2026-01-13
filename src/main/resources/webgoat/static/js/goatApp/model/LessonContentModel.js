@@ -19,7 +19,10 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
+            // Use encodeURIComponent first, then escape the result to avoid
+            // double-encoding risks and excessive regex complexity.
+            var safeName = encodeURIComponent(options.name);
+            this.urlRoot = _.escape(safeName) + '.lesson';
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -31,16 +34,12 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-
-            const currentUrl = document.URL;
-
-            // Use a simpler, non-backtracking-prone pattern for the lesson URL
-            this.set('lessonUrl', currentUrl.replace(/\.lesson(?:\/.*)?$/, '.lesson'));
-
-            // Use a safer, linear-time pattern for page number extraction
-            const pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            this.set('lessonUrl',document.URL.replace(/\.lesson.*/,'.lesson'));
+            // Avoid catastrophic backtracking by simplifying the regex to a linear-time pattern
+            // and reusing it once instead of evaluating multiple complex patterns.
+            var pageMatch = document.URL.match(/\.lesson\/(\d{1,4})$/);
             if (pageMatch) {
-                this.set('pageNum',pageMatch[1]);
+                this.set('pageNum', pageMatch[1]);
             } else {
                 this.set('pageNum',0);
             }

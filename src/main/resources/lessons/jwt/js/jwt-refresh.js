@@ -3,12 +3,24 @@ $(document).ready(function () {
 });
 
 function login(user) {
-    // NOTE: Password must not be hard-coded in source.
-    // In a real deployment, this value should be provided from a secure source
-    // (e.g., environment variable, secrets manager) and never exposed to clients.
-    const password = window.webgoatConfig && window.webgoatConfig.jwtDemoPassword
-        ? window.webgoatConfig.jwtDemoPassword
-        : '';
+    // NOTE:
+    // The password value should NOT be hard-coded in source.
+    // This implementation expects a secure injection of the password via a global
+    // configuration object or environment mapping set up by the platform.
+    // If the secure configuration is missing, the call is safely aborted.
+    var password = (window.webgoatConfig &&
+        typeof window.webgoatConfig.getJwtRefreshPassword === 'function')
+        ? window.webgoatConfig.getJwtRefreshPassword()
+        : null;
+
+    if (!password) {
+        // Fail securely if no configured password is available.
+        // Do NOT log the actual password or sensitive values.
+        if (window.console && typeof window.console.error === 'function') {
+            console.error('JWT refresh login password is not configured securely.');
+        }
+        return;
+    }
 
     $.ajax({
         type: 'POST',
@@ -17,12 +29,13 @@ function login(user) {
         data: JSON.stringify({ user: user, password: password })
     }).success(
         function (response) {
-            // Only store tokens if they are present and non-empty
-            if (response && typeof response.access_token === 'string' && response.access_token.length > 0) {
-                localStorage.setItem('access_token', response['access_token']);
-            }
-            if (response && typeof response.refresh_token === 'string' && response.refresh_token.length > 0) {
-                localStorage.setItem('refresh_token', response['refresh_token']);
+            if (response && typeof response === 'object') {
+                if (typeof response['access_token'] === 'string') {
+                    localStorage.setItem('access_token', response['access_token']);
+                }
+                if (typeof response['refresh_token'] === 'string') {
+                    localStorage.setItem('refresh_token', response['refresh_token']);
+                }
             }
         }
     );
@@ -40,30 +53,32 @@ webgoat.customjs.addBearerToken = function () {
 
 //Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
 function newToken() {
-    // Use the stored refresh token safely without logging it anywhere
     var refreshToken = localStorage.getItem('refresh_token');
-    var accessToken = localStorage.getItem('access_token');
-
-    if (!refreshToken || !accessToken) {
+    if (!refreshToken) {
+        if (window.console && typeof window.console.warn === 'function') {
+            console.warn('No refresh token available for newToken request.');
+        }
         return;
     }
 
     $.ajax({
         headers: {
-            'Authorization': 'Bearer ' + accessToken
+            'Authorization': 'Bearer ' + localStorage.getItem('access_token')
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        contentType: 'application/json',
+        contentType: "application/json",
         data: JSON.stringify({ refreshToken: refreshToken })
     }).success(
         function (response) {
-            // Ensure new tokens are present before overwriting
-            if (response && typeof response.access_token === 'string' && response.access_token.length > 0) {
-                localStorage.setItem('access_token', response.access_token);
-            }
-            if (response && typeof response.refresh_token === 'string' && response.refresh_token.length > 0) {
-                localStorage.setItem('refresh_token', response.refresh_token);
+            // Expect the API to return new tokens; update only if present.
+            if (response && typeof response === 'object') {
+                if (typeof response.accessToken === 'string') {
+                    localStorage.setItem('access_token', response.accessToken);
+                }
+                if (typeof response.refreshToken === 'string') {
+                    localStorage.setItem('refresh_token', response.refreshToken);
+                }
             }
         }
     );
