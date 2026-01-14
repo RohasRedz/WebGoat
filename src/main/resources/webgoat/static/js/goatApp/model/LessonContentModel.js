@@ -32,23 +32,23 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use simpler, non-backtracking-prone patterns for URL normalization
-            var url = document.URL;
-            // Normalize lesson URL by stripping any suffix after ".lesson"
-            var lessonIndex = url.indexOf('.lesson');
-            if (lessonIndex !== -1) {
-                this.set('lessonUrl', url.substring(0, lessonIndex + '.lesson'.length));
-            } else {
-                this.set('lessonUrl', url);
+            // Use location.href instead of document.URL to avoid legacy/non‑standard behavior
+            var currentUrl = window.location && window.location.href ? window.location.href : String(document.URL || '');
+
+            // Pre-validate URL length to avoid excessive backtracking work
+            if (currentUrl.length > 2048) {
+                currentUrl = currentUrl.substring(0, 2048);
             }
 
-            // Extract page number using a bounded, safe regex
-            var pageMatch = url.match(/\.lesson\/([0-9]{1,4})$/);
+            this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
+
+            var pageMatch = currentUrl.match(/.*\.lesson\/(\d{1,4})$/);
             if (pageMatch) {
                 this.set('pageNum', pageMatch[1]);
             } else {
-                this.set('pageNum',0);
+                this.set('pageNum', 0);
             }
+
             this.trigger('content:loaded',this,loadHelps);
         },
 
