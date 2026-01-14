@@ -54,14 +54,12 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        // FIX: Replaced printStackTrace with secure logging to prevent information exposure
-        log.error("Database error during password retrieval: {}", sqle.getMessage());
-        // do nothing
-      } catch (Exception e) {
-        // FIX: Replaced printStackTrace with secure logging to prevent information exposure
-        log.error("Unexpected error during password retrieval: {}", e.getMessage());
+        log.error("SQL Exception in getPassword: {}", sqle.getMessage(), sqle);
         // do nothing
       }
+    } catch (Exception e) {
+      log.error("General Exception in getPassword: {}", e.getMessage(), e);
+      // do nothing
     }
     return (password);
   }

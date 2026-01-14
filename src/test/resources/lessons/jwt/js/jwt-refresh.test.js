@@ -1,33 +1,38 @@
 /**
- * Delta tests for jwt-refresh.js focusing on removal of the hard-coded password.
- * These tests verify that:
- *  - The login function no longer embeds a literal password in the request body.
- *  - The password is passed as a parameter and can come from configuration.
+ * Delta tests for jwt-refresh.js focusing only on the secret-handling fix:
+ * - Ensure login() sends a non-hard-coded password taken from DOM
+ * - Ensure no hard-coded secret value is present in the request payload
  */
 
-const $ = require('jquery');
-global.$ = $;
-global.jQuery = $;
+jest.mock('jquery', () => {
+  const ajaxMock = jest.fn(() => ({
+    success: function (cb) {
+      // Immediately call success callback with fake tokens
+      cb({ access_token: 'ACCESS', refresh_token: 'REFRESH' });
+      return this;
+    }
+  }));
+  const $ = function () {};
+  $.ajax = ajaxMock;
+  $.fn = {};
+  return $;
+});
 
-require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js'); // Adjust relative path based on actual project layout if needed.
+describe('jwt-refresh login behavior (delta tests)', () => {
+  let $;
+  let originalDocument;
 
-describe('jwt-refresh login (delta tests)', () => {
   beforeEach(() => {
-    // Reset jQuery AJAX mock
-    jest.spyOn($, 'ajax').mockImplementation(() => ({
-      success: function (cb) {
-        cb({ access_token: 'token', refresh_token: 'refresh' });
-        return this;
-      },
-    }));
+    jest.resetModules();
+    $ = require('jquery');
 
-    global.webgoat = {
-      config: {
-        demoUserPassword: 'DEMO_CONFIG_PASSWORD',
-      },
-      customjs: {},
+    // Mock global document with a configurable password field
+    originalDocument = global.document;
+    global.document = {
+      getElementById: jest.fn()
     };
 
+    // Mock localStorage
     global.localStorage = {
       data: {},
       setItem(key, value) {
@@ -35,39 +40,50 @@ describe('jwt-refresh login (delta tests)', () => {
       },
       getItem(key) {
         return this.data[key];
-      },
+      }
     };
+
+    // Load the module under test, which will attach login() to global scope
+    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
-    delete global.webgoat;
-    delete global.localStorage;
+    global.document = originalDocument;
+    jest.resetModules();
   });
 
-  test('login uses provided password parameter instead of hard-coded literal', () => {
-    const ajaxSpy = jest.spyOn($, 'ajax');
+  it('uses password from DOM instead of hard-coded literal', () => {
+    const passwordField = { value: 'dynamicSecret!' };
+    global.document.getElementById.mockReturnValue(passwordField);
 
-    // Trigger document.ready handler from jwt-refresh.js
-    $(document).ready();
+    // Call the global login function exposed by jwt-refresh.js
+    // eslint-disable-next-line no-undef
+    login('Jerry');
 
-    expect(ajaxSpy).toHaveBeenCalledTimes(1);
-    const callArgs = ajaxSpy.mock.calls[0][0];
+    expect(global.document.getElementById).toHaveBeenCalledWith('jwt-demo-password');
 
-    expect(callArgs.type).toBe('POST');
-    expect(callArgs.url).toBe('JWT/refresh/login');
+    // Verify that jQuery.ajax was called with a body containing the DOM-derived password
+    expect($.ajax).toHaveBeenCalledTimes(1);
+    const ajaxConfig = $.ajax.mock.calls[0][0];
 
-    const body = JSON.parse(callArgs.data);
-    expect(body.user).toBe('Jerry');
-    // Password should come from configuration, not from a fixed literal value
-    expect(body.password).toBe('DEMO_CONFIG_PASSWORD');
+    const payload = JSON.parse(ajaxConfig.data);
+    expect(payload.user).toBe('Jerry');
+    expect(payload.password).toBe('dynamicSecret!');
+    expect(payload.password).not.toBe('bm5nhSkxCXZkKRy4');
   });
 
-  test('addBearerToken still uses access_token from localStorage header', () => {
-    global.localStorage.setItem('access_token', 'ACCESS123');
+  it('does not include the removed hard-coded password literal in the request payload', () => {
+    const passwordField = { value: 'anotherPassword' };
+    global.document.getElementById.mockReturnValue(passwordField);
 
-    const headers = global.webgoat.customjs.addBearerToken();
+    // eslint-disable-next-line no-undef
+    login('Jerry');
 
-    expect(headers.Authorization).toBe('Bearer ACCESS123');
+    const ajaxConfig = $.ajax.mock.calls[0][0];
+    const payload = JSON.parse(ajaxConfig.data);
+
+    // Assert that the removed literal is nowhere in the serialized payload
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toContain('bm5nhSkxCXZkKRy4');
   });
 });

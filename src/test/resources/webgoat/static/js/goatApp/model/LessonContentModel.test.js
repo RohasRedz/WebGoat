@@ -1,21 +1,22 @@
-/* Delta tests for LessonContentModel focusing on the updated URL parsing logic
- * that replaces complex regex usage with the URL API and bounded parsing.
- */
-
 define([
   'jquery',
   'underscore',
   'backbone',
-  'goatApp/model/HTMLContentModel',
-  'webgoat/static/js/goatApp/model/LessonContentModel'
-], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
+  'goatApp/model/LessonContentModel'
+], function ($, _, Backbone, LessonContentModel) {
+  'use strict';
 
-  describe('LessonContentModel URL parsing (delta tests)', function () {
+  // Delta tests cover only the updated URL/regex handling behavior in setContent.
+
+  describe('LessonContentModel URL and page parsing (delta tests)', function () {
+    let model;
     let originalUrl;
 
     beforeEach(function () {
+      // Save and override global document.URL for each test
       originalUrl = global.document && global.document.URL;
-      global.document = { URL: 'http://localhost:8080/WebGoat/lesson/1234' };
+      global.document = global.document || {};
+      model = new LessonContentModel();
     });
 
     afterEach(function () {
@@ -24,36 +25,37 @@ define([
       }
     });
 
-    it('sets lessonUrl and pageNum correctly using URL-based parsing', function () {
-      var model = new LessonContentModel();
+    it('computes lessonUrl and pageNum correctly for a standard lesson page URL', function () {
+      global.document.URL = 'http://localhost/WebGoat.lesson/3';
 
-      // Spy on trigger to inspect arguments without requiring full Backbone infrastructure
-      spyOn(model, 'trigger');
+      model.setContent('<html>...</html>');
 
-      model.setContent('<html>content</html>', true);
-
-      var lessonUrl = model.get('lessonUrl');
-      var pageNum = model.get('pageNum');
-
-      expect(lessonUrl).toBe('http://localhost:8080/WebGoat/lesson');
-      expect(pageNum).toBe(1234);
-      expect(model.trigger).toHaveBeenCalledWith('content:loaded', model, true);
+      expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat.lesson');
+      expect(model.get('pageNum')).toBe('3');
     });
 
-    it('defaults pageNum to 0 when URL has no numeric suffix', function () {
-      global.document.URL = 'http://localhost:8080/WebGoat/lesson';
+    it('defaults pageNum to 0 when URL has no trailing page number', function () {
+      global.document.URL = 'http://localhost/WebGoat.lesson';
 
-      var model = new LessonContentModel();
-      spyOn(model, 'trigger');
+      model.setContent('<html>...</html>');
 
-      model.setContent('<html>content</html>', false);
+      expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat.lesson');
+      expect(model.get('pageNum')).toBe(0);
+    });
 
-      var lessonUrl = model.get('lessonUrl');
-      var pageNum = model.get('pageNum');
+    it('handles long but benign URLs efficiently without throwing', function () {
+      const longSegment = 'a'.repeat(5000);
+      global.document.URL = `http://example.com/WebGoat.lesson/${longSegment}`;
 
-      expect(lessonUrl).toBe('http://localhost:8080/WebGoat/lesson');
-      expect(pageNum).toBe(0);
-      expect(model.trigger).toHaveBeenCalledWith('content:loaded', model, false);
+      // The main assertion is that setContent() returns quickly and does not throw
+      expect(function () {
+        model.setContent('<html>...</html>');
+      }).not.toThrow();
+
+      // Because there is no numeric page at the end, pageNum should be 0
+      expect(model.get('pageNum')).toBe(0);
+      // lessonUrl should still end in '.lesson'
+      expect(model.get('lessonUrl')).toMatch(/\.lesson$/);
     });
   });
 });

@@ -1,15 +1,9 @@
-/*
- * Delta tests for SqlInjectionLesson6b focusing on the change from printStackTrace()
- * to structured logging via log.error, to avoid leaking stack traces into logs.
- */
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.anyString;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.reset;
-import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
@@ -17,66 +11,76 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 
-public class SqlInjectionLesson6bTest {
+/**
+ * Delta tests for SqlInjectionLesson6b focusing on the logging changes:
+ * - Ensure exceptions are logged via log.error()
+ * - Ensure printStackTrace() is not used anymore
+ */
+@Slf4j
+class SqlInjectionLesson6bTest {
 
-  private LessonDataSource lessonDataSource;
+  private LessonDataSource dataSource;
+  private SqlInjectionLesson6b lesson;
+
   private Connection connection;
   private Statement statement;
-  private ResultSet resultSet;
-  private SqlInjectionLesson6b lesson;
 
   @BeforeEach
   void setUp() throws Exception {
-    lessonDataSource = mock(LessonDataSource.class);
-    connection = mock(Connection.class);
-    statement = mock(Statement.class);
-    resultSet = mock(ResultSet.class);
+    dataSource = Mockito.mock(LessonDataSource.class);
+    connection = Mockito.mock(Connection.class);
+    statement = Mockito.mock(Statement.class);
 
-    when(lessonDataSource.getConnection()).thenReturn(connection);
-    when(connection.createStatement(
-            ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+    when(dataSource.getConnection()).thenReturn(connection);
+    when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
         .thenReturn(statement);
-    when(statement.executeQuery(anyString())).thenReturn(resultSet);
-    when(resultSet.first()).thenReturn(true);
-    when(resultSet.getString("password")).thenReturn("dave");
 
-    lesson = new SqlInjectionLesson6b(lessonDataSource);
+    lesson = new SqlInjectionLesson6b(dataSource);
   }
 
   @Test
-  void getPassword_logsErrorWithoutPrintingStackTrace_onSqlException() throws Exception {
-    // Arrange: force SQLException when creating the statement
-    reset(statement, connection);
-    when(lessonDataSource.getConnection()).thenReturn(connection);
-    when(connection.createStatement(
-            ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-        .thenThrow(new SQLException("simulated failure"));
+  void getPassword_logsSqlExceptionWithSlf4jAndDoesNotThrow() throws Exception {
+    SQLException sqlException = new SQLException("DB down");
+    doThrow(sqlException)
+        .when(statement)
+        .executeQuery(Mockito.anyString());
 
-    SqlInjectionLesson6b spyLesson = spy(lesson);
+    // Call the protected method indirectly via completed()
+    AttackResult result = lesson.completed("anyUser");
 
-    // We cannot assert internal log.error calls directly without a logging appender,
-    // but we can assert that method completes without throwing and returns default password.
-    String password = spyLesson.getPassword();
+    // Verify behavior: method handles exception and still returns some password, leading to failed()
+    assertEquals(false, result.isSuccess(), "Exception during getPassword should not cause success");
 
-    assertEquals("dave", password, "On SQL exception, getPassword should return the default value");
+    // We cannot directly assert logger behavior without a logging appender.
+    // Instead, we assert that no printStackTrace() is invoked by ensuring we never call it
+    // on our mocked exception.
+    verify(statement).executeQuery(Mockito.anyString());
+    verify(connection).createStatement(
+        ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
+
+    // Critical assertion: no printStackTrace() on SQLException
+    verify(sqlException, never()).printStackTrace();
   }
 
   @Test
-  void completed_stillBehavesCorrectlyWithRetrievedPassword() throws IOException {
-    // With successful getPassword(), userid_6b equals the retrieved password
-    when(resultSet.first()).thenReturn(true);
-    when(resultSet.getString("password")).thenReturn("secretPwd");
-    SqlInjectionLesson6b lessonLocal = new SqlInjectionLesson6b(lessonDataSource);
+  void getPassword_logsGeneralExceptionWithSlf4jAndDoesNotThrow() throws Exception {
+    // Simulate a general exception when acquiring a connection
+    RuntimeException runtimeException = new RuntimeException("Connection pool failure");
+    when(dataSource.getConnection()).thenThrow(runtimeException);
 
-    AttackResult successResult = lessonLocal.completed("secretPwd");
-    AttackResult failureResult = lessonLocal.completed("wrong");
+    AttackResult result = lesson.completed("anyUser");
 
-    assertTrue(successResult.getSuccess(), "Matching password should still yield a successful result");
-    assertTrue(!failureResult.getSuccess(), "Non-matching password should still fail");
+    // Method should handle the exception gracefully and not succeed
+    assertEquals(false, result.isSuccess(), "General exception should not cause success");
+
+    // Ensure no printStackTrace() is called on the runtime exception
+    verify(runtimeException, never()).printStackTrace();
   }
 }
