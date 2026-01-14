@@ -32,23 +32,32 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use location.href instead of document.URL to avoid legacy/non‑standard behavior
-            var currentUrl = window.location && window.location.href ? window.location.href : String(document.URL || '');
+            // Use URL API for robust parsing and avoid overly complex regular expressions
+            var currentUrl = new URL(document.URL, window.location.origin);
+            var pathname = currentUrl.pathname;
 
-            // Pre-validate URL length to avoid excessive backtracking work
-            if (currentUrl.length > 2048) {
-                currentUrl = currentUrl.substring(0, 2048);
+            // Derive lessonUrl by replacing the trailing ".lesson..." segment with ".lesson"
+            // without using a complex backtracking-prone regex
+            var lessonUrl = pathname;
+            var lessonIndex = lessonUrl.indexOf('.lesson');
+            if (lessonIndex !== -1) {
+                lessonUrl = lessonUrl.substring(0, lessonIndex + '.lesson'.length);
+            }
+            this.set('lessonUrl', lessonUrl);
+
+            // Safely extract page number: expect pattern ending with ".lesson/<digits>"
+            var pageNum = 0;
+            var pathSegments = pathname.split('/');
+            var lastSegment = pathSegments[pathSegments.length - 1];
+
+            if (pathname.indexOf('.lesson/') !== -1 && /^[0-9]{1,4}$/.test(lastSegment)) {
+                pageNum = parseInt(lastSegment, 10);
+                if (Number.isNaN(pageNum)) {
+                    pageNum = 0;
+                }
             }
 
-            this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
-
-            var pageMatch = currentUrl.match(/.*\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
-            } else {
-                this.set('pageNum', 0);
-            }
-
+            this.set('pageNum', pageNum);
             this.trigger('content:loaded',this,loadHelps);
         },
 
