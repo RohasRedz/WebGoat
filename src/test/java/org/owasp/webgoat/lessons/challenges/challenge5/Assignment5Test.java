@@ -1,94 +1,85 @@
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.when;
-import static org.owasp.webgoat.container.assignments.AttackResult.Status.SUCCESS;
-import static org.owasp.webgoat.container.assignments.AttackResult.Status.FAIL;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
+import org.springframework.util.StringUtils;
 
 /**
- * Delta tests for Assignment5 focusing on the secured, parameterized SQL query behavior.
- *
- * Test file path (derived by replacing /main/ with /test/):
- * src/test/java/org/owasp/webgoat/lessons/challenges/challenge5/Assignment5Test.java
+ * Delta tests for Assignment5, focused on the SQL injection fix:
+ * verifying that a PreparedStatement with parameter placeholders is used
+ * and that user input containing quotes is safely bound via setString.
  */
 public class Assignment5Test {
 
-  @Test
-  @DisplayName("login should use parameterized PreparedStatement and succeed for valid Larry credentials")
-  void login_usesParameterizedQuery_andAuthenticatesLarry() throws Exception {
-    // Arrange
-    LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
-    Flags flags = Mockito.mock(Flags.class);
-    Connection connection = Mockito.mock(Connection.class);
-    PreparedStatement preparedStatement = Mockito.mock(PreparedStatement.class);
-    ResultSet resultSet = Mockito.mock(ResultSet.class);
+  private LessonDataSource dataSource;
+  private Flags flags;
 
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(
-            connection.prepareStatement(
-                "select password from challenge_users where userid = ? and password = ?"))
-        .thenReturn(preparedStatement);
-    when(preparedStatement.executeQuery()).thenReturn(resultSet);
-    when(resultSet.next()).thenReturn(true);
-    when(flags.getFlag(5)).thenReturn("FLAG-5");
+  private Assignment5 assignment5;
 
-    Assignment5 assignment5 = new Assignment5(dataSource, flags);
-
-    // Act
-    AttackResult result = assignment5.login("Larry", "safePassword");
-
-    // Assert
-    Mockito.verify(connection)
-        .prepareStatement(
-            "select password from challenge_users where userid = ? and password = ?");
-    Mockito.verify(preparedStatement).setString(1, "Larry");
-    Mockito.verify(preparedStatement).setString(2, "safePassword");
-    Mockito.verify(preparedStatement).executeQuery();
-
-    assertEquals(SUCCESS, result.getStatus());
+  @BeforeEach
+  void setUp() {
+    dataSource = mock(LessonDataSource.class);
+    flags = mock(Flags.class);
+    assignment5 = new Assignment5(dataSource, flags);
   }
 
   @Test
-  @DisplayName("login should fail when password does not match while still using parameterized query")
-  void login_failsWithWrongPassword_usingParameterizedQuery() throws Exception {
+  void login_usesPreparedStatementWithBoundParameters_andHandlesQuotedInputSafely() throws Exception {
     // Arrange
-    LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
-    Flags flags = Mockito.mock(Flags.class);
-    Connection connection = Mockito.mock(Connection.class);
-    PreparedStatement preparedStatement = Mockito.mock(PreparedStatement.class);
-    ResultSet resultSet = Mockito.mock(ResultSet.class);
+    String username = "Larry";
+    String password = "p' OR '1'='1";
 
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(
-            connection.prepareStatement(
-                "select password from challenge_users where userid = ? and password = ?"))
+    Connection connection = mock(Connection.class);
+    PreparedStatement preparedStatement = mock(PreparedStatement.class);
+    ResultSet resultSet = mock(ResultSet.class);
+
+    Mockito.when(dataSource.getConnection()).thenReturn(connection);
+    Mockito
+        .when(connection.prepareStatement(
+            eq("select password from challenge_users where userid = ? and password = ?")))
         .thenReturn(preparedStatement);
-    when(preparedStatement.executeQuery()).thenReturn(resultSet);
-    when(resultSet.next()).thenReturn(false);
-
-    Assignment5 assignment5 = new Assignment5(dataSource, flags);
+    Mockito.when(preparedStatement.executeQuery()).thenReturn(resultSet);
+    Mockito.when(resultSet.next()).thenReturn(true);
+    Mockito.when(flags.getFlag(5)).thenReturn("flag-5");
 
     // Act
-    AttackResult result = assignment5.login("Larry", "wrongPassword");
+    AttackResult result = assignment5.login(username, password);
 
     // Assert
-    Mockito.verify(connection)
-        .prepareStatement(
-            "select password from challenge_users where userid = ? and password = ?");
-    Mockito.verify(preparedStatement).setString(1, "Larry");
-    Mockito.verify(preparedStatement).setString(2, "wrongPassword");
-    Mockito.verify(preparedStatement).executeQuery();
+    // Verify that parameters are set via setString instead of concatenation into the SQL string.
+    verify(preparedStatement, times(1)).setString(1, username);
+    verify(preparedStatement, times(1)).setString(2, password);
+    verify(preparedStatement, times(1)).executeQuery();
 
-    assertEquals(FAIL, result.getStatus());
+    // Ensure the happy-path behavior is preserved when credentials are correct.
+    assertEquals("success", result.getType().name().toLowerCase());
+  }
+
+  @Test
+  void login_failsWhenUsernameIsNotLarry_evenWithSpecialCharacters() throws Exception {
+    // Arrange
+    String username = "Mallory' OR '1'='1";
+    String password = "anything";
+
+    // Act
+    AttackResult result = assignment5.login(username, password);
+
+    // Assert
+    // This ensures the precondition check on username is still enforced and not bypassed by injection.
+    assertEquals("failure", result.getType().name().toLowerCase());
   }
 }
