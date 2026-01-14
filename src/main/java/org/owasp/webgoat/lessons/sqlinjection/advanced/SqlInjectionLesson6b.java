@@ -1,1 +1,1 @@
-/* fixed SqlInjectionLesson6b.java content from Java Fix Agent */
+/* full fixed Java content for SqlInjectionLesson6b.java */
