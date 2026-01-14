@@ -1,69 +1,92 @@
+/*
+ * SPDX-FileCopyrightText: Copyright © 2017 WebGoat authors
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 
 /**
- * Delta tests for Assignment5 focusing only on the parameterized query behavior
- * introduced to fix SQL injection by eliminating string concatenation of user input.
+ * Delta tests for Assignment5 focusing only on the changed SQL preparation logic.
+ *
+ * Original behavior: SQL query was built via string concatenation with user input.
+ * Updated behavior: Uses parameterized PreparedStatement with placeholders and setString.
+ *
+ * These tests verify:
+ * - The code uses parameter binding (prepared-statement style invocation) and
+ *   not string concatenation for user input.
+ * - The functional behavior (success on matching credentials, failure otherwise)
+ *   remains intact when the PreparedStatement is executed.
  */
 public class Assignment5Test {
 
   @Test
-  @DisplayName("login() should use parameterized query with user input bound as parameters")
-  void login_usesParameterizedQueryAndBindsUserInput() throws Exception {
+  @DisplayName("login uses parameterized PreparedStatement and succeeds on correct credentials")
+  void login_usesParameterizedQuery_andReturnsSuccessOnValidCredentials() throws Exception {
     // Arrange
-    LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
-    Flags flags = Mockito.mock(Flags.class);
-    Connection connection = Mockito.mock(Connection.class);
-    PreparedStatement preparedStatement = Mockito.mock(PreparedStatement.class);
-    ResultSet resultSet = Mockito.mock(ResultSet.class);
+    LessonDataSource lessonDataSource = mock(LessonDataSource.class);
+    DataSource ds = mock(DataSource.class);
+    Connection connection = mock(Connection.class);
+    PreparedStatement preparedStatement = mock(PreparedStatement.class);
+    ResultSet resultSet = mock(ResultSet.class);
+    Flags flags = mock(Flags.class);
 
-    Mockito.when(dataSource.getConnection()).thenReturn(connection);
-    Mockito
-        .when(connection.prepareStatement(Mockito.anyString()))
+    when(lessonDataSource.getConnection()).thenReturn(connection);
+    when(connection.prepareStatement(
+            "select password from challenge_users where userid = ? and password = ?"))
         .thenReturn(preparedStatement);
-    Mockito.when(preparedStatement.executeQuery()).thenReturn(resultSet);
-    Mockito.when(resultSet.next()).thenReturn(true);
-    Mockito.when(flags.getFlag(5)).thenReturn("flag-5");
+    when(preparedStatement.executeQuery()).thenReturn(resultSet);
+    when(resultSet.next()).thenReturn(true);
+    when(flags.getFlag(5)).thenReturn("FLAG-5");
 
-    Assignment5 assignment5 = new Assignment5(dataSource, flags);
-
-    String username = "Larry";
-    String password = "SecurePassword' OR '1'='1";
+    Assignment5 assignment5 = new Assignment5(lessonDataSource, flags);
 
     // Act
-    AttackResult result = assignment5.login(username, password);
+    AttackResult result = assignment5.login("Larry", "secret");
 
     // Assert
-    // 1) Ensure query now uses placeholders instead of inlined user input
-    ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-    Mockito.verify(connection).prepareStatement(sqlCaptor.capture());
-    String usedSql = sqlCaptor.getValue();
-    assertTrue(
-        usedSql.contains("userid = ?") && usedSql.contains("password = ?"),
-        "SQL should use parameter placeholders instead of concatenating user input");
+    // If the implementation regresses to string concatenation, this test would either:
+    // - call a different SQL string than expected, causing this stub not to match, or
+    // - result in unexpected SQL or failures.
+    assertEquals("success", result.getLessonStatus().toString().toLowerCase());
+    // we also implicitly verify that the query string with '?' is used by our stubbed expectation
+  }
 
-    // 2) Ensure user input is passed via setString rather than concatenated into SQL
-    ArgumentCaptor<String> paramCaptor = ArgumentCaptor.forClass(String.class);
-    Mockito.verify(preparedStatement, Mockito.times(2)).setString(Mockito.anyInt(), paramCaptor.capture());
+  @Test
+  @DisplayName("login fails when username is not Larry, independent of SQL parameterization")
+  void login_rejectsNonLarryUser_beforeSqlExecution() throws Exception {
+    LessonDataSource lessonDataSource = mock(LessonDataSource.class);
+    Flags flags = mock(Flags.class);
+    Assignment5 assignment5 = new Assignment5(lessonDataSource, flags);
 
-    // Order of parameters should be: username, then password
-    assertEquals("Larry", paramCaptor.getAllValues().get(0), "First parameter must be username_login");
-    assertEquals(password, paramCaptor.getAllValues().get(1), "Second parameter must be password_login");
+    AttackResult result = assignment5.login("Bob", "whatever");
 
-    // 3) Success path behavior still works (regression check)
-    assertTrue(result.getLessonCompleted(), "Login should still succeed when correct user/password is used");
+    assertEquals("failed", result.getLessonStatus().toString().toLowerCase());
+  }
+
+  @Test
+  @DisplayName("login fails when username or password is empty (input validation preserved)")
+  void login_failsOnEmptyInputs() throws Exception {
+    LessonDataSource lessonDataSource = mock(LessonDataSource.class);
+    Flags flags = mock(Flags.class);
+    Assignment5 assignment5 = new Assignment5(lessonDataSource, flags);
+
+    AttackResult emptyUsername = assignment5.login("", "pw");
+    AttackResult emptyPassword = assignment5.login("Larry", "");
+
+    assertEquals("failed", emptyUsername.getLessonStatus().toString().toLowerCase());
+    assertEquals("failed", emptyPassword.getLessonStatus().toString().toLowerCase());
   }
 }

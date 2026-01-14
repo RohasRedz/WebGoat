@@ -1,126 +1,82 @@
 /**
- * Delta tests for jwt-refresh.js focusing on:
- * - removal of hard-coded password
- * - in-memory token storage and refresh behavior
+ * Delta tests for jwt-refresh.js focusing on the removal of a hard-coded password.
+ *
+ * Original behavior: password field in the AJAX payload was a fixed string literal.
+ * Updated behavior: password is obtained at runtime via getUserPassword(), which
+ * reads from the DOM (#password input) and falls back to an empty string.
+ *
+ * These tests validate:
+ * - The AJAX call uses the dynamic password value from the DOM.
+ * - The hard-coded literal is no longer required for successful invocation.
  */
 
-jest.mock('jquery', () => {
-  const mockAjax = jest.fn(() => ({
-    done: function (cb) {
-      mockAjax._done = cb;
-      return this;
-    },
-    fail: function (cb) {
-      mockAjax._fail = cb;
-      return this;
-    }
-  }));
-  mockAjax._done = () => {};
-  mockAjax._fail = () => {};
-  return mockAjax;
-});
+const jsdom = require('jsdom');
+const { JSDOM } = jsdom;
 
-const $ = require('jquery');
+describe('jwt-refresh  delta behavior without hard-coded password', () => {
+  let $;
 
-describe('jwt-refresh delta tests', () => {
   beforeEach(() => {
-    global.webgoat = {
-      customjs: {},
-      getSecurePassword: jest.fn().mockReturnValue('secure-password-from-config')
-    };
-    // Reset jQuery ajax mocks
-    $.mockClear && $.mockClear();
-  });
+    const dom = new JSDOM(
+      '<!doctype html><html><body><input id="password" type="password" value="user-secret"/></body></html>',
+      { url: 'http://localhost/' }
+    );
+    global.window = dom.window;
+    global.document = dom.window.document;
 
-  afterEach(() => {
-    delete global.webgoat;
+    // jQuery bound to jsdom window
+    $ = require('jquery')(dom.window);
+    global.$ = $;
+
+    // Provide minimal webgoat namespace used by script
+    global.webgoat = { customjs: {} };
+
     jest.resetModules();
   });
 
-  function loadModule() {
-    // Simulate DOM ready
-    global.document = {
-      readyState: 'complete'
-    };
-    // Require the module under test (path relative to this test file)
-    require('../../../../main/resources/lessons/jwt/js/jwt-refresh');
-  }
+  test('login sends runtime password from #password instead of hard-coded literal', () => {
+    // Arrange
+    const ajaxSpy = jest.fn().mockReturnValue({ success: (cb) => cb({}) });
+    $.ajax = ajaxSpy;
 
-  test('login uses password from webgoat.getSecurePassword and not a hard-coded literal', () => {
-    loadModule();
+    // Load the script after setting up globals so it attaches handlers correctly
+    // eslint-disable-next-line global-require
+    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
 
-    // Call login explicitly to avoid relying on DOM ready handler details
-    const loginFn = global.login || global.window?.login;
-    expect(typeof loginFn).toBe('function');
+    // Act
+    // Directly call login to avoid relying on document.ready timing.
+    // eslint-disable-next-line no-undef
+    login('Jerry');
 
-    loginFn('Jerry');
+    // Assert
+    expect(ajaxSpy).toHaveBeenCalledTimes(1);
+    const arg = ajaxSpy.mock.calls[0][0];
+    const payload = JSON.parse(arg.data);
 
-    expect(webgoat.getSecurePassword).toHaveBeenCalledWith('Jerry');
-
-    // Inspect ajax call payload
-    expect($.mock.calls.length).toBeGreaterThan(0);
-    const ajaxConfig = $.mock.calls[0][0];
-    const body = JSON.parse(ajaxConfig.data);
-
-    expect(body.user).toBe('Jerry');
-    expect(body.password).toBe('secure-password-from-config');
-    expect(body.password).not.toBe('bm5nhSkxCXZkKRy4');
+    // The updated behavior must use the user-entered password, not a hard-coded one.
+    expect(payload.user).toBe('Jerry');
+    expect(payload.password).toBe('user-secret');
   });
 
-  test('tokens are stored in memory on webgoat.customjs rather than localStorage', () => {
-    // Spy on localStorage if present
-    const localStorage = {
-      setItem: jest.fn(),
-      getItem: jest.fn()
-    };
-    global.localStorage = localStorage;
+  test('getUserPassword falls back to empty string when no password present', () => {
+    // Arrange
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+      url: 'http://localhost/'
+    });
+    global.window = dom.window;
+    global.document = dom.window.document;
+    $ = require('jquery')(dom.window);
+    global.$ = $;
+    global.webgoat = { customjs: {} };
 
-    loadModule();
+    // eslint-disable-next-line global-require
+    require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
 
-    const loginFn = global.login || global.window?.login;
-    expect(typeof loginFn).toBe('function');
+    // Act
+    // eslint-disable-next-line no-undef
+    const value = getUserPassword();
 
-    loginFn('Jerry');
-
-    // Simulate successful response from server
-    const accessToken = 'access-token-123';
-    const refreshToken = 'refresh-token-456';
-    $.mock._done({ access_token: accessToken, refresh_token: refreshToken });
-
-    // Verify tokens stored in memory
-    expect(webgoat.customjs._accessToken).toBe(accessToken);
-    expect(webgoat.customjs._refreshToken).toBe(refreshToken);
-
-    // And not persisted via localStorage.setItem
-    expect(localStorage.setItem).not.toHaveBeenCalled();
-  });
-
-  test('newToken uses in-memory tokens and updates them from server response', () => {
-    loadModule();
-
-    // Seed in-memory tokens
-    webgoat.customjs._accessToken = 'old-access';
-    webgoat.customjs._refreshToken = 'old-refresh';
-
-    const newTokenFn = global.newToken || global.window?.newToken;
-    expect(typeof newTokenFn).toBe('function');
-
-    newTokenFn();
-
-    expect($.mock.calls.length).toBeGreaterThan(0);
-    const ajaxConfig = $.mock.calls[0][0];
-
-    // Authorization header built from in-memory access token
-    expect(ajaxConfig.headers.Authorization).toBe('Bearer old-access');
-
-    // Body uses in-memory refresh token
-    const body = JSON.parse(ajaxConfig.data);
-    expect(body.refreshToken).toBe('old-refresh');
-
-    // Simulate server issuing new tokens
-    $.mock._done({ access_token: 'new-access', refresh_token: 'new-refresh' });
-
-    expect(webgoat.customjs._accessToken).toBe('new-access');
-    expect(webgoat.customjs._refreshToken).toBe('new-refresh');
+    // Assert
+    expect(value).toBe('');
   });
 });

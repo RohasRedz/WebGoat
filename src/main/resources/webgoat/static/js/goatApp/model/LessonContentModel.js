@@ -31,28 +31,12 @@ define(['jquery',
                 loadHelps = true;
             }
             this.set('content',content);
-
-            var currentUrl = String(document.URL || '');
-            // Use simpler, bounded operations to avoid complex backtracking patterns
-            var lessonUrl = currentUrl;
-            var lessonSuffixIndex = currentUrl.indexOf('.lesson');
-            if (lessonSuffixIndex !== -1) {
-                lessonUrl = currentUrl.substring(0, lessonSuffixIndex + '.lesson'.length);
+            this.set('lessonUrl',document.URL.replace(/\.lesson(?:\/.*)?$/, '.lesson'));
+            if (/^.*\.lesson\/(\d{1,4})$/.test(document.URL)) {
+                this.set('pageNum',document.URL.replace(/^.*\.lesson\/(\d{1,4})$/, '$1'));
+            } else {
+                this.set('pageNum',0);
             }
-            this.set('lessonUrl', lessonUrl);
-
-            // Extract page number using safer parsing instead of a potentially expensive regex
-            var pageNum = 0;
-            var lessonPathIndex = currentUrl.indexOf('.lesson/');
-            if (lessonPathIndex !== -1) {
-                var pagePart = currentUrl.substring(lessonPathIndex + '.lesson/'.length);
-                // Expect only digits after ".lesson/"
-                if (/^\d{1,4}$/.test(pagePart)) {
-                    pageNum = parseInt(pagePart, 10);
-                }
-            }
-            this.set('pageNum', pageNum);
-
             this.trigger('content:loaded',this,loadHelps);
         },
 
