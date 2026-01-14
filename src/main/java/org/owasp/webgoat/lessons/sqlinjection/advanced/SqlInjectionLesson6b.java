@@ -15,16 +15,15 @@ import java.sql.Statement;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import lombok.extern.slf4j.Slf4j;
 
 @RestController
+@Slf4j
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
-  private static final Logger log = LoggerFactory.getLogger(SqlInjectionLesson6b.class);
   private final LessonDataSource dataSource;
 
   public SqlInjectionLesson6b(LessonDataSource dataSource) {
@@ -55,10 +54,12 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception occurred while fetching password", sqle);
+        log.error("SQL Exception occurred during password retrieval", sqle);
+        // do nothing
       }
     } catch (Exception e) {
-      log.error("An unexpected exception occurred while fetching password", e);
+      log.error("An unexpected error occurred during password retrieval", e);
+      // do nothing
     }
     return (password);
   }

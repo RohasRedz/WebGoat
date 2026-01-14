@@ -1,17 +1,19 @@
-define(['jquery',
+define([
+    'jquery',
     'underscore',
     'backbone',
-    'goatApp/model/HTMLContentModel'],
-     function($,
-        _,
-        Backbone,
-        HTMLContentModel){
+    'goatApp/model/HTMLContentModel'
+],
+function($,
+         _,
+         Backbone,
+         HTMLContentModel) {
 
     return HTMLContentModel.extend({
-        urlRoot:null,
+        urlRoot: null,
         defaults: {
-            items:null,
-            selectedItem:null
+            items: null,
+            selectedItem: null
         },
 
         initialize: function (options) {
@@ -30,19 +32,29 @@ define(['jquery',
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
-            this.set('content',content);
-            this.set('lessonUrl',document.URL.replace(/\.lesson(?:\/?(?:\d{1,4})?)?$/,'.lesson'));
-            if (/.*\.lesson\/(\d{1,4})$/.test(document.URL)) {
-                this.set('pageNum',document.URL.replace(/.*\.lesson\/(\d{1,4})$/,'$1'));
+            this.set('content', content);
+
+            this.set(
+                'lessonUrl',
+                document.URL.replace(/(.*)\.lesson.*/, '$1.lesson')
+            );
+
+            var pageMatch = document.URL.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
             } else {
-                this.set('pageNum',0);
+                this.set('pageNum', 0);
             }
-            this.trigger('content:loaded',this,loadHelps);
+
+            this.trigger('content:loaded', this, loadHelps);
         },
 
         fetch: function (options) {
             options = options || {};
-            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
+            return Backbone.Model.prototype.fetch.call(
+                this,
+                _.extend({ dataType: 'html' }, options)
+            );
         }
     });
 });

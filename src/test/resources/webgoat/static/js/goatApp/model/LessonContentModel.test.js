@@ -1,59 +1,62 @@
+// File: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 define([
-    'jquery',
-    'underscore',
-    'backbone',
-    'goatApp/model/HTMLContentModel'
-], function ($,
-             _,
-             Backbone,
-             HTMLContentModel) {
+  'jquery',
+  'underscore',
+  'backbone',
+  'goatApp/model/HTMLContentModel',
+  'webgoat/static/js/goatApp/model/LessonContentModel'
+], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
+  // Note: This AMD-style test assumes the same module loading environment as the application.
+  // The focus is to validate the changed regex behavior in setContent.
 
-    // NOTE: This test file assumes a test runner capable of loading AMD modules.
-    // It focuses only on the changed regex behavior in setContent.
+  describe('LessonContentModel delta tests', function () {
+    var originalLocation;
 
-    describe('LessonContentModel - delta tests', function () {
-        var LessonContentModel;
-
-        beforeAll(function (done) {
-            // Dynamically require the model under test if AMD loader is available
-            require(['webgoat/static/js/goatApp/model/LessonContentModel'], function (Model) {
-                LessonContentModel = Model;
-                done();
-            });
-        });
-
-        it('should normalize lessonUrl using the bounded regex without affecting valid URLs', function () {
-            var model = new LessonContentModel();
-
-            var originalUrl = 'http://example.com/lesson/intro.lesson/12';
-            var oldDocument = global.document;
-            global.document = { URL: originalUrl };
-
-            try {
-                model.setContent('<html></html>', true);
-                var lessonUrl = model.get('lessonUrl');
-
-                expect(lessonUrl).toBe('http://example.com/lesson/intro.lesson');
-            } finally {
-                global.document = oldDocument;
-            }
-        });
-
-        it('should set pageNum based on existing behavior when URL ends with digits', function () {
-            var model = new LessonContentModel();
-
-            var urlWithPage = 'http://example.com/lesson/intro.lesson/42';
-            var oldDocument = global.document;
-            global.document = { URL: urlWithPage };
-
-            try {
-                model.setContent('<html></html>', true);
-                var pageNum = model.get('pageNum');
-
-                expect(pageNum).toBe('42');
-            } finally {
-                global.document = oldDocument;
-            }
-        });
+    beforeEach(function () {
+      originalLocation = window.location;
+      delete window.location;
+      window.location = {
+        href: 'http://localhost',
+        toString: function () {
+          return this.href;
+        }
+      };
+      Object.defineProperty(document, 'URL', {
+        configurable: true,
+        get: function () {
+          return window.location.href;
+        }
+      });
     });
+
+    afterEach(function () {
+      window.location = originalLocation;
+    });
+
+    function createModelInstance() {
+      return new LessonContentModel();
+    }
+
+    it('setContent computes lessonUrl and pageNum correctly with safer regex when URL has page number', function () {
+      window.location.href = 'http://example.com/path/to/lesson.lesson/1234';
+
+      var model = createModelInstance();
+
+      model.setContent('<div>content</div>');
+
+      expect(model.get('lessonUrl')).toBe('http://example.com/path/to/lesson.lesson');
+      expect(model.get('pageNum')).toBe('1234');
+    });
+
+    it('setContent falls back to pageNum 0 when URL has no trailing page number', function () {
+      window.location.href = 'http://example.com/path/to/lesson.lesson';
+
+      var model = createModelInstance();
+
+      model.setContent('<div>content</div>');
+
+      expect(model.get('lessonUrl')).toBe('http://example.com/path/to/lesson.lesson');
+      expect(model.get('pageNum')).toBe(0);
+    });
+  });
 });
