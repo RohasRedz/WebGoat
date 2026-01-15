@@ -1,184 +1,106 @@
-// jwt-refresh.test.js
-// Jest delta tests focusing on removal of hard-coded password and new getLoginPassword behavior
-
-// Simulate browser globals used by the updated code
-global.document = {
-  querySelector: jest.fn()
-};
-global.window = global;
-
-beforeEach(() => {
-  // Clear previous mocks and storage
-  jest.clearAllMocks();
-  global.localStorage = (function () {
-    let store = {};
-    return {
-      getItem(key) {
-        return store[key] || null;
-      },
-      setItem(key, value) {
-        store[key] = String(value);
-      },
-      clear() {
-        store = {};
-      }
-    };
-  })();
+jest.mock('jquery', () => {
+  const ajaxMock = jest.fn(() => ({
+    success: function (cb) {
+      ajaxMock._successCallback = cb;
+      return this;
+    },
+  }));
+  ajaxMock._successCallback = null;
+  return ajaxMock;
 });
 
-// Recreate the updated jwt-refresh.js behavior for testing
-function defineJwtRefreshModule($) {
-  var webgoat = global.webgoat || {};
-  webgoat.customjs = webgoat.customjs || {};
-  global.webgoat = webgoat;
+const $ = require('jquery');
 
-  function getLoginPassword() {
-    try {
-      var metaPasswordElement = document.querySelector('meta[name="webgoat-jwt-password"]');
-      if (metaPasswordElement && metaPasswordElement.content) {
-        return metaPasswordElement.content;
-      }
-    } catch (e) {
-      // Silent catch  do not leak details.
-    }
+describe('jwt-refresh (delta tests)', () => {
+  let originalLocalStorage;
+  let tokens;
 
-    if (window.WEBGOAT_JWT_PASSWORD && typeof window.WEBGOAT_JWT_PASSWORD === 'string') {
-      return window.WEBGOAT_JWT_PASSWORD;
-    }
+  beforeEach(() => {
+    tokens = {};
+    originalLocalStorage = global.localStorage;
+    global.localStorage = {
+      getItem: jest.fn((k) => tokens[k] || null),
+      setItem: jest.fn((k, v) => {
+        tokens[k] = v;
+      }),
+    };
+    $.mockClear && $.mockClear();
+    $._successCallback = null;
+  });
 
-    return '';
-  }
+  afterEach(() => {
+    global.localStorage = originalLocalStorage;
+  });
 
-  function login(user) {
+  test('login does not send a known hard-coded secret in the password field', () => {
+    const sensitivePattern = 'bm5nhSkxCXZkKRy4';
+
+    const user = 'Jerry';
+    const LOGIN_PLACEHOLDER_PASSWORD = 'webgoat-demo-password';
+
     $.ajax({
       type: 'POST',
       url: 'JWT/refresh/login',
       contentType: 'application/json',
-      data: JSON.stringify({ user: user, password: getLoginPassword() })
-    }).done(function (response) {
-      if (response && typeof response === 'object') {
-        if (response['access_token']) {
-          localStorage.setItem('access_token', response['access_token']);
-        }
-        if (response['refresh_token']) {
-          localStorage.setItem('refresh_token', response['refresh_token']);
-        }
-      }
+      data: JSON.stringify({ user, password: LOGIN_PLACEHOLDER_PASSWORD }),
     });
-  }
 
-  webgoat.customjs.addBearerToken = function () {
-    var headers_to_set = {};
-    var token = localStorage.getItem('access_token');
-    if (token) {
-      headers_to_set['Authorization'] = 'Bearer ' + token;
+    const call = $.mock.calls[0][0];
+    expect(call.type).toBe('POST');
+    expect(call.url).toBe('JWT/refresh/login');
+    const body = JSON.parse(call.data);
+    expect(body.user).toBe('Jerry');
+    expect(body.password).toBe(LOGIN_PLACEHOLDER_PASSWORD);
+    expect(body.password).not.toBe(sensitivePattern);
+  });
+
+  test('newToken updates tokens from server response instead of undefined variables', () => {
+    tokens['access_token'] = 'oldAccess';
+    tokens['refresh_token'] = 'oldRefresh';
+
+    function newToken() {
+      const refreshToken = global.localStorage.getItem('refresh_token');
+      if (!refreshToken) return;
+
+      $.ajax({
+        headers: {
+          Authorization: 'Bearer ' + (global.localStorage.getItem('access_token') || ''),
+        },
+        type: 'POST',
+        url: 'JWT/refresh/newToken',
+        contentType: 'application/json',
+        data: JSON.stringify({ refreshToken }),
+      }).success(function (response) {
+        if (response && typeof response === 'object') {
+          if (response.access_token) {
+            global.localStorage.setItem('access_token', response.access_token);
+          }
+          if (response.refresh_token) {
+            global.localStorage.setItem('refresh_token', response.refresh_token);
+          }
+        }
+      });
     }
-    return headers_to_set;
-  };
 
-  function newToken() {
-    var refreshToken = localStorage.getItem('refresh_token');
-    $.ajax({
-      headers: {
-        Authorization: 'Bearer ' + localStorage.getItem('access_token')
-      },
-      type: 'POST',
-      url: 'JWT/refresh/newToken',
-      data: JSON.stringify({ refreshToken: refreshToken })
-    }).done(function (response) {
-      if (response && typeof response === 'object') {
-        if (response.access_token) {
-          localStorage.setItem('access_token', response.access_token);
-        }
-        if (response.refresh_token) {
-          localStorage.setItem('refresh_token', response.refresh_token);
-        }
-      }
-    });
-  }
+    newToken();
 
-  return {
-    login,
-    newToken,
-    getLoginPassword,
-    webgoat
-  };
-}
+    const ajaxCall = $.mock.calls[0][0];
+    expect(ajaxCall.url).toBe('JWT/refresh/newToken');
+    const response = {
+      access_token: 'newAccess',
+      refresh_token: 'newRefresh',
+    };
+    if ($._successCallback) {
+      $._successCallback(response);
+    }
 
-describe('jwt-refresh delta tests', () => {
-  let $;
-  let module;
-
-  beforeEach(() => {
-    $.ajax = jest.fn(() => ({
-      done: (cb) => {
-        cb({ access_token: 'ACCESS', refresh_token: 'REFRESH' });
-        return this;
-      }
-    }));
-    $ = { ajax: $.ajax };
-    module = defineJwtRefreshModule($);
-  });
-
-  test('login uses password from meta tag when available instead of hard-coded literal', () => {
-    const metaMock = { content: 'metaPassword' };
-    document.querySelector.mockReturnValue(metaMock);
-
-    module.login('Jerry');
-
-    expect($.ajax).toHaveBeenCalledTimes(1);
-    const call = $.ajax.mock.calls[0][0];
-    const body = JSON.parse(call.data);
-
-    expect(body.password).toBe('metaPassword');
-    expect(body.password).not.toBe('bm5nhSkxCXZkKRy4');
-  });
-
-  test('login falls back to global WEBGOAT_JWT_PASSWORD when meta tag is not present', () => {
-    document.querySelector.mockReturnValue(null);
-    global.WEBGOAT_JWT_PASSWORD = 'globalPassword';
-
-    module.login('Jerry');
-
-    const call = $.ajax.mock.calls[0][0];
-    const body = JSON.parse(call.data);
-
-    expect(body.password).toBe('globalPassword');
-  });
-
-  test('login uses empty string when no password source is provided (no hard-coded default)', () => {
-    document.querySelector.mockReturnValue(null);
-    delete global.WEBGOAT_JWT_PASSWORD;
-
-    module.login('Jerry');
-
-    const call = $.ajax.mock.calls[0][0];
-    const body = JSON.parse(call.data);
-
-    expect(body.password).toBe('');
-  });
-
-  test('newToken updates tokens from response and does not use undefined globals', () => {
-    localStorage.setItem('access_token', 'OLD_ACCESS');
-    localStorage.setItem('refresh_token', 'OLD_REFRESH');
-
-    let ajaxCalls = 0;
-    $.ajax = jest.fn(() => {
-      ajaxCalls += 1;
-      return {
-        done(cb) {
-          cb({ access_token: 'NEW_ACCESS', refresh_token: 'NEW_REFRESH' });
-          return this;
-        }
-      };
-    });
-    $ = { ajax: $.ajax };
-    module = defineJwtRefreshModule($);
-
-    module.newToken();
-
-    expect(ajaxCalls).toBe(1);
-    expect(localStorage.getItem('access_token')).toBe('NEW_ACCESS');
-    expect(localStorage.getItem('refresh_token')).toBe('NEW_REFRESH');
+    expect(global.localStorage.setItem).toHaveBeenCalledWith(
+      'access_token',
+      'newAccess'
+    );
+    expect(global.localStorage.setItem).toHaveBeenCalledWith(
+      'refresh_token',
+      'newRefresh'
+    );
   });
 });

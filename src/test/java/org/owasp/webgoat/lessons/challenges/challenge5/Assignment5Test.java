@@ -1,69 +1,69 @@
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 
 class Assignment5Test {
 
-  private LessonDataSource dataSource;
-  private Flags flags;
-  private Assignment5 assignment5;
-
-  private Connection connection;
-  private PreparedStatement preparedStatement;
-  private ResultSet resultSet;
-
-  @BeforeEach
-  void setUp() throws Exception {
-    dataSource = mock(LessonDataSource.class);
-    flags = mock(Flags.class);
-    assignment5 = new Assignment5(dataSource, flags);
-
-    connection = mock(Connection.class);
-    preparedStatement = mock(PreparedStatement.class);
-    resultSet = mock(ResultSet.class);
+  @Test
+  @DisplayName("login should bind username and password as PreparedStatement parameters")
+  void loginUsesParameterizedQueryWithUserInputs() throws Exception {
+    LessonDataSource dataSource = mock(LessonDataSource.class);
+    Flags flags = mock(Flags.class);
+    Connection connection = mock(Connection.class);
+    PreparedStatement preparedStatement = mock(PreparedStatement.class);
+    ResultSet resultSet = mock(ResultSet.class);
 
     when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+    when(connection.prepareStatement(
+            eq("select password from challenge_users where userid = ? and password = ?")))
+        .thenReturn(preparedStatement);
     when(preparedStatement.executeQuery()).thenReturn(resultSet);
-    when(flags.getFlag(5)).thenReturn("FLAG-5");
-  }
-
-  @Test
-  void login_usesParameterizedQueryAndSucceedsForValidLarryUser() throws Exception {
-    // Arrange: simulate that credentials are correct (one row returned)
     when(resultSet.next()).thenReturn(true);
+    when(flags.getFlag(5)).thenReturn("dummy-flag");
 
-    // Act
-    AttackResult result = assignment5.login("Larry", "secretPassword");
+    Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-    // Assert: success path still works with parameterized query
-    assert result != null;
-    assert result.getLessonCompleted();
-  }
+    String username = "Larry";
+    String password = "somePassword";
 
-  @Test
-  void login_failsWhenCredentialsDoNotMatchEvenWithSqlInjectionAttempt() throws Exception {
-    // Arrange: simulate that no rows are returned for SQL injection payload
-    when(resultSet.next()).thenReturn(false);
+    AttackResult result = assignment5.login(username, password);
 
-    String maliciousPassword = "anything' OR '1'='1";
+    verify(connection)
+        .prepareStatement(
+            "select password from challenge_users where userid = ? and password = ?");
+    verify(preparedStatement).setString(1, username);
+    verify(preparedStatement).setString(2, password);
 
-    // Act
-    AttackResult result = assignment5.login("Larry", maliciousPassword);
+    verify(preparedStatement).executeQuery();
+    assertEquals(
+        AttackResult.Status.SUCCESS,
+        result.getLessonCompleted()
+            ? AttackResult.Status.SUCCESS
+            : AttackResult.Status.FAIL);
 
-    // Assert: SQL injection should no longer succeed; query is parameterized
-    assert result != null;
-    assert !result.getLessonCompleted();
+    ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+    verify(connection).prepareStatement(sqlCaptor.capture());
+    String usedSql = sqlCaptor.getValue();
+
+    org.junit.jupiter.api.Assertions.assertFalse(
+        usedSql.contains(username),
+        "SQL must not contain the raw username; it must use placeholders");
+    org.junit.jupiter.api.Assertions.assertFalse(
+        usedSql.contains(password),
+        "SQL must not contain the raw password; it must use placeholders");
   }
 }
