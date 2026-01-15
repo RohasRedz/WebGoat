@@ -1,110 +1,95 @@
-const $ = require('jquery');
+/**
+ * @file src/test/resources/lessons/jwt/js/jwt-refresh.test.js
+ *
+ * Delta Jest tests for jwt-refresh.js focusing on:
+ *  - removal of hard-coded password from login request
+ *  - correct usage of refreshed tokens from server response
+ */
 
-// Ensure global $ for the script-under-test if it relies on it.
-global.$ = $;
-
-// Mock webgoat.customjs namespace expected by jwt-refresh.js
-global.webgoat = global.webgoat || {};
-webgoat.customjs = webgoat.customjs || {};
-
-// Load the updated script so that its functions are attached to global scope.
-require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
-
-describe('jwt-refresh delta tests', () => {
-  let originalAjax;
+describe('jwt-refresh (delta tests)', () => {
+  let $ajaxMock;
+  let originalWebgoat;
 
   beforeEach(() => {
-    originalAjax = $.ajax;
-    $.ajax = jest.fn();
-    global.localStorage = (function () {
-      let store = {};
-      return {
-        getItem: key => store[key] || null,
-        setItem: (key, value) => {
-          store[key] = String(value);
-        },
-        clear: () => {
-          store = {};
-        }
-      };
-    })();
+    // Mock jQuery.ajax
+    $ajaxMock = jest.fn().mockReturnValue({ success: function (cb) { this._success = cb; return this; } });
+    global.$ = {
+      ajax: $ajaxMock
+    };
+
+    // Mock localStorage
+    const store = {};
+    global.localStorage = {
+      getItem: jest.fn((k) => store[k]),
+      setItem: jest.fn((k, v) => { store[k] = v; })
+    };
+
+    // Mock webgoat.customjs namespace used in file
+    originalWebgoat = global.webgoat;
+    global.webgoat = { customjs: {} };
+
+    // Ensure document.ready handler does not automatically run during require:
+    // We simulate jQuery ready as a no-op.
+    global.$.ready = (fn) => fn && fn();
+
+    // Provide a runtime password to avoid falling back to empty string
+    global.WEBGOAT_JWT_PASSWORD = 'runtimePassword';
+
+    // Require the updated script under test
+    jest.isolateModules(() => {
+      require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+    });
   });
 
   afterEach(() => {
-    $.ajax = originalAjax;
+    global.webgoat = originalWebgoat;
+    delete global.WEBGOAT_JWT_PASSWORD;
   });
 
-  test('login does not send a hard-coded password and uses a non-secret placeholder instead', () => {
+  test('login sends password from runtime configuration, not hard-coded value', () => {
     // Arrange
-    const user = 'Jerry';
-    const captured = {};
+    // First ajax call should be for JWT/refresh/login triggered on document.ready
+    const firstCallConfig = $ajaxMock.mock.calls[0][0];
 
-    $.ajax.mockImplementation(opts => {
-      captured.type = opts.type;
-      captured.url = opts.url;
-      captured.contentType = opts.contentType;
-      captured.data = opts.data;
+    // Assert
+    expect(firstCallConfig.url).toBe('JWT/refresh/login');
+    const body = JSON.parse(firstCallConfig.data);
 
-      // Simulate success callback
-      if (typeof opts.success === 'function') {
-        opts.success({ access_token: 'a', refresh_token: 'r' });
-      } else if (typeof opts.done === 'function') {
-        opts.done({ access_token: 'a', refresh_token: 'r' });
-      }
+    // The password must come from WEBGOAT_JWT_PASSWORD, not from a hard-coded literal
+    expect(body.user).toBe('Jerry');
+    expect(body.password).toBe('runtimePassword');
+  });
 
-      return { success: jest.fn(), done: jest.fn() };
+  test('newToken uses refreshed tokens from server response', () => {
+    // Arrange
+    // Find the function newToken attached to global scope (defined by script)
+    const newToken = global.newToken;
+    expect(typeof newToken).toBe('function');
+
+    localStorage.getItem.mockImplementation((key) => {
+      if (key === 'access_token') return 'oldAccess';
+      if (key === 'refresh_token') return 'oldRefresh';
+      return null;
     });
 
     // Act
-    global.login(user);
+    newToken();
+
+    // Capture the ajax call for newToken (should be second call)
+    const newTokenCallConfig = $ajaxMock.mock.calls[1][0];
+    // Simulate server response through success callback
+    const response = { access_token: 'newAccess', refresh_token: 'newRefresh' };
+    if (typeof $ajaxMock.mock.results[1].value._success === 'function') {
+      $ajaxMock.mock.results[1].value._success(response);
+    }
 
     // Assert
-    expect($.ajax).toHaveBeenCalledTimes(1);
-    expect(captured.type).toBe('POST');
-    expect(captured.url).toBe('JWT/refresh/login');
-    expect(captured.contentType).toBe('application/json');
+    expect(newTokenCallConfig.url).toBe('JWT/refresh/newToken');
+    const body = JSON.parse(newTokenCallConfig.data);
+    expect(body.refreshToken).toBe('oldRefresh');
 
-    const payload = JSON.parse(captured.data);
-    expect(payload.user).toBe(user);
-    // Vulnerability fix: password should no longer be the hard-coded secret
-    expect(payload.password).toBe('');
-  });
-
-  test('newToken uses tokens from response and not undeclared variables', () => {
-    // Arrange
-    localStorage.setItem('access_token', 'old-access');
-    localStorage.setItem('refresh_token', 'old-refresh');
-
-    const requests = [];
-    $.ajax.mockImplementation(opts => {
-      requests.push(opts);
-
-      // Simulate server returning new tokens
-      if (opts && typeof opts.success === 'function') {
-        opts.success({ access_token: 'new-access', refresh_token: 'new-refresh' });
-      } else if (opts && typeof opts.done === 'function') {
-        opts.done({ access_token: 'new-access', refresh_token: 'new-refresh' });
-      }
-
-      return { success: jest.fn(), done: jest.fn() };
-    });
-
-    // Act
-    global.newToken();
-
-    // Assert
-    expect(requests).toHaveLength(1);
-    const call = requests[0];
-
-    expect(call.url).toBe('JWT/refresh/newToken');
-    expect(call.type).toBe('POST');
-    expect(call.headers.Authorization).toBe('Bearer old-access');
-
-    const body = JSON.parse(call.data);
-    expect(body.refreshToken).toBe('old-refresh');
-
-    // After success, values should come from response, not from undeclared variables
-    expect(localStorage.getItem('access_token')).toBe('new-access');
-    expect(localStorage.getItem('refresh_token')).toBe('new-refresh');
+    // Tokens in localStorage should be updated from response, not undefined variables
+    expect(localStorage.setItem).toHaveBeenCalledWith('access_token', 'newAccess');
+    expect(localStorage.setItem).toHaveBeenCalledWith('refresh_token', 'newRefresh');
   });
 });

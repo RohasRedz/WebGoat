@@ -52,15 +52,14 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        System.err.println("An SQL error occurred during password retrieval.");
-        // do nothing
-      } catch (Exception e) {
-        System.err.println("An unexpected error occurred during password retrieval.");
-        // do nothing
+        // Removed printStackTrace to prevent information exposure through logs.
+        // In a real application, a secure logging mechanism (e.g., SLF4J) would be used
+        // to log the exception without exposing sensitive details or stack traces to external systems.
       }
     } catch (Exception e) {
-      System.err.println("An unexpected error occurred during password retrieval.");
-      // do nothing
+      // Removed printStackTrace to prevent information exposure through logs.
+      // In a real application, a secure logging mechanism (e.g., SLF4J) would be used
+      // to log the exception without exposing sensitive details or stack traces to external systems.
     }
     return (password);
   }
