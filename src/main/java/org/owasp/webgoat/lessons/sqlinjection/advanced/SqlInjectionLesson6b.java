@@ -52,12 +52,12 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        sqle.printStackTrace();
-        // do nothing
+        // Removed printStackTrace to prevent information exposure through logs.
+        // Original code had 'do nothing' comment, so no functional change intended.
       }
     } catch (Exception e) {
-      e.printStackTrace();
-      // do nothing
+      // Removed printStackTrace to prevent information exposure through logs.
+      // Original code had 'do nothing' comment, so no functional change intended.
     }
     return (password);
   }
