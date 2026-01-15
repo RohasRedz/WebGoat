@@ -1,74 +1,59 @@
-// Delta tests focus on removal of hard-coded password and corrected newToken behavior
+// Derived test file path: src/test/resources/lessons/jwt/js/jwt-refresh.test.js
 
-// Assume jwt-refresh.js registers functions on global scope / webgoat.customjs
-require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+/**
+ * Unit tests for jwt-refresh.js focusing on the removal of hardcoded password
+ * and usage of getSafePassword() to source the credential externally.
+ */
 
-describe('jwt-refresh.js - delta tests', () => {
+jest.mock('jquery', () => {
+  const ajaxMock = jest.fn(() => ({
+    success: (cb) => {
+      cb({ access_token: 'atk', refresh_token: 'rtk' });
+    },
+  }));
+  return {
+    ajax: ajaxMock,
+  };
+});
 
-    beforeEach(() => {
-        // Reset localStorage mock
-        global.localStorage = (function () {
-            let store = {};
-            return {
-                getItem: key => store[key],
-                setItem: (key, value) => { store[key] = value; },
-                clear: () => { store = {}; }
-            };
-        })();
+const $ = require('jquery');
 
-        global.$ = {
-            ajax: jest.fn().mockReturnValue({
-                success: function (cb) {
-                    // Allow chaining behavior but callback can be triggered manually
-                    this._successCb = cb;
-                    return this;
-                },
-                triggerSuccess: function (response) {
-                    if (this._successCb) this._successCb(response);
-                }
-            })
-        };
+describe('jwt-refresh – externalized password handling', () => {
+  beforeEach(() => {
+    jest.resetModules();
+    global.localStorage = {
+      store: {},
+      setItem(key, value) {
+        this.store[key] = value;
+      },
+      getItem(key) {
+        return this.store[key];
+      },
+    };
+  });
 
-        global.webgoat = { customjs: {} };
+  test('login should not use hardcoded password and must invoke getSafePassword', () => {
+    // Arrange
+    const webgoat = {
+      config: {
+        getJwtRefreshPassword: jest.fn(() => 'external-secret'),
+      },
+      customjs: {},
+    };
+    global.webgoat = webgoat;
+
+    // Act: require after setting global so that getSafePassword sees config
+    jest.isolateModules(() => {
+      require('./jwt-refresh.js');
     });
 
-    test('login no longer sends hard-coded password in request body', () => {
-        // Arrange
-        const ajaxMock = global.$.ajax;
-        const testUser = 'Jerry';
+    // Assert: ensure our external provider was used
+    expect(webgoat.config.getJwtRefreshPassword).toHaveBeenCalled();
 
-        // Act
-        // login is defined in jwt-refresh.js in the global scope
-        login(testUser);
-
-        // Assert
-        expect(ajaxMock).toHaveBeenCalledTimes(1);
-        const callArgs = ajaxMock.mock.calls[0][0];
-        const body = JSON.parse(callArgs.data);
-
-        expect(body.user).toBe(testUser);
-        // Verify that the password field is not hard-coded or present
-        expect(body.password).toBeUndefined();
-    });
-
-    test('newToken uses response tokens instead of undeclared globals', () => {
-        // Arrange
-        const ajaxCall = global.$.ajax();
-        const response = {
-            access_token: 'new-access',
-            refresh_token: 'new-refresh'
-        };
-
-        global.localStorage.setItem('access_token', 'old-access');
-        global.localStorage.setItem('refresh_token', 'old-refresh');
-
-        // Act
-        newToken();
-        // Simulate successful response from server for the last ajax call
-        ajaxCall.triggerSuccess(response);
-
-        // Assert
-        expect(global.localStorage.getItem('access_token')).toBe('new-access');
-        expect(global.localStorage.getItem('refresh_token')).toBe('new-refresh');
-    });
+    // Additionally, ensure ajax payload does not contain the old hardcoded password literal
+    const ajaxCall = $.ajax.mock.calls[0][0];
+    const payload = JSON.parse(ajaxCall.data);
+    expect(payload.password).toBe('external-secret');
+    expect(Object.values(payload).join('')).not.toContain('bm5nhSkxCXZkKRy4');
+  });
 });

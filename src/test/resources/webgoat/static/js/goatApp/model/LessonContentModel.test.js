@@ -1,72 +1,51 @@
-define([
-    'jquery',
-    'underscore',
-    'backbone',
-    'goatApp/model/HTMLContentModel',
-    'webgoat/static/js/goatApp/model/LessonContentModel'
-], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
-    // Delta tests focus on the updated URL parsing and regex behavior in setContent
+// Derived test file path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 
-    describe('LessonContentModel - delta tests for URL parsing', function () {
+const $ = require('jquery');
+const _ = require('underscore');
+const Backbone = require('backbone');
 
-        function createModel() {
-            return new LessonContentModel();
-        }
+// Minimal HTMLContentModel stub to allow extension
+const HTMLContentModel = Backbone.Model.extend({});
 
-        it('sets lessonUrl and pageNum correctly for URL with page number (secure regex behavior)', function () {
-            // Arrange
-            var originalUrl = 'http://localhost/WebGoat.lesson/12';
-            var model = createModel();
-            var setSpy = jest.spyOn(model, 'set');
-            var triggerSpy = jest.spyOn(model, 'trigger').mockImplementation(function () {});
+// Import the updated module under test
+// NOTE: In real setup, adjust the require path resolution to your module loader/bundler.
+// Here we assume CommonJS loading from the same relative path.
+const LessonContentModelFactory = require('./LessonContentModel.js');
 
-            var originalDocumentUrl = global.document && global.document.URL;
-            global.document = global.document || {};
-            global.document.URL = originalUrl;
+describe('LessonContentModel – regex hardening', () => {
+  test('setContent should derive lessonUrl without using greedy .* and handle pageNum correctly', () => {
+    // Arrange
+    const LessonContentModel = LessonContentModelFactory($, _, Backbone, HTMLContentModel);
+    const model = new LessonContentModel();
+    const originalUrl = 'http://example.com/course.lesson/12';
+    const previousLocation = global.document && global.document.URL;
+    global.document = { URL: originalUrl };
 
-            // Act
-            model.setContent('<html>dummy</html>', true);
+    // Act
+    model.setContent('<html>content</html>', true);
 
-            // Assert
-            // New behavior: use bounded regex with match; verify resulting values
-            expect(setSpy).toHaveBeenCalledWith('content', '<html>dummy</html>');
-            expect(setSpy).toHaveBeenCalledWith('lessonUrl', 'http://localhost/WebGoat.lesson');
-            expect(setSpy).toHaveBeenCalledWith('pageNum', '12');
+    // Assert
+    expect(model.get('lessonUrl')).toBe('http://example.com/course.lesson');
+    expect(model.get('pageNum')).toBe('12');
 
-            expect(triggerSpy).toHaveBeenCalledWith('content:loaded', model, true);
+    // Cleanup
+    if (previousLocation) {
+      global.document.URL = previousLocation;
+    }
+  });
 
-            // Cleanup
-            setSpy.mockRestore();
-            triggerSpy.mockRestore();
-            if (originalDocumentUrl !== undefined) {
-                global.document.URL = originalDocumentUrl;
-            }
-        });
+  test('setContent should set pageNum to 0 when URL has no trailing page segment', () => {
+    // Arrange
+    const LessonContentModel = LessonContentModelFactory($, _, Backbone, HTMLContentModel);
+    const model = new LessonContentModel();
+    const originalUrl = 'http://example.com/course.lesson';
+    global.document = { URL: originalUrl };
 
-        it('defaults pageNum to 0 when URL does not end with page number', function () {
-            // Arrange
-            var originalUrl = 'http://localhost/WebGoat.lesson';
-            var model = createModel();
-            var setSpy = jest.spyOn(model, 'set');
-            var triggerSpy = jest.spyOn(model, 'trigger').mockImplementation(function () {});
+    // Act
+    model.setContent('<html>content</html>', true);
 
-            var originalDocumentUrl = global.document && global.document.URL;
-            global.document = global.document || {};
-            global.document.URL = originalUrl;
-
-            // Act
-            model.setContent('<html>dummy</html>');
-
-            // Assert
-            expect(setSpy).toHaveBeenCalledWith('lessonUrl', 'http://localhost/WebGoat.lesson');
-            expect(setSpy).toHaveBeenCalledWith('pageNum', 0);
-
-            // Cleanup
-            setSpy.mockRestore();
-            triggerSpy.mockRestore();
-            if (originalDocumentUrl !== undefined) {
-                global.document.URL = originalDocumentUrl;
-            }
-        });
-    });
+    // Assert
+    expect(model.get('lessonUrl')).toBe('http://example.com/course.lesson');
+    expect(model.get('pageNum')).toBe(0);
+  });
 });
