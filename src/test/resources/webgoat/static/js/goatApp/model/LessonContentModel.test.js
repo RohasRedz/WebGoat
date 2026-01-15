@@ -1,51 +1,94 @@
-// Derived test file path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+// File: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 
-const $ = require('jquery');
-const _ = require('underscore');
-const Backbone = require('backbone');
+// Delta tests for LessonContentModel.js focusing on the input-validation and URL-handling changes.
+// - Ensure options.name is sanitized and constrained.
+// - Ensure a safe default is used when name is missing/invalid.
+// - Ensure pageNum and lessonUrl are derived as expected from document.URL.
 
-// Minimal HTMLContentModel stub to allow extension
-const HTMLContentModel = Backbone.Model.extend({});
+define([
+  'jquery',
+  'underscore',
+  'backbone',
+  'goatApp/model/HTMLContentModel',
+  'webgoat/static/js/goatApp/model/LessonContentModel'
+], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
+  'use strict';
 
-// Import the updated module under test
-// NOTE: In real setup, adjust the require path resolution to your module loader/bundler.
-// Here we assume CommonJS loading from the same relative path.
-const LessonContentModelFactory = require('./LessonContentModel.js');
+  describe('LessonContentModel delta tests', function () {
+    var originalUrl;
 
-describe('LessonContentModel – regex hardening', () => {
-  test('setContent should derive lessonUrl without using greedy .* and handle pageNum correctly', () => {
-    // Arrange
-    const LessonContentModel = LessonContentModelFactory($, _, Backbone, HTMLContentModel);
-    const model = new LessonContentModel();
-    const originalUrl = 'http://example.com/course.lesson/12';
-    const previousLocation = global.document && global.document.URL;
-    global.document = { URL: originalUrl };
+    beforeEach(function () {
+      originalUrl = global.document && global.document.URL;
+      // Provide a minimal DOM-like object if not present.
+      if (typeof document === 'undefined') {
+        global.document = { URL: 'http://example.com/Intro.lesson/1' };
+      } else {
+        document.URL = 'http://example.com/Intro.lesson/1';
+      }
+    });
 
-    // Act
-    model.setContent('<html>content</html>', true);
+    afterEach(function () {
+      if (typeof originalUrl !== 'undefined') {
+        document.URL = originalUrl;
+      }
+    });
 
-    // Assert
-    expect(model.get('lessonUrl')).toBe('http://example.com/course.lesson');
-    expect(model.get('pageNum')).toBe('12');
+    it('sanitizes options.name and falls back to safe default', function () {
+      var model = new LessonContentModel();
 
-    // Cleanup
-    if (previousLocation) {
-      global.document.URL = previousLocation;
-    }
-  });
+      // Name contains characters that should be stripped by the new regex.
+      var options = { name: 'Intro../..//\\?<script>' };
+      spyOn(Backbone.Model.prototype, 'fetch').and.callFake(function (opts) {
+        // URL root should be built from sanitized "Intro" only.
+        expect(model.urlRoot).toBe(encodeURIComponent('Intro') + '.lesson');
+        // Ensure options still passed through.
+        expect(opts).toBeDefined();
+        return {
+          done: function () {
+            return this;
+          }
+        };
+      });
 
-  test('setContent should set pageNum to 0 when URL has no trailing page segment', () => {
-    // Arrange
-    const LessonContentModel = LessonContentModelFactory($, _, Backbone, HTMLContentModel);
-    const model = new LessonContentModel();
-    const originalUrl = 'http://example.com/course.lesson';
-    global.document = { URL: originalUrl };
+      model.loadData(options);
+    });
 
-    // Act
-    model.setContent('<html>content</html>', true);
+    it('uses default index when name is missing or becomes empty after sanitization', function () {
+      var model = new LessonContentModel();
 
-    // Assert
-    expect(model.get('lessonUrl')).toBe('http://example.com/course.lesson');
-    expect(model.get('pageNum')).toBe(0);
+      spyOn(Backbone.Model.prototype, 'fetch').and.callFake(function () {
+        expect(model.urlRoot).toBe(encodeURIComponent('index') + '.lesson');
+        return {
+          done: function (cb) {
+            // Simulate backend returning HTML payload; this will exercise setContent.
+            cb('<h1>Lesson</h1>');
+            return this;
+          }
+        };
+      });
+
+      model.loadData({ name: '!!!@@@' }); // should sanitize to empty and use "index"
+      expect(model.get('lessonUrl')).toBe('http://example.com/Intro.lesson');
+      expect(model.get('pageNum')).toBe('1');
+    });
+
+    it('sets pageNum to 0 when URL does not contain page segment', function () {
+      var model = new LessonContentModel();
+      document.URL = 'http://example.com/Intro.lesson';
+
+      spyOn(Backbone.Model.prototype, 'fetch').and.callFake(function () {
+        return {
+          done: function (cb) {
+            cb('<h1>Lesson</h1>');
+            return this;
+          }
+        };
+      });
+
+      model.loadData({ name: 'Intro' });
+
+      expect(model.get('lessonUrl')).toBe('http://example.com/Intro.lesson');
+      expect(model.get('pageNum')).toBe(0);
+    });
   });
 });
