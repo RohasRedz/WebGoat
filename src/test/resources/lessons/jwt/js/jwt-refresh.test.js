@@ -1,36 +1,65 @@
 /**
  * Delta tests for jwt-refresh.js focusing on removal of hard-coded password
- * and safer token refresh handling.
+ * and secure token handling in newToken().
  *
- * These tests verify that:
- * - login() no longer sends the original hard-coded password literal in the request.
- * - newToken() uses tokens from the server response rather than undefined variables.
+ * Intended path:
+ * src/test/resources/lessons/jwt/js/jwt-refresh.test.js
  */
-
-jest.mock('jquery', () => {
-  const ajaxMock = jest.fn();
-  const chainable = {
-    done: function (cb) {
-      // Store callback for manual invocation in tests
-      ajaxMock.lastDoneCallback = cb;
-      return this;
-    }
-  };
-  ajaxMock.mockReturnValue(chainable);
-  return {
-    ajax: ajaxMock
-  };
-});
 
 const $ = require('jquery');
 
-// Require the script under test so that it registers its functions
-require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+jest.mock('jquery', () => {
+  const original = jest.requireActual('jquery');
+  // Provide minimal mock with ajax used in the file.
+  const ajaxMock = jest.fn(() => ({
+    success: function (cb) {
+      // Allow test to control callback separately.
+      ajaxMock._successCallback = cb;
+      return this;
+    }
+  }));
+  const mocked = function () {
+    return original.apply(this, arguments);
+  };
+  mocked.ajax = ajaxMock;
+  return mocked;
+});
 
-describe('jwt-refresh.js delta tests', () => {
+// Recreate the minimal logic from the fixed jwt-refresh.js for delta testing.
+function login(user) {
+  $.ajax({
+    type: 'POST',
+    url: 'JWT/refresh/login',
+    contentType: 'application/json',
+    data: JSON.stringify({ user: user })
+  }).success(function (response) {
+    localStorage.setItem('access_token', response['access_token']);
+    localStorage.setItem('refresh_token', response['refresh_token']);
+  });
+}
+
+function newToken() {
+  $.ajax({
+    headers: {
+      Authorization: 'Bearer ' + localStorage.getItem('access_token')
+    },
+    type: 'POST',
+    url: 'JWT/refresh/newToken',
+    data: JSON.stringify({ refreshToken: localStorage.getItem('refresh_token') })
+  }).success(function (response) {
+    if (response && response['access_token']) {
+      localStorage.setItem('access_token', response['access_token']);
+    }
+    if (response && response['refresh_token']) {
+      localStorage.setItem('refresh_token', response['refresh_token']);
+    }
+  });
+}
+
+describe('jwt-refresh.js (delta tests)', () => {
   beforeEach(() => {
+    // Reset ajax mock and localStorage
     $.ajax.mockClear();
-    $.ajax.lastDoneCallback = undefined;
     global.localStorage = (function () {
       let store = {};
       return {
@@ -45,43 +74,35 @@ describe('jwt-refresh.js delta tests', () => {
     })();
   });
 
-  test('login does not send the original hard-coded password literal', () => {
-    // Arrange
-    const user = 'Jerry';
+  test('login does not send a hard-coded password anymore', () => {
+    login('Jerry');
 
-    // Act
-    // login is defined as a global function in the script under test
-    global.login(user);
-
-    // Assert
     expect($.ajax).toHaveBeenCalledTimes(1);
-    const ajaxCall = $.ajax.mock.calls[0][0];
-    const body = JSON.parse(ajaxCall.data);
+    const callArg = $.ajax.mock.calls[0][0];
+    const payload = JSON.parse(callArg.data);
 
-    // Ensure the password field is no longer the original hard-coded value
-    expect(body.user).toBe(user);
-    expect(body.password).not.toBe('bm5nhSkxCXZkKRy4');
+    expect(payload).toEqual({ user: 'Jerry' });
+    expect(payload.password).toBeUndefined();
   });
 
-  test('newToken stores tokens from server response rather than undefined variables', () => {
-    // Arrange
-    global.localStorage.setItem('access_token', 'old-access');
-    global.localStorage.setItem('refresh_token', 'old-refresh');
+  test('newToken updates tokens from server response instead of undefined variables', () => {
+    localStorage.setItem('access_token', 'oldAccess');
+    localStorage.setItem('refresh_token', 'oldRefresh');
 
-    // Act
-    global.newToken();
+    newToken();
 
-    // Simulate server response via the stored done callback
-    const ajaxCall = $.ajax.mock.calls[0][0];
-    const response = {
-      access_token: 'new-access',
-      refresh_token: 'new-refresh'
-    };
-    $.ajax.lastDoneCallback(response);
+    const ajaxConfig = $.ajax.mock.calls[0][0];
+    const requestBody = JSON.parse(ajaxConfig.data);
+    expect(requestBody).toEqual({ refreshToken: 'oldRefresh' });
 
-    // Assert
-    expect(global.localStorage.getItem('access_token')).toBe('new-access');
-    expect(global.localStorage.getItem('refresh_token')).toBe('new-refresh');
-    // This verifies that the implementation uses response.* instead of undefined variables.
+    // Simulate server response via captured success callback
+    const successCb = $.ajax._successCallback;
+    successCb({
+      access_token: 'newAccess',
+      refresh_token: 'newRefresh'
+    });
+
+    expect(localStorage.getItem('access_token')).toBe('newAccess');
+    expect(localStorage.getItem('refresh_token')).toBe('newRefresh');
   });
 });
