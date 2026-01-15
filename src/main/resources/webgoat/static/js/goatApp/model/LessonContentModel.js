@@ -7,6 +7,38 @@ define(['jquery',
         Backbone,
         HTMLContentModel){
 
+    function getSafeLessonUrl(url) {
+        // Enforce basic format and length limits to mitigate ReDoS risk
+        if (typeof url !== 'string') {
+            return '';
+        }
+
+        // Limit length to a reasonable maximum to avoid pathological inputs
+        var MAX_URL_LENGTH = 2048;
+        if (url.length > MAX_URL_LENGTH) {
+            url = url.substring(0, MAX_URL_LENGTH);
+        }
+
+        // Use a simpler, bounded pattern and avoid backtracking-heavy constructs
+        // Expected formats:
+        //   ...something.lesson
+        //   ...something.lesson/1234   (1–4 digits)
+        //
+        // We derive the base lesson URL and page number with lightweight logic
+        var lessonMatch = url.match(/^(.*?\.lesson)(?:\/(\d{1,4}))?$/);
+        if (!lessonMatch) {
+            return {
+                lessonUrl: url,
+                pageNum: 0
+            };
+        }
+
+        return {
+            lessonUrl: lessonMatch[1],
+            pageNum: lessonMatch[2] ? parseInt(lessonMatch[2], 10) : 0
+        };
+    }
+
     return HTMLContentModel.extend({
         urlRoot:null,
         defaults: {
@@ -19,9 +51,7 @@ define(['jquery',
         },
 
         loadData: function(options) {
-            // Use safe encoding for the lesson name without double-encoding or unnecessary escaping
-            var lessonName = String(options.name || '');
-            this.urlRoot = encodeURIComponent(lessonName) + '.lesson';
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
             var self = this;
             this.fetch().done(function(data) {
                 self.setContent(data);
@@ -34,30 +64,9 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a simpler, non-backtracking-heavy approach to derive lessonUrl and pageNum
-            var currentUrl = String(document.URL || '');
-
-            // Derive lessonUrl by stripping any trailing `.lesson` and optional `/digits`
-            // Example:
-            //   /foo/bar.lesson/12  -> /foo/bar.lesson
-            //   /foo/bar.lesson     -> /foo/bar.lesson
-            var lessonUrlMatch = currentUrl.match(/^(.*?\.lesson)(?:\/\d{1,4})?$/);
-            if (lessonUrlMatch && lessonUrlMatch[1]) {
-                this.set('lessonUrl', lessonUrlMatch[1]);
-            } else {
-                this.set('lessonUrl', currentUrl);
-            }
-
-            // Derive pageNum using a lightweight regex without nested or ambiguous quantifiers
-            var pageNum = 0;
-            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch && pageMatch[1]) {
-                pageNum = parseInt(pageMatch[1], 10);
-                if (!Number.isFinite(pageNum)) {
-                    pageNum = 0;
-                }
-            }
-            this.set('pageNum', pageNum);
+            var safe = getSafeLessonUrl(document.URL);
+            this.set('lessonUrl', safe.lessonUrl);
+            this.set('pageNum', safe.pageNum);
 
             this.trigger('content:loaded',this,loadHelps);
         },

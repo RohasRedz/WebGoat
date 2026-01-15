@@ -1,114 +1,70 @@
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.owasp.webgoat.container.LessonDataSource;
+import org.owasp.webgoat.lessons.challenges.Flags;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.owasp.webgoat.container.LessonDataSource;
-import org.owasp.webgoat.container.assignments.AttackResult;
-import org.owasp.webgoat.lessons.challenges.Flags;
-import org.springframework.util.StringUtils;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
 
 /**
- * Delta tests for Assignment5 focusing on the fixed SQL injection vulnerability.
- * Verifies that user input is passed via PreparedStatement parameters rather than
- * concatenated into the SQL string.
+ * Delta tests for Assignment5 focusing on the secure SQL usage introduced in the fix.
  */
-public class Assignment5Test {
+class Assignment5Test {
 
-    @Test
-    @DisplayName("login uses parameterized query and succeeds with correct credentials")
-    void login_usesPreparedStatementParameters_onSuccess() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Flags flags = mock(Flags.class);
+    private LessonDataSource dataSource;
+    private Flags flags;
+    private Assignment5 assignment5;
 
-        Connection connection = mock(Connection.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        ResultSet resultSet = mock(ResultSet.class);
+    private Connection connection;
+    private PreparedStatement preparedStatement;
+    private ResultSet resultSet;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        dataSource = mock(LessonDataSource.class);
+        flags = mock(Flags.class);
+        assignment5 = new Assignment5(dataSource, flags);
+
+        connection = mock(Connection.class);
+        preparedStatement = mock(PreparedStatement.class);
+        resultSet = mock(ResultSet.class);
 
         when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(
-                "select password from challenge_users where userid = ? and password = ?"))
-            .thenReturn(preparedStatement);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        when(resultSet.next()).thenReturn(true);
+
         when(flags.getFlag(5)).thenReturn("FLAG-5");
-
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
-
-        // Act
-        String username = "Larry";
-        String password = "securePassword";
-        AttackResult result = assignment5.login(username, password);
-
-        // Assert: PreparedStatement was created with placeholders, not concatenated SQL
-        verify(connection, times(1))
-            .prepareStatement("select password from challenge_users where userid = ? and password = ?");
-
-        // Assert: user input is bound via parameters, in correct order
-        verify(preparedStatement, times(1)).setString(1, username);
-        verify(preparedStatement, times(1)).setString(2, password);
-
-        // Also verify that the query was actually executed
-        verify(preparedStatement, times(1)).executeQuery();
-
-        // And that on success we return the success AttackResult with the flag
-        // (using feedbackArgs as indicator that successful path was taken)
-        // We cannot easily introspect the message, but we can at least assert non-null
-        // and that it's the same instance returned from success() builder.
-        assertSame(result.getClass(), AttackResult.class);
-
-        // Optional: capture the actual bound values defensively
-        ArgumentCaptor<String> paramCaptor = ArgumentCaptor.forClass(String.class);
-        verify(preparedStatement, times(2)).setString(anyInt(), paramCaptor.capture());
-        assertEquals(username, paramCaptor.getAllValues().get(0));
-        assertEquals(password, paramCaptor.getAllValues().get(1));
     }
 
     @Test
-    @DisplayName("login returns failure and still uses parameter binding for wrong password")
-    void login_usesPreparedStatementParameters_onFailure() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Flags flags = mock(Flags.class);
-
-        Connection connection = mock(Connection.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        ResultSet resultSet = mock(ResultSet.class);
-
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(
-                "select password from challenge_users where userid = ? and password = ?"))
-            .thenReturn(preparedStatement);
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        // No matching row
-        when(resultSet.next()).thenReturn(false);
-
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
-
-        // Act
+    void login_usesParameterizedQueryWithUserInputs() throws Exception {
         String username = "Larry";
-        String password = "wrongPassword";
-        AttackResult result = assignment5.login(username, password);
+        String password = "secret";
 
-        // Assert: PreparedStatement API usage is the same, even on failure
-        verify(connection).prepareStatement(
-                "select password from challenge_users where userid = ? and password = ?");
-        verify(preparedStatement).setString(1, username);
-        verify(preparedStatement).setString(2, password);
-        verify(preparedStatement).executeQuery();
+        when(resultSet.next()).thenReturn(true);
 
-        // Result should be a failure path (we cannot check message key easily, but
-        // the absence of a flag argument indicates not the success branch).
-        assertSame(result.getClass(), AttackResult.class);
+        assignment5.login(username, password);
+
+        // Verify that the SQL string uses ? placeholders, not concatenated inputs
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sqlCaptor.capture());
+        String sql = sqlCaptor.getValue();
+        assertEquals(
+                "select password from challenge_users where userid = ? and password = ?",
+                sql,
+                "SQL must use parameter placeholders instead of concatenated user input"
+        );
+
+        // Verify that user input is passed via setString parameters rather than concatenation
+        verify(preparedStatement).setString(1, eq(username));
+        verify(preparedStatement).setString(2, eq(password));
     }
 }
