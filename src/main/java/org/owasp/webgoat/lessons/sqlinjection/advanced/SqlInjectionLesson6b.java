@@ -1,1 +1,1 @@
-/* fixed Java content for SqlInjectionLesson6b.java */
+/* fixed SqlInjectionLesson6b.java content */
