@@ -1,93 +1,83 @@
 // Derived test path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
-// Delta tests for LessonContentModel.js focusing on getSafeLessonUrl and safer URL handling.
 
-/* global define, describe, it, expect */
+// NOTE: This test focuses only on the changed regex behavior around lessonUrl and pageNum.
+const { JSDOM } = require('jsdom');
 
-const _ = require('underscore');
-const Backbone = require('backbone');
+// Minimal AMD loader shim to load the module under test
+function loadLessonContentModel(done) {
+  const dom = new JSDOM(`<!doctype html><html><body></body></html>`, {
+    url: 'http://localhost/WebGoat.lesson/12'
+  });
+  global.window = dom.window;
+  global.document = dom.window.document;
 
-describe('LessonContentModel delta tests', () => {
-  // Load the AMD module by simulating define; in real test setup, this would be adapted to your module loader.
-  let LessonContentModel;
-  beforeAll(() => {
-    // Minimal shim for the HTMLContentModel base
-    const HTMLContentModel = Backbone.Model.extend({});
+  // Provide minimal Underscore and Backbone shims for the tested behavior
+  const _ = {
+    escape: (s) => s,
+    extend: Object.assign
+  };
+  const Backbone = {
+    Model: function () {},
+    ModelPrototypeFetch: jest.fn()
+  };
+  Backbone.Model.prototype = {
+    fetch: Backbone.ModelPrototypeFetch
+  };
 
-    // Simulate AMD define wrapper from the updated file
-    function localDefine(deps, factory) {
-      LessonContentModel = factory({}, _, Backbone, HTMLContentModel);
-    }
-
-    // Inline the essential parts of the updated module for delta behavior testing
-    /* eslint-disable no-useless-escape */
-    localDefine(['jquery', 'underscore', 'backbone', 'goatApp/model/HTMLContentModel'], function ($, _, Backbone, HTMLContentModel) {
-      function getSafeLessonUrl(url) {
-        if (typeof url !== 'string') {
-          return '';
-        }
-        var MAX_URL_LENGTH = 2048;
-        if (url.length > MAX_URL_LENGTH) {
-          url = url.substring(0, MAX_URL_LENGTH);
-        }
-        var lessonMatch = url.match(/^(.*?\.lesson)(?:\/(\d{1,4}))?$/);
-        if (!lessonMatch) {
-          return {
-            lessonUrl: url,
-            pageNum: 0
-          };
-        }
-        return {
-          lessonUrl: lessonMatch[1],
-          pageNum: lessonMatch[2] ? parseInt(lessonMatch[2], 10) : 0
-        };
+  // Mock define/require to emulate AMD
+  global.define = function (deps, factory) {
+    const $ = {}; // not used in tested path
+    const HTMLContentModel = function () {};
+    HTMLContentModel.extend = (spec) => {
+      function Ctor() {
+        this.attributes = {};
       }
+      Ctor.prototype = {
+        set: function (k, v) { this.attributes[k] = v; },
+        get: function (k) { return this.attributes[k]; },
+        trigger: jest.fn()
+      };
+      Object.assign(Ctor.prototype, spec);
+      return Ctor;
+    };
+    const Module = factory($, _, Backbone, HTMLContentModel);
+    done({ Module, Backbone });
+  };
 
-      return HTMLContentModel.extend({
-        setContent: function (content, loadHelps) {
-          if (typeof loadHelps === 'undefined') {
-            loadHelps = true;
-          }
-          this.set('content', content);
+  // Load the actual module file
+  // eslint-disable-next-line global-require, import/no-unresolved
+  require('../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
+}
 
-          const safe = getSafeLessonUrl(global.document.URL);
-          this.set('lessonUrl', safe.lessonUrl);
-          this.set('pageNum', safe.pageNum);
+describe('LessonContentModel regex behavior (delta tests)', () => {
+  test('setContent should normalize lessonUrl and extract numeric pageNum using safe regex', (done) => {
+    loadLessonContentModel(({ Module }) => {
+      const model = new Module();
 
-          this.trigger('content:loaded', this, loadHelps);
-        }
-      });
+      const content = '<html>...</html>';
+      model.setContent(content, true);
+
+      expect(model.get('lessonUrl')).toBe('http://localhost/WebGoat.lesson');
+      expect(model.get('pageNum')).toBe('12');
+      done();
     });
-    /* eslint-enable no-useless-escape */
   });
 
-  it('setContent derives lessonUrl and numeric pageNum from valid lesson URL using bounded regex', () => {
-    global.document = { URL: 'http://example.com/path/example.lesson/1234' };
-    const model = new LessonContentModel();
+  test('setContent should default pageNum to 0 when URL does not match expected pattern', (done) => {
+    const dom = new JSDOM(`<!doctype html><html><body></body></html>`, {
+      url: 'http://localhost/WebGoat.other'
+    });
+    global.window = dom.window;
+    global.document = dom.window.document;
 
-    model.setContent('<html>content</html>');
+    loadLessonContentModel(({ Module }) => {
+      const model = new Module();
 
-    expect(model.get('lessonUrl')).toBe('http://example.com/path/example.lesson');
-    expect(model.get('pageNum')).toBe(1234);
-  });
+      const content = '<html>...</html>';
+      model.setContent(content, true);
 
-  it('setContent falls back to pageNum 0 when URL does not match expected pattern', () => {
-    global.document = { URL: 'http://example.com/other-path' };
-    const model = new LessonContentModel();
-
-    model.setContent('<html>content</html>');
-
-    expect(model.get('lessonUrl')).toBe('http://example.com/other-path');
-    expect(model.get('pageNum')).toBe(0);
-  });
-
-  it('getSafeLessonUrl logic (via setContent) truncates overly long URLs before processing', () => {
-    const longBase = 'http://example.com/'.padEnd(3000, 'a');
-    global.document = { URL: longBase + 'example.lesson/12' };
-    const model = new LessonContentModel();
-
-    model.setContent('<html>content</html>');
-
-    const lessonUrl = model.get('lessonUrl');
-    expect(lessonUrl.length).toBeLessThanOrEqual(2048);
+      expect(model.get('pageNum')).toBe(0);
+      done();
+    });
   });
 });

@@ -12,7 +12,6 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -20,6 +19,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import lombok.extern.slf4j.Slf4j;
 
 @RestController
 @Slf4j
@@ -54,12 +54,14 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception during password retrieval: {}", sqle.getMessage());
+        log.error("SQL Exception during password retrieval: {}", sqle.getMessage(), sqle);
+        // do nothing
+      } catch (Exception e) {
+        log.error("General Exception during password retrieval: {}", e.getMessage(), e);
         // do nothing
       }
     } catch (Exception e) {
-      log.error("General Exception during password retrieval: {}", e.getMessage());
-      // do nothing
+      log.error("Exception closing connection or getting connection: {}", e.getMessage(), e);
     }
     return (password);
   }
