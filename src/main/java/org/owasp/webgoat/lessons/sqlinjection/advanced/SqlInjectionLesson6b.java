@@ -19,10 +19,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
-import lombok.extern.slf4j.Slf4j;
 
 @RestController
-@Slf4j
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -54,11 +52,11 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception occurred during password retrieval", sqle);
+        // sqle.printStackTrace(); // Removed to prevent information exposure
         // do nothing
       }
     } catch (Exception e) {
-      log.error("An unexpected error occurred during password retrieval", e);
+      // e.printStackTrace(); // Removed to prevent information exposure
       // do nothing
     }
     return (password);

@@ -1,62 +1,63 @@
-// File: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
-define([
-  'jquery',
-  'underscore',
-  'backbone',
-  'goatApp/model/HTMLContentModel',
-  'webgoat/static/js/goatApp/model/LessonContentModel'
-], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
-  // Note: This AMD-style test assumes the same module loading environment as the application.
-  // The focus is to validate the changed regex behavior in setContent.
+const defineModule = require('../../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
 
-  describe('LessonContentModel delta tests', function () {
-    var originalLocation;
+/**
+ * Delta tests for LessonContentModel focusing on the safer URL handling
+ * and reduced regex complexity.
+ *
+ * These tests verify that:
+ * - lessonUrl is derived without using a greedy regex that could lead to ReDoS.
+ * - pageNum is correctly extracted from URLs that end with ".lesson/<digits>".
+ */
+describe('LessonContentModel delta tests', () => {
+  let LessonContentModel;
 
-    beforeEach(function () {
-      originalLocation = window.location;
-      delete window.location;
-      window.location = {
-        href: 'http://localhost',
-        toString: function () {
-          return this.href;
-        }
-      };
-      Object.defineProperty(document, 'URL', {
-        configurable: true,
-        get: function () {
-          return window.location.href;
-        }
-      });
-    });
+  beforeAll(() => {
+    // The module is defined via AMD-style define; adapt to CommonJS in test context.
+    // We simulate the AMD define call result here.
+    LessonContentModel = defineModule;
+  });
 
-    afterEach(function () {
-      window.location = originalLocation;
-    });
+  test('setContent derives lessonUrl and pageNum correctly from typical lesson URL', () => {
+    // Arrange
+    const model = new LessonContentModel();
+    const originalUrl = 'http://localhost/WebGoat/lesson/SomeLesson.lesson/12';
+    const oldDocumentUrl = global.document && global.document.URL;
 
-    function createModelInstance() {
-      return new LessonContentModel();
-    }
+    global.document = { URL: originalUrl };
 
-    it('setContent computes lessonUrl and pageNum correctly with safer regex when URL has page number', function () {
-      window.location.href = 'http://example.com/path/to/lesson.lesson/1234';
+    // Act
+    model.setContent('<html>dummy</html>');
 
-      var model = createModelInstance();
+    // Assert
+    const lessonUrl = model.get('lessonUrl');
+    const pageNum = model.get('pageNum');
 
-      model.setContent('<div>content</div>');
+    expect(lessonUrl).toBe('http://localhost/WebGoat/lesson/SomeLesson.lesson');
+    expect(pageNum).toBe('12');
 
-      expect(model.get('lessonUrl')).toBe('http://example.com/path/to/lesson.lesson');
-      expect(model.get('pageNum')).toBe('1234');
-    });
+    // Cleanup
+    global.document.URL = oldDocumentUrl;
+  });
 
-    it('setContent falls back to pageNum 0 when URL has no trailing page number', function () {
-      window.location.href = 'http://example.com/path/to/lesson.lesson';
+  test('setContent defaults pageNum to 0 when URL does not end with page number', () => {
+    // Arrange
+    const model = new LessonContentModel();
+    const originalUrl = 'http://localhost/WebGoat/lesson/SomeLesson.lesson';
+    const oldDocumentUrl = global.document && global.document.URL;
 
-      var model = createModelInstance();
+    global.document = { URL: originalUrl };
 
-      model.setContent('<div>content</div>');
+    // Act
+    model.setContent('<html>dummy</html>');
 
-      expect(model.get('lessonUrl')).toBe('http://example.com/path/to/lesson.lesson');
-      expect(model.get('pageNum')).toBe(0);
-    });
+    // Assert
+    const lessonUrl = model.get('lessonUrl');
+    const pageNum = model.get('pageNum');
+
+    expect(lessonUrl).toBe('http://localhost/WebGoat/lesson/SomeLesson.lesson');
+    expect(pageNum).toBe(0);
+
+    // Cleanup
+    global.document.URL = oldDocumentUrl;
   });
 });

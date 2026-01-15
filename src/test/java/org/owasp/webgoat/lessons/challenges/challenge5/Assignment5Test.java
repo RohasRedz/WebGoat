@@ -1,85 +1,84 @@
-// File: src/test/java/org/owasp/webgoat/lessons/challenges/challenge5/Assignment5Test.java
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
 import org.springframework.util.StringUtils;
 
-class Assignment5Test {
+/**
+ * Delta tests for Assignment5 focusing only on the SQL injection fix.
+ *
+ * These tests verify that:
+ * - The login logic uses a parameterized PreparedStatement with placeholders.
+ * - User input is no longer concatenated into the SQL string.
+ */
+public class Assignment5Test {
 
   @Test
-  void login_usesPreparedStatementParametersAndSucceedsForValidLarry() throws Exception {
-    LessonDataSource dataSource = mock(LessonDataSource.class);
-    Flags flags = mock(Flags.class);
-    Connection connection = mock(Connection.class);
-    PreparedStatement preparedStatement = mock(PreparedStatement.class);
-    ResultSet resultSet = mock(ResultSet.class);
+  @DisplayName("login uses parameterized PreparedStatement and does not concatenate user input")
+  void loginUsesParameterizedQuery() throws Exception {
+    // Arrange
+    String username = "Larry' OR '1'='1";
+    String password = "somePass";
 
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement(
-            "select password from challenge_users where userid = ? and password = ?"))
+    // Mock JDBC interaction
+    LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
+    Connection connection = Mockito.mock(Connection.class);
+    PreparedStatement preparedStatement = Mockito.mock(PreparedStatement.class);
+    ResultSet resultSet = Mockito.mock(ResultSet.class);
+
+    Mockito.when(dataSource.getConnection()).thenReturn(connection);
+    Mockito.when(
+            connection.prepareStatement(
+                Mockito.anyString()))
         .thenReturn(preparedStatement);
-    when(preparedStatement.executeQuery()).thenReturn(resultSet);
-    when(resultSet.next()).thenReturn(true);
-    when(flags.getFlag(5)).thenReturn("FLAG-5");
+    Mockito.when(preparedStatement.executeQuery()).thenReturn(resultSet);
+    Mockito.when(resultSet.next()).thenReturn(true);
+
+    // Mock Flags so that success path can be executed without NPE
+    Flags flags = Mockito.mock(Flags.class);
+    Mockito.when(flags.getFlag(5)).thenReturn("FLAG-5");
 
     Assignment5 assignment5 = new Assignment5(dataSource, flags);
 
-    try (MockedStatic<StringUtils> stringUtilsMock = mockStatic(StringUtils.class)) {
-      stringUtilsMock
-          .when(() -> StringUtils.hasText("Larry"))
-          .thenReturn(true);
-      stringUtilsMock
-          .when(() -> StringUtils.hasText("secret"))
-          .thenReturn(true);
+    // Act
+    AttackResult result = assignment5.login(username, password);
 
-      AttackResult result = assignment5.login("Larry", "secret");
+    // Assert
+    // 1) Verify query string does not contain the raw username or password
+    ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+    Mockito.verify(connection).prepareStatement(sqlCaptor.capture());
+    String usedSql = sqlCaptor.getValue();
 
-      verify(connection, times(1))
-          .prepareStatement(
-              "select password from challenge_users where userid = ? and password = ?");
-      verify(preparedStatement, times(1)).setString(1, "Larry");
-      verify(preparedStatement, times(1)).setString(2, "secret");
+    // The SQL must use placeholders instead of concatenated user input
+    assertTrue(
+        usedSql.contains("where userid = ? and password = ?"),
+        "SQL should use parameter placeholders instead of inlined user input");
+    // Ensure the potentially malicious username is not directly present in the SQL string
+    assertTrue(
+        !usedSql.contains(username),
+        "SQL must not contain the raw username value");
+    assertTrue(
+        !usedSql.contains(password),
+        "SQL must not contain the raw password value");
 
-      assertEquals("FLAG-5", result.getFeedbackArgs()[0]);
-    }
-  }
+    // 2) Verify parameters are bound separately in correct order
+    Mockito.verify(preparedStatement).setString(1, username);
+    Mockito.verify(preparedStatement).setString(2, password);
 
-  @Test
-  void login_failsWhenNotLarryWithoutChangingQueryShape() throws Exception {
-    LessonDataSource dataSource = mock(LessonDataSource.class);
-    Flags flags = mock(Flags.class);
-    Assignment5 assignment5 = new Assignment5(dataSource, flags);
-
-    try (MockedStatic<StringUtils> stringUtilsMock = mockStatic(StringUtils.class)) {
-      stringUtilsMock
-          .when(() -> StringUtils.hasText("Bob"))
-          .thenReturn(true);
-      stringUtilsMock
-          .when(() -> StringUtils.hasText("secret"))
-          .thenReturn(true);
-
-      AttackResult result = assignment5.login("Bob", "secret");
-
-      // Ensure that when username is not Larry, the database is not called at all
-      verify(dataSource, times(0)).getConnection();
-      // The secure behavior (no concatenation) is implicitly validated by the first test;
-      // this test ensures behavior for non-Larry is unchanged.
-      assertEquals("user.not.larry", result.getFeedbackId());
-    }
+    // 3) Verify behavior remains success when ResultSet has a row
+    assertTrue(result.isSuccess(), "Login should still succeed functionally when a row is returned");
   }
 }

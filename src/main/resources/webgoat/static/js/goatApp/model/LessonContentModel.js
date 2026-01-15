@@ -3,11 +3,7 @@ define([
     'underscore',
     'backbone',
     'goatApp/model/HTMLContentModel'
-],
-function($,
-         _,
-         Backbone,
-         HTMLContentModel) {
+], function ($, _, Backbone, HTMLContentModel) {
 
     return HTMLContentModel.extend({
         urlRoot: null,
@@ -20,28 +16,32 @@ function($,
 
         },
 
-        loadData: function(options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
+        loadData: function (options) {
+            // Use encodeURIComponent directly, avoid double encoding and handle basic normalization
+            var safeName = encodeURIComponent(String(options.name || ''));
+
+            this.urlRoot = safeName + '.lesson';
+
             var self = this;
-            this.fetch().done(function(data) {
+            this.fetch().done(function (data) {
                 self.setContent(data);
             });
         },
 
-        setContent: function(content, loadHelps) {
+        setContent: function (content, loadHelps) {
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
             this.set('content', content);
 
-            this.set(
-                'lessonUrl',
-                document.URL.replace(/(.*)\.lesson.*/, '$1.lesson')
-            );
+            // Defensive handling of document.URL without overly complex regex
+            var currentUrl = String(document.URL || '');
+            var baseLessonUrl = currentUrl.split('.lesson')[0] + '.lesson';
+            this.set('lessonUrl', baseLessonUrl);
 
-            var pageMatch = document.URL.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
+            var pageNumMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageNumMatch) {
+                this.set('pageNum', pageNumMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
@@ -51,10 +51,7 @@ function($,
 
         fetch: function (options) {
             options = options || {};
-            return Backbone.Model.prototype.fetch.call(
-                this,
-                _.extend({ dataType: 'html' }, options)
-            );
+            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: 'html' }, options));
         }
     });
 });
