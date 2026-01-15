@@ -1,104 +1,74 @@
-/**
- * Delta tests for LessonContentModel.js focusing on the updated regex handling and URL parsing.
- *
- * Intended path:
- * src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
- */
+// Derived test path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 
-const $ = require('jquery');
-const _ = require('underscore');
-const Backbone = require('backbone');
+// Delta tests for LessonContentModel.js focusing on:
+// - Safer regex behavior and page number extraction
+// - Sanitization of options.name when constructing urlRoot
 
-// Since the original code uses AMD define(), we simulate the factory directly here.
-// In a real test environment, you'd likely use a loader (e.g., requirejs) or refactor.
-const HTMLContentModel = Backbone.Model.extend({});
+define([
+    'jquery',
+    'underscore',
+    'backbone',
+    'goatApp/model/HTMLContentModel',
+    'webgoat/static/js/goatApp/model/LessonContentModel'
+], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
+    'use strict';
 
-function createLessonContentModelModule() {
-  return (function ($, _, Backbone, HTMLContentModel) {
-    return HTMLContentModel.extend({
-      urlRoot: null,
-      defaults: {
-        items: null,
-        selectedItem: null
-      },
+    describe('LessonContentModel delta tests', function () {
+        let model;
 
-      initialize: function (options) {},
-
-      loadData: function (options) {
-        this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
-        const self = this;
-        this.fetch().done(function (data) {
-          self.setContent(data);
+        beforeEach(function () {
+            model = new LessonContentModel();
         });
-      },
 
-      setContent: function (content, loadHelps) {
-        if (typeof loadHelps === 'undefined') {
-          loadHelps = true;
-        }
-        this.set('content', content);
+        it('setContent should derive lessonUrl without catastrophic regex and extract numeric pageNum', function () {
+            // Arrange
+            var originalUrl = 'http://example.com/lesson/SomeLesson.lesson/1234';
+            spyOn(document, 'URL', 'get').and.returnValue(originalUrl);
 
-        // This block is copied from the fixed file to validate the changed behavior.
-        const lessonUrlPattern = /\.lesson.*/;
-        this.set('lessonUrl', document.URL.replace(lessonUrlPattern, '.lesson'));
+            // Act
+            model.setContent('<html>dummy</html>', true);
 
-        const pagePattern = /.*\.lesson\/(\d{1,4})$/;
-        if (pagePattern.test(document.URL)) {
-          this.set('pageNum', document.URL.replace(pagePattern, '$1'));
-        } else {
-          this.set('pageNum', 0);
-        }
-        this.trigger('content:loaded', this, loadHelps);
-      },
+            // Assert
+            expect(model.get('lessonUrl')).toBe('http://example.com/lesson/SomeLesson.lesson');
+            expect(model.get('pageNum')).toBe('1234');
+        });
 
-      fetch: function (options) {
-        options = options || {};
-        return Backbone.Model.prototype.fetch.call(
-          this,
-          _.extend({ dataType: 'html' }, options)
-        );
-      }
+        it('setContent should default pageNum to 0 when URL has no page segment', function () {
+            // Arrange
+            var originalUrl = 'http://example.com/lesson/SomeLesson.lesson';
+            spyOn(document, 'URL', 'get').and.returnValue(originalUrl);
+
+            // Act
+            model.setContent('<html>dummy</html>', true);
+
+            // Assert
+            expect(model.get('pageNum')).toBe(0);
+        });
+
+        it('loadData should sanitize options.name before using it in urlRoot', function () {
+            // Arrange
+            // Name containing characters that should be stripped by the new allowlist
+            var unsafeName = 'less/on\\name?<script>';
+
+            spyOn(model, 'fetch').and.callFake(function () {
+                return {
+                    done: function (cb) {
+                        cb('<html>dummy</html>');
+                    }
+                };
+            });
+
+            // Act
+            model.loadData({ name: unsafeName });
+
+            // Assert
+            var urlRoot = model.urlRoot;
+            // Expectation: only word chars, dot, dash and underscore remain
+            expect(urlRoot).toMatch(/^[A-Za-z0-9_.%-]+\.lesson$/);
+            expect(urlRoot).not.toContain('<');
+            expect(urlRoot).not.toContain('>');
+            expect(urlRoot).not.toContain('/');
+            expect(urlRoot).not.toContain('\\');
+        });
     });
-  })($, _, Backbone, HTMLContentModel);
-}
-
-describe('LessonContentModel regex handling (delta tests)', () => {
-  let LessonContentModel;
-  let model;
-
-  beforeEach(() => {
-    LessonContentModel = createLessonContentModelModule();
-    model = new LessonContentModel();
-  });
-
-  test('setContent uses precompiled regex patterns and normalizes lessonUrl', () => {
-    const originalUrl = 'http://example.com/path/to/lesson/Intro.lesson/1234';
-    Object.defineProperty(global, 'document', {
-      value: { URL: originalUrl },
-      configurable: true
-    });
-
-    const contentLoadedSpy = jest.fn();
-    model.on('content:loaded', contentLoadedSpy);
-
-    model.setContent('<html>content</html>', true);
-
-    expect(model.get('lessonUrl')).toBe(
-      'http://example.com/path/to/lesson/Intro.lesson'
-    );
-    expect(model.get('pageNum')).toBe('1234');
-    expect(contentLoadedSpy).toHaveBeenCalledWith(model, true);
-  });
-
-  test('setContent assigns pageNum 0 when URL does not match the page pattern', () => {
-    const originalUrl = 'http://example.com/path/to/lesson/Intro.lesson';
-    Object.defineProperty(global, 'document', {
-      value: { URL: originalUrl },
-      configurable: true
-    });
-
-    model.setContent('<html>content</html>', false);
-
-    expect(model.get('pageNum')).toBe(0);
-  });
 });
