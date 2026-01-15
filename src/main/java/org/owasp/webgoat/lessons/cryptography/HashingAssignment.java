@@ -11,6 +11,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.util.Random;
 import javax.xml.bind.DatatypeConverter;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
@@ -34,7 +35,6 @@ public class HashingAssignment implements AssignmentEndpoint {
     String md5Hash = (String) request.getSession().getAttribute("md5Hash");
     if (md5Hash == null) {
 
-      // FIX: Replaced java.util.Random with java.security.SecureRandom for cryptographic operations
       String secret = SECRETS[new SecureRandom().nextInt(SECRETS.length)];
 
       MessageDigest md = MessageDigest.getInstance("MD5");
@@ -53,7 +53,6 @@ public class HashingAssignment implements AssignmentEndpoint {
 
     String sha256 = (String) request.getSession().getAttribute("sha256");
     if (sha256 == null) {
-      // FIX: Replaced java.util.Random with java.security.SecureRandom for cryptographic operations
       String secret = SECRETS[new SecureRandom().nextInt(SECRETS.length)];
       sha256 = getHash(secret, "SHA-256");
       request.getSession().setAttribute("sha256Hash", sha256);
