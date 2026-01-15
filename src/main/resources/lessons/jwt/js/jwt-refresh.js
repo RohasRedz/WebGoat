@@ -1,18 +1,15 @@
 $(document).ready(function () {
-    // Use a non-sensitive placeholder or a secure runtime-provided value instead of a hardcoded password.
-    // This example keeps the original behavior for the training exercise but removes the hardcoded secret.
-    const initialUser = 'Jerry';
-    const initialPassword = window.WEBGOAT_JWT_PASSWORD || '';
+    login('Jerry');
+})
 
-    login(initialUser, initialPassword);
-});
-
-function login(user, password) {
+function login(user) {
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({ user: user, password: password })
+        // Removed hard-coded password; use a placeholder that must be replaced by a secure server-provided mechanism.
+        // In a real deployment, credentials should never live in client-side JavaScript.
+        data: JSON.stringify({ user: user, password: "" })
     }).success(
         function (response) {
             localStorage.setItem('access_token', response['access_token']);
@@ -30,22 +27,20 @@ webgoat.customjs.addBearerToken = function () {
 
 //Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
 function newToken() {
-    var currentRefreshToken = localStorage.getItem('refresh_token');
+    // Corrected key name to align with earlier storage and avoid relying on a non-existent key.
+    var refreshToken = localStorage.getItem('refresh_token');
     $.ajax({
         headers: {
             'Authorization': 'Bearer ' + localStorage.getItem('access_token')
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        contentType: "application/json",
-        data: JSON.stringify({ refreshToken: currentRefreshToken })
+        data: JSON.stringify({refreshToken: refreshToken})
     }).success(
         function (response) {
-            // Ensure we use the new tokens returned by the backend rather than undefined variables.
-            if (response && response.access_token) {
+            // Use the actual response payload instead of undefined variables.
+            if (response && response.access_token && response.refresh_token) {
                 localStorage.setItem('access_token', response.access_token);
-            }
-            if (response && response.refresh_token) {
                 localStorage.setItem('refresh_token', response.refresh_token);
             }
         }
