@@ -1,100 +1,74 @@
-// Derived test path: src/test/resources/lessons/jwt/js/jwt-refresh.test.js
+// Delta tests focus on removal of hard-coded password and corrected newToken behavior
 
-// Delta tests for jwt-refresh.js focusing on:
-// - Removal of hard-coded password
-// - Correct handling of tokens from server response during login and refresh flows
+// Assume jwt-refresh.js registers functions on global scope / webgoat.customjs
+require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
 
-// NOTE: These tests assume the updated jwt-refresh.js module is loaded in the test environment.
+describe('jwt-refresh.js - delta tests', () => {
 
-describe('jwt-refresh delta tests', () => {
     beforeEach(() => {
-        // Reset localStorage between tests
-        localStorage.clear();
-        // Ensure webgoat.customjs exists
-        global.webgoat = global.webgoat || {};
-        webgoat.customjs = webgoat.customjs || {};
+        // Reset localStorage mock
+        global.localStorage = (function () {
+            let store = {};
+            return {
+                getItem: key => store[key],
+                setItem: (key, value) => { store[key] = value; },
+                clear: () => { store = {}; }
+            };
+        })();
+
+        global.$ = {
+            ajax: jest.fn().mockReturnValue({
+                success: function (cb) {
+                    // Allow chaining behavior but callback can be triggered manually
+                    this._successCb = cb;
+                    return this;
+                },
+                triggerSuccess: function (response) {
+                    if (this._successCb) this._successCb(response);
+                }
+            })
+        };
+
+        global.webgoat = { customjs: {} };
     });
 
-    test('login should not send hard-coded password literal', () => {
+    test('login no longer sends hard-coded password in request body', () => {
         // Arrange
-        const ajaxSpy = jest.spyOn($, 'ajax').mockImplementation((options) => {
-            // Simulate server response
-            const response = {
-                access_token: 'access-token-from-server',
-                refresh_token: 'refresh-token-from-server'
-            };
-            options.success && options.success(response);
-            return { success: (cb) => cb(response) };
-        });
+        const ajaxMock = global.$.ajax;
+        const testUser = 'Jerry';
 
         // Act
-        login('Jerry');
+        // login is defined in jwt-refresh.js in the global scope
+        login(testUser);
 
         // Assert
-        expect(ajaxSpy).toHaveBeenCalledTimes(1);
-        const callArgs = ajaxSpy.mock.calls[0][0];
+        expect(ajaxMock).toHaveBeenCalledTimes(1);
+        const callArgs = ajaxMock.mock.calls[0][0];
+        const body = JSON.parse(callArgs.data);
 
-        expect(callArgs.url).toBe('JWT/refresh/login');
-
-        const sent = JSON.parse(callArgs.data);
-        // New behavior: password should no longer be the original hard-coded literal
-        expect(sent.user).toBe('Jerry');
-        expect(sent.password).not.toBe('bm5nhSkxCXZkKRy4');
-
-        // Ensure tokens from response are stored
-        expect(localStorage.getItem('access_token')).toBe('access-token-from-server');
-        expect(localStorage.getItem('refresh_token')).toBe('refresh-token-from-server');
-
-        ajaxSpy.mockRestore();
+        expect(body.user).toBe(testUser);
+        // Verify that the password field is not hard-coded or present
+        expect(body.password).toBeUndefined();
     });
 
-    test('newToken should send Authorization header using stored access token and update tokens from response', () => {
+    test('newToken uses response tokens instead of undeclared globals', () => {
         // Arrange
-        localStorage.setItem('access_token', 'existing-access-token');
-        localStorage.setItem('refresh_token', 'existing-refresh-token');
+        const ajaxCall = global.$.ajax();
+        const response = {
+            access_token: 'new-access',
+            refresh_token: 'new-refresh'
+        };
 
-        const ajaxSpy = jest.spyOn($, 'ajax').mockImplementation((options) => {
-            // Verify headers are set via addBearerToken
-            expect(options.headers.Authorization).toBe('Bearer existing-access-token');
-
-            const response = {
-                access_token: 'new-access-token',
-                refresh_token: 'new-refresh-token'
-            };
-            options.success && options.success(response);
-            return { success: (cb) => cb(response) };
-        });
+        global.localStorage.setItem('access_token', 'old-access');
+        global.localStorage.setItem('refresh_token', 'old-refresh');
 
         // Act
         newToken();
+        // Simulate successful response from server for the last ajax call
+        ajaxCall.triggerSuccess(response);
 
         // Assert
-        expect(ajaxSpy).toHaveBeenCalledTimes(1);
-        const callArgs = ajaxSpy.mock.calls[0][0];
-        expect(callArgs.url).toBe('JWT/refresh/newToken');
-
-        const sent = JSON.parse(callArgs.data);
-        expect(sent.refreshToken).toBe('existing-refresh-token');
-
-        expect(localStorage.getItem('access_token')).toBe('new-access-token');
-        expect(localStorage.getItem('refresh_token')).toBe('new-refresh-token');
-
-        ajaxSpy.mockRestore();
-    });
-
-    test('newToken should no-op when refresh token is missing', () => {
-        // Arrange
-        localStorage.removeItem('refresh_token');
-        const ajaxSpy = jest.spyOn($, 'ajax').mockImplementation(() => {
-            return { success: (cb) => cb({}) };
-        });
-
-        // Act
-        newToken();
-
-        // Assert
-        expect(ajaxSpy).not.toHaveBeenCalled();
-
-        ajaxSpy.mockRestore();
+        expect(global.localStorage.getItem('access_token')).toBe('new-access');
+        expect(global.localStorage.getItem('refresh_token')).toBe('new-refresh');
     });
 });

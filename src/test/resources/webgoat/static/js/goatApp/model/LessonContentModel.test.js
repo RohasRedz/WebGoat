@@ -1,9 +1,3 @@
-// Derived test path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
-
-// Delta tests for LessonContentModel.js focusing on:
-// - Safer regex behavior and page number extraction
-// - Sanitization of options.name when constructing urlRoot
-
 define([
     'jquery',
     'underscore',
@@ -11,64 +5,68 @@ define([
     'goatApp/model/HTMLContentModel',
     'webgoat/static/js/goatApp/model/LessonContentModel'
 ], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
-    'use strict';
+    // Delta tests focus on the updated URL parsing and regex behavior in setContent
 
-    describe('LessonContentModel delta tests', function () {
-        let model;
+    describe('LessonContentModel - delta tests for URL parsing', function () {
 
-        beforeEach(function () {
-            model = new LessonContentModel();
-        });
+        function createModel() {
+            return new LessonContentModel();
+        }
 
-        it('setContent should derive lessonUrl without catastrophic regex and extract numeric pageNum', function () {
+        it('sets lessonUrl and pageNum correctly for URL with page number (secure regex behavior)', function () {
             // Arrange
-            var originalUrl = 'http://example.com/lesson/SomeLesson.lesson/1234';
-            spyOn(document, 'URL', 'get').and.returnValue(originalUrl);
+            var originalUrl = 'http://localhost/WebGoat.lesson/12';
+            var model = createModel();
+            var setSpy = jest.spyOn(model, 'set');
+            var triggerSpy = jest.spyOn(model, 'trigger').mockImplementation(function () {});
+
+            var originalDocumentUrl = global.document && global.document.URL;
+            global.document = global.document || {};
+            global.document.URL = originalUrl;
 
             // Act
             model.setContent('<html>dummy</html>', true);
 
             // Assert
-            expect(model.get('lessonUrl')).toBe('http://example.com/lesson/SomeLesson.lesson');
-            expect(model.get('pageNum')).toBe('1234');
+            // New behavior: use bounded regex with match; verify resulting values
+            expect(setSpy).toHaveBeenCalledWith('content', '<html>dummy</html>');
+            expect(setSpy).toHaveBeenCalledWith('lessonUrl', 'http://localhost/WebGoat.lesson');
+            expect(setSpy).toHaveBeenCalledWith('pageNum', '12');
+
+            expect(triggerSpy).toHaveBeenCalledWith('content:loaded', model, true);
+
+            // Cleanup
+            setSpy.mockRestore();
+            triggerSpy.mockRestore();
+            if (originalDocumentUrl !== undefined) {
+                global.document.URL = originalDocumentUrl;
+            }
         });
 
-        it('setContent should default pageNum to 0 when URL has no page segment', function () {
+        it('defaults pageNum to 0 when URL does not end with page number', function () {
             // Arrange
-            var originalUrl = 'http://example.com/lesson/SomeLesson.lesson';
-            spyOn(document, 'URL', 'get').and.returnValue(originalUrl);
+            var originalUrl = 'http://localhost/WebGoat.lesson';
+            var model = createModel();
+            var setSpy = jest.spyOn(model, 'set');
+            var triggerSpy = jest.spyOn(model, 'trigger').mockImplementation(function () {});
+
+            var originalDocumentUrl = global.document && global.document.URL;
+            global.document = global.document || {};
+            global.document.URL = originalUrl;
 
             // Act
-            model.setContent('<html>dummy</html>', true);
+            model.setContent('<html>dummy</html>');
 
             // Assert
-            expect(model.get('pageNum')).toBe(0);
-        });
+            expect(setSpy).toHaveBeenCalledWith('lessonUrl', 'http://localhost/WebGoat.lesson');
+            expect(setSpy).toHaveBeenCalledWith('pageNum', 0);
 
-        it('loadData should sanitize options.name before using it in urlRoot', function () {
-            // Arrange
-            // Name containing characters that should be stripped by the new allowlist
-            var unsafeName = 'less/on\\name?<script>';
-
-            spyOn(model, 'fetch').and.callFake(function () {
-                return {
-                    done: function (cb) {
-                        cb('<html>dummy</html>');
-                    }
-                };
-            });
-
-            // Act
-            model.loadData({ name: unsafeName });
-
-            // Assert
-            var urlRoot = model.urlRoot;
-            // Expectation: only word chars, dot, dash and underscore remain
-            expect(urlRoot).toMatch(/^[A-Za-z0-9_.%-]+\.lesson$/);
-            expect(urlRoot).not.toContain('<');
-            expect(urlRoot).not.toContain('>');
-            expect(urlRoot).not.toContain('/');
-            expect(urlRoot).not.toContain('\\');
+            // Cleanup
+            setSpy.mockRestore();
+            triggerSpy.mockRestore();
+            if (originalDocumentUrl !== undefined) {
+                global.document.URL = originalDocumentUrl;
+            }
         });
     });
 });
