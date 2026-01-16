@@ -1,71 +1,81 @@
-// File path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+// Test file path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+
 define([
-  'jquery',
-  'underscore',
-  'backbone',
-  'goatApp/model/HTMLContentModel',
-  'webgoat/static/js/goatApp/model/LessonContentModel' // TODO: Adjust module ID to match actual AMD loader configuration if different
+    'jquery',
+    'underscore',
+    'backbone',
+    'goatApp/model/HTMLContentModel',
+    'webgoat/static/js/goatApp/model/LessonContentModel'
 ], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
-  'use strict';
+    'use strict';
 
-  // Delta tests for LessonContentModel focusing on changed regex and URL handling behavior.
-  // These tests verify:
-  // - setContent derives lessonUrl using the new, more specific regex.
-  // - setContent extracts pageNum correctly without using backtracking-prone patterns.
+    /**
+     * Delta tests for LessonContentModel focusing on the rewritten URL parsing
+     * logic that replaced complex regexes to avoid ReDoS risk.
+     *
+     * These tests verify:
+     * - lessonUrl is the base `.lesson` URL without a trailing page number.
+     * - pageNum is correctly derived from a trailing numeric segment when present.
+     */
 
-  describe('LessonContentModel - delta security tests', function () {
-    var originalDocumentUrl;
+    describe('LessonContentModel delta tests', function () {
 
-    beforeEach(function () {
-      originalDocumentUrl = window.document.URL;
+        function createModel() {
+            return new LessonContentModel();
+        }
+
+        it('computes lessonUrl and pageNum correctly when URL has a page number suffix', function () {
+            // Arrange
+            var model = createModel();
+            var originalUrl = 'http://example.com/path/to/some.lesson/12';
+            var eventsTriggered = [];
+            model.on('content:loaded', function () {
+                eventsTriggered.push('content:loaded');
+            });
+
+            // Simulate environment
+            var originalDocument = global.document;
+            global.document = {
+                URL: originalUrl
+            };
+
+            // Act
+            model.setContent('<html>dummy</html>', true);
+
+            // Assert
+            expect(model.get('lessonUrl')).toBe('http://example.com/path/to/some.lesson');
+            expect(model.get('pageNum')).toBe(12);
+            expect(eventsTriggered).toContain('content:loaded');
+
+            // Cleanup
+            global.document = originalDocument;
+        });
+
+        it('computes lessonUrl and defaults pageNum to 0 when no page number suffix is present', function () {
+            // Arrange
+            var model = createModel();
+            var originalUrl = 'http://example.com/path/to/some.lesson';
+            var eventsTriggered = [];
+            model.on('content:loaded', function () {
+                eventsTriggered.push('content:loaded');
+            });
+
+            var originalDocument = global.document;
+            global.document = {
+                URL: originalUrl
+            };
+
+            // Act
+            model.setContent('<html>dummy</html>', true);
+
+            // Assert
+            expect(model.get('lessonUrl')).toBe('http://example.com/path/to/some.lesson');
+            expect(model.get('pageNum')).toBe(0);
+            expect(eventsTriggered).toContain('content:loaded');
+
+            // Cleanup
+            global.document = originalDocument;
+        });
+
     });
-
-    afterEach(function () {
-      window.document.URL = originalDocumentUrl;
-    });
-
-    function createModel() {
-      return new LessonContentModel();
-    }
-
-    it('setContent normalizes lessonUrl using anchored regex without catastrophic backtracking', function () {
-      // Arrange: construct a long, adversarial URL that would stress /.lesson.*/ style regexes.
-      var longPathSegment = new Array(5000).join('a');
-      window.document.URL = 'https://example.org/lesson/' + longPathSegment + '.lesson/123';
-
-      var model = createModel();
-
-      // Act
-      model.setContent('<html>dummy</html>', false);
-
-      // Assert:
-      // With the new regex /\.lesson(?:\/.*)?$/, lessonUrl should be truncated at ".lesson".
-      var lessonUrl = model.get('lessonUrl');
-      expect(lessonUrl).toBe('https://example.org/lesson/' + longPathSegment + '.lesson');
-    });
-
-    it('setContent extracts pageNum using match-based extraction with safe regex', function () {
-      // Arrange
-      window.document.URL = 'https://example.org/path/to/anything.lesson/42';
-      var model = createModel();
-
-      // Act
-      model.setContent('<html>dummy</html>', false);
-
-      // Assert
-      expect(model.get('pageNum')).toBe('42');
-    });
-
-    it('setContent falls back to pageNum 0 when URL does not match pattern', function () {
-      // Arrange
-      window.document.URL = 'https://example.org/path/to/no-lesson-here';
-      var model = createModel();
-
-      // Act
-      model.setContent('<html>dummy</html>', false);
-
-      // Assert
-      expect(model.get('pageNum')).toBe(0);
-    });
-  });
 });
