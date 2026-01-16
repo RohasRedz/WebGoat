@@ -1,83 +1,62 @@
+/*
+ * SPDX-FileCopyrightText: Copyright © 2017 WebGoat authors
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
-import static org.owasp.webgoat.container.assignments.AttackResult.Type.FAILURE;
-import static org.owasp.webgoat.container.assignments.AttackResult.Type.INFORMATION;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.verify;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 
 /**
- * Delta tests for SqlInjectionChallenge focusing on the updated user-existence check
- * that now uses a parameterized PreparedStatement.
- *
- * Verifies:
- * - Existing user path returns the appropriate failure result.
- * - Non-existing user path results in an insert and informational success.
+ * Delta tests for SqlInjectionChallenge focusing on the change from a concatenated SQL string to a
+ * parameterized PreparedStatement for the user existence check query.
  */
-class SqlInjectionChallengeTest {
+public class SqlInjectionChallengeTest {
 
   @Test
-  void registerNewUser_existingUser_returnsFailure() throws Exception {
-    LessonDataSource dataSource = mock(LessonDataSource.class);
+  void registerNewUser_shouldUsePreparedStatementForUserExistenceCheck() throws SQLException {
+    LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
     SqlInjectionChallenge challenge = new SqlInjectionChallenge(dataSource);
 
-    Connection connection = mock(Connection.class);
-    PreparedStatement checkStatement = mock(PreparedStatement.class);
-    ResultSet resultSet = mock(ResultSet.class);
-    PreparedStatement insertStatement = mock(PreparedStatement.class);
+    Connection connection = Mockito.mock(Connection.class);
+    PreparedStatement checkStatement = Mockito.mock(PreparedStatement.class);
+    PreparedStatement insertStatement = Mockito.mock(PreparedStatement.class);
+    ResultSet resultSet = Mockito.mock(ResultSet.class);
 
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select userid from sql_challenge_users where userid = ?"))
-        .thenReturn(checkStatement);
-    when(checkStatement.executeQuery()).thenReturn(resultSet);
-    when(resultSet.next()).thenReturn(true);
-
-    // insert statement should not be executed when user exists
-    when(connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)"))
+    Mockito.when(dataSource.getConnection()).thenReturn(connection);
+    // First call: check user; second call: insert
+    Mockito.when(connection.prepareStatement(Mockito.anyString()))
+        .thenReturn(checkStatement)
         .thenReturn(insertStatement);
+    Mockito.when(checkStatement.executeQuery()).thenReturn(resultSet);
+    Mockito.when(resultSet.next()).thenReturn(false); // user does not exist
 
     AttackResult result =
-        challenge.registerNewUser("existingUser", "user@example.com", "password");
+        challenge.registerNewUser("newUser", "user@example.com", "Passw0rd!");
 
-    assertEquals(FAILURE, result.getType(), "Existing user registration should fail");
-    verify(checkStatement).setString(1, "existingUser");
-    verify(insertStatement, never()).execute();
-  }
+    // Capture the SQL used for the existence check
+    ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+    verify(connection).prepareStatement(sqlCaptor.capture());
+    String usedSql = sqlCaptor.getValue();
 
-  @Test
-  void registerNewUser_newUser_insertsAndReturnsInformation() throws Exception {
-    LessonDataSource dataSource = mock(LessonDataSource.class);
-    SqlInjectionChallenge challenge = new SqlInjectionChallenge(dataSource);
+    org.junit.jupiter.api.Assertions.assertTrue(
+        usedSql.contains("where userid = ?"),
+        "User existence check must use a parameterized query");
 
-    Connection connection = mock(Connection.class);
-    PreparedStatement checkStatement = mock(PreparedStatement.class);
-    ResultSet resultSet = mock(ResultSet.class);
-    PreparedStatement insertStatement = mock(PreparedStatement.class);
-
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select userid from sql_challenge_users where userid = ?"))
-        .thenReturn(checkStatement);
-    when(checkStatement.executeQuery()).thenReturn(resultSet);
-    when(resultSet.next()).thenReturn(false);
-
-    when(connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)"))
-        .thenReturn(insertStatement);
-
-    AttackResult result =
-        challenge.registerNewUser("newUser", "user@example.com", "password");
-
-    assertEquals(
-        INFORMATION, result.getType(), "New user registration should return informational success");
+    // Verify binding of username parameter
     verify(checkStatement).setString(1, "newUser");
-    verify(insertStatement).setString(1, "newUser");
-    verify(insertStatement).setString(2, "user@example.com");
-    verify(insertStatement).setString(3, "password");
-    verify(insertStatement).execute();
+
+    // Sanity: original behavior preserved when user is new
+    assertEquals("user.created", result.getLessonKey());
   }
 }

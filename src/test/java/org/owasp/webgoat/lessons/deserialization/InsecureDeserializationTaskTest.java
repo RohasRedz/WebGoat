@@ -1,6 +1,10 @@
+/*
+ * SPDX-FileCopyrightText: Copyright © 2014 WebGoat authors
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
 package org.owasp.webgoat.lessons.deserialization;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectOutputStream;
@@ -10,50 +14,51 @@ import org.junit.jupiter.api.Test;
 import org.owasp.webgoat.container.assignments.AttackResult;
 
 /**
- * Delta tests for InsecureDeserializationTask focusing on the secured deserialization path.
- * Verifies:
- * - A valid VulnerableTaskHolder payload can be deserialized and passes timing constraints.
- * - An attempt to deserialize a disallowed type fails due to the new class whitelist.
+ * Delta tests for InsecureDeserializationTask focusing on the added ObjectInputFilter that
+ * restricts deserialization to a safe whitelist.
  */
-class InsecureDeserializationTaskTest {
+public class InsecureDeserializationTaskTest {
 
-  @Test
-  void completed_withValidVulnerableTaskHolderToken_succeedsOrFailsOnTimingOnly() throws Exception {
-    InsecureDeserializationTask task = new InsecureDeserializationTask();
-
-    VulnerableTaskHolder holder = new VulnerableTaskHolder();
-    // Note: We do not depend on internal fields; we only need a legitimate instance
-    String token = serializeAndEncode(holder);
-
-    AttackResult result = task.completed(token);
-
-    // The security fix focuses on class whitelisting; the original lesson has timing checks.
-    // Here we assert specifically that we do NOT fail due to invalid class/version feedbacks.
-    // Both success and generic failure (due to timing) are acceptable from a security perspective.
-    assertNotNull(result, "AttackResult should not be null");
-  }
-
-  @Test
-  void completed_withDisallowedTypeToken_fails() throws Exception {
-    InsecureDeserializationTask task = new InsecureDeserializationTask();
-
-    String token = serializeAndEncode(Integer.valueOf(42));
-
-    AttackResult result = task.completed(token);
-
-    // Disallowed type should not be deserialized successfully; the method should report failure.
-    assertNotNull(result, "AttackResult should not be null");
-    assertEquals(
-        AttackResult.Type.FAILURE, result.getType(), "Deserialization of disallowed type must fail");
-  }
-
-  private String serializeAndEncode(Object obj) throws Exception {
+  private String toWebToken(Object obj) throws Exception {
     ByteArrayOutputStream baos = new ByteArrayOutputStream();
     try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
       oos.writeObject(obj);
     }
     String b64 = Base64.getEncoder().encodeToString(baos.toByteArray());
-    // mirror token transformation in the endpoint: '-'→'+', '_'→'/'
+    // Mirror the replacement done in the controller: '+' -> '-', '/' -> '_'
     return b64.replace('+', '-').replace('/', '_');
+  }
+
+  @Test
+  void completed_shouldAcceptWhitelistedVulnerableTaskHolder() throws Exception {
+    InsecureDeserializationTask task = new InsecureDeserializationTask();
+
+    VulnerableTaskHolder holder = new VulnerableTaskHolder("test", 0);
+    String token = toWebToken(holder);
+
+    AttackResult result = task.completed(token);
+
+    // We only assert that the flow does not fail with class-type-specific errors.
+    // Exact success condition is based on internal timing, but for the delta test we assert
+    // that the result is not the specific feedback used when wrong object types are deserialized.
+    String feedback = result.getFeedback();
+    org.junit.jupiter.api.Assertions.assertNotEquals(
+        "insecure-deserialization.wrongobject", feedback);
+    org.junit.jupiter.api.Assertions.assertNotEquals(
+        "insecure-deserialization.stringobject", feedback);
+  }
+
+  @Test
+  void completed_shouldRejectNonWhitelistedType() throws Exception {
+    InsecureDeserializationTask task = new InsecureDeserializationTask();
+
+    // A type not on the whitelist (e.g., plain Integer) should be rejected by the filter.
+    String token = toWebToken(Integer.valueOf(42));
+
+    AttackResult result = task.completed(token);
+
+    // When the filter blocks the class, the catch(Exception) path is used,
+    // which currently maps to "invalidversion" feedback.
+    assertEquals("insecure-deserialization.invalidversion", result.getFeedback());
   }
 }
