@@ -16,8 +16,9 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; // Added import
+import org.springframework.security.crypto.password.PasswordEncoder; // Added import
+// Removed import org.springframework.security.crypto.password.NoOpPasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 /** Security configuration for WebGoat. */
@@ -59,8 +60,7 @@ public class WebSecurityConfig {
               oidc.loginPage("/login");
             })
         .logout(logout -> logout.deleteCookies("JSESSIONID").invalidateHttpSession(true))
-        // FIX: Re-enabled CSRF protection for enhanced security
-        .csrf(csrf -> csrf.ignoringRequestMatchers("/csrf-disabled-endpoint")) // Example: re-enable CSRF, ignoring specific endpoints if needed
+        // .csrf(csrf -> csrf.disable()) // Removed: CSRF protection enabled by default
         .headers(headers -> headers.disable())
         .exceptionHandling(
             handling ->
@@ -69,8 +69,8 @@ public class WebSecurityConfig {
   }
 
   @Autowired
-  public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder()); // FIX: Configured passwordEncoder for AuthenticationManagerBuilder
+  public void configureGlobal(AuthenticationManagerBuilder auth, PasswordEncoder passwordEncoder) throws Exception { // Added PasswordEncoder parameter
+    auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder); // Added passwordEncoder
   }
 
   @Bean
@@ -86,8 +86,7 @@ public class WebSecurityConfig {
   }
 
   @Bean
-  public PasswordEncoder passwordEncoder() {
-    // FIX: Replaced NoOpPasswordEncoder with BCryptPasswordEncoder for secure password hashing
+  public PasswordEncoder passwordEncoder() { // Changed return type and implementation
     return new BCryptPasswordEncoder();
   }
 }

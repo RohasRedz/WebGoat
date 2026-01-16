@@ -1,76 +1,83 @@
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import static org.owasp.webgoat.container.assignments.AttackResult.Type.FAILURE;
+import static org.owasp.webgoat.container.assignments.AttackResult.Type.INFORMATION;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
-import org.springframework.util.StringUtils;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 
 /**
- * Delta tests for SqlInjectionChallenge focusing on the SQL injection fix for the user lookup:
- * - Before fix: SELECT query was built via string concatenation with username.
- * - After fix:  SELECT query uses PreparedStatement with parameter binding.
+ * Delta tests for SqlInjectionChallenge focusing on the updated user-existence check
+ * that now uses a parameterized PreparedStatement.
  *
- * We verify:
- * - The SELECT query string uses a single parameter placeholder ("?") and not an inline username.
- * - The PreparedStatement receives the username via setString.
+ * Verifies:
+ * - Existing user path returns the appropriate failure result.
+ * - Non-existing user path results in an insert and informational success.
  */
-public class SqlInjectionChallengeTest {
+class SqlInjectionChallengeTest {
 
-  private LessonDataSource dataSource;
-  private SqlInjectionChallenge challenge;
+  @Test
+  void registerNewUser_existingUser_returnsFailure() throws Exception {
+    LessonDataSource dataSource = mock(LessonDataSource.class);
+    SqlInjectionChallenge challenge = new SqlInjectionChallenge(dataSource);
 
-  @BeforeEach
-  void setUp() {
-    dataSource = Mockito.mock(LessonDataSource.class);
-    challenge = new SqlInjectionChallenge(dataSource);
+    Connection connection = mock(Connection.class);
+    PreparedStatement checkStatement = mock(PreparedStatement.class);
+    ResultSet resultSet = mock(ResultSet.class);
+    PreparedStatement insertStatement = mock(PreparedStatement.class);
+
+    when(dataSource.getConnection()).thenReturn(connection);
+    when(connection.prepareStatement("select userid from sql_challenge_users where userid = ?"))
+        .thenReturn(checkStatement);
+    when(checkStatement.executeQuery()).thenReturn(resultSet);
+    when(resultSet.next()).thenReturn(true);
+
+    // insert statement should not be executed when user exists
+    when(connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)"))
+        .thenReturn(insertStatement);
+
+    AttackResult result =
+        challenge.registerNewUser("existingUser", "user@example.com", "password");
+
+    assertEquals(FAILURE, result.getType(), "Existing user registration should fail");
+    verify(checkStatement).setString(1, "existingUser");
+    verify(insertStatement, never()).execute();
   }
 
   @Test
-  void registerNewUser_shouldUseParameterizedSelectForUserLookup() throws Exception {
-    // Arrange
-    String username = "victim";
-    String email = "victim@example.com";
-    String password = "secret";
+  void registerNewUser_newUser_insertsAndReturnsInformation() throws Exception {
+    LessonDataSource dataSource = mock(LessonDataSource.class);
+    SqlInjectionChallenge challenge = new SqlInjectionChallenge(dataSource);
 
-    Connection connection = Mockito.mock(Connection.class);
-    PreparedStatement selectStatement = Mockito.mock(PreparedStatement.class);
-    PreparedStatement insertStatement = Mockito.mock(PreparedStatement.class);
-    ResultSet resultSet = Mockito.mock(ResultSet.class);
+    Connection connection = mock(Connection.class);
+    PreparedStatement checkStatement = mock(PreparedStatement.class);
+    ResultSet resultSet = mock(ResultSet.class);
+    PreparedStatement insertStatement = mock(PreparedStatement.class);
 
     when(dataSource.getConnection()).thenReturn(connection);
+    when(connection.prepareStatement("select userid from sql_challenge_users where userid = ?"))
+        .thenReturn(checkStatement);
+    when(checkStatement.executeQuery()).thenReturn(resultSet);
+    when(resultSet.next()).thenReturn(false);
 
-    // Capture SQL for SELECT query
-    ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-    when(connection.prepareStatement(sqlCaptor.capture()))
-        .thenReturn(selectStatement)
-        .thenReturn(insertStatement); // first call: select, second: insert
+    when(connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)"))
+        .thenReturn(insertStatement);
 
-    when(selectStatement.executeQuery()).thenReturn(resultSet);
-    when(resultSet.next()).thenReturn(false); // user does not exist, go to insert
+    AttackResult result =
+        challenge.registerNewUser("newUser", "user@example.com", "password");
 
-    // Act
-    AttackResult result = challenge.registerNewUser(username, email, password);
-
-    // Assert - verify SELECT SQL string uses placeholder
-    String selectSql = sqlCaptor.getAllValues().get(0);
     assertEquals(
-        "select userid from sql_challenge_users where userid = ?",
-        selectSql,
-        "User lookup query must be parameterized and not contain raw username");
-
-    // Assert - username is bound via setString on the select statement
-    verify(selectStatement).setString(1, username);
+        INFORMATION, result.getType(), "New user registration should return informational success");
+    verify(checkStatement).setString(1, "newUser");
+    verify(insertStatement).setString(1, "newUser");
+    verify(insertStatement).setString(2, "user@example.com");
+    verify(insertStatement).setString(3, "password");
+    verify(insertStatement).execute();
   }
 }

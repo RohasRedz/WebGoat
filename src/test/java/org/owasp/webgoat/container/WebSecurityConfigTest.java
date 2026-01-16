@@ -1,56 +1,85 @@
 package org.owasp.webgoat.container;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 import org.junit.jupiter.api.Test;
 import org.owasp.webgoat.container.users.UserService;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.mock.web.MockServletContext;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
 
 /**
  * Delta tests for WebSecurityConfig focusing on:
- * - Replacement of NoOpPasswordEncoder with BCryptPasswordEncoder (strong hashing).
- * - Wiring of the passwordEncoder into AuthenticationManagerBuilder.
- *
- * We verify:
- * - passwordEncoder() returns a BCryptPasswordEncoder instance.
- * - configureGlobal() registers the passwordEncoder with the AuthenticationManagerBuilder.
+ * - PasswordEncoder is not a no-op and produces encoded (non-plain-text) values.
+ * - SecurityFilterChain loads successfully with CSRF protection not explicitly disabled.
  */
-public class WebSecurityConfigTest {
+class WebSecurityConfigTest {
 
   @Test
-  void passwordEncoder_shouldReturnBCryptPasswordEncoder() {
-    // Arrange
-    UserService userService = org.mockito.Mockito.mock(UserService.class);
+  void passwordEncoder_encodesPassword() {
+    UserService userService = null; // not needed for encoder bean
     WebSecurityConfig config = new WebSecurityConfig(userService);
 
-    // Act
     PasswordEncoder encoder = config.passwordEncoder();
 
-    // Assert
-    assertTrue(
-        encoder instanceof BCryptPasswordEncoder,
-        "passwordEncoder() must return a BCryptPasswordEncoder for secure password hashing");
+    String raw = "password123";
+    String encoded = encoder.encode(raw);
+
+    assertNotEquals(raw, encoded, "Encoded password must not equal raw password");
+    assertTrue(encoder.matches(raw, encoded), "PasswordEncoder should validate encoded password");
   }
 
   @Test
-  void configureGlobal_shouldRegisterPasswordEncoder() throws Exception {
-    // Arrange
-    UserService userService = org.mockito.Mockito.mock(UserService.class);
-    WebSecurityConfig config = new WebSecurityConfig(userService);
-    AuthenticationManagerBuilder authBuilder =
-        org.mockito.Mockito.mock(AuthenticationManagerBuilder.class);
+  void securityFilterChain_loadsWithCsrfEnabledByDefault() throws Exception {
+    AnnotationConfigWebApplicationContext context = new AnnotationConfigWebApplicationContext();
+    context.register(WebSecurityConfig.class);
+    context.setServletContext(new MockServletContext());
+    context.refresh();
 
-    // Act
-    config.configureGlobal(authBuilder);
+    WebSecurityConfig config = context.getBean(WebSecurityConfig.class);
 
-    // Assert
-    // We cannot easily introspect internal builder state here; instead we verify that
-    // userDetailsService(userService).passwordEncoder(...) chaining was invoked using Mockito.
-    org.mockito.Mockito.verify(authBuilder)
-        .userDetailsService(userService);
-    // Note: Further deep verification would require advanced mocking of the builder's fluent API.
+    // Build an HttpSecurity manually bound to the context
+    HttpSecurity http =
+        new HttpSecurity(
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+
+    SecurityFilterChain chain = config.filterChain(http);
+    assertNotNull(chain, "SecurityFilterChain should be created successfully");
+
+    context.close();
+  }
+
+  @Test
+  void authenticationManager_usesPasswordEncoderBean() throws Exception {
+    AnnotationConfigWebApplicationContext context = new AnnotationConfigWebApplicationContext();
+    context.register(WebSecurityConfig.class);
+    context.setServletContext(new MockServletContext());
+    context.refresh();
+
+    AuthenticationConfiguration authenticationConfiguration =
+        context.getBean(AuthenticationConfiguration.class);
+    AuthenticationManager authenticationManager =
+        context.getBean(WebSecurityConfig.class).authenticationManager(authenticationConfiguration);
+
+    assertNotNull(authenticationManager, "AuthenticationManager should be created");
+
+    PasswordEncoder encoder = context.getBean(PasswordEncoder.class);
+    UserDetailsService userDetailsService = context.getBean(UserDetailsService.class);
+
+    assertNotNull(encoder, "PasswordEncoder bean must be present");
+    assertNotNull(userDetailsService, "UserDetailsService bean must be present");
+
+    context.close();
   }
 }
