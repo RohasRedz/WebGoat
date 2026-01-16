@@ -1,43 +1,71 @@
-/* eslint-env jest */
+// File path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+define([
+  'jquery',
+  'underscore',
+  'backbone',
+  'goatApp/model/HTMLContentModel',
+  'webgoat/static/js/goatApp/model/LessonContentModel' // TODO: Adjust module ID to match actual AMD loader configuration if different
+], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
+  'use strict';
 
-const $ = require('jquery');
-const _ = require('underscore');
-const Backbone = require('backbone');
+  // Delta tests for LessonContentModel focusing on changed regex and URL handling behavior.
+  // These tests verify:
+  // - setContent derives lessonUrl using the new, more specific regex.
+  // - setContent extracts pageNum correctly without using backtracking-prone patterns.
 
-const LessonContentModel = require('../../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
+  describe('LessonContentModel - delta security tests', function () {
+    var originalDocumentUrl;
 
-describe('LessonContentModel – regex hardening for lessonUrl and pageNum', () => {
-  test('setContent derives lessonUrl and pageNum using hardened regexes', () => {
-    const originalUrl = 'http://example.com/path/to/page.lesson/123/extra?param=value';
-    const previousDocumentUrl = global.document && global.document.URL;
-    global.document = { URL: originalUrl };
+    beforeEach(function () {
+      originalDocumentUrl = window.document.URL;
+    });
 
-    const model = new LessonContentModel();
+    afterEach(function () {
+      window.document.URL = originalDocumentUrl;
+    });
 
-    model.setContent('<html>content</html>', true);
-
-    expect(model.get('lessonUrl')).toBe('http://example.com/path/to/page.lesson');
-    expect(model.get('pageNum')).toBe('123');
-
-    if (previousDocumentUrl) {
-      global.document.URL = previousDocumentUrl;
+    function createModel() {
+      return new LessonContentModel();
     }
-  });
 
-  test('setContent sets pageNum to 0 when URL has no page number', () => {
-    const originalUrl = 'http://example.com/path/to/page.lesson';
-    const previousDocumentUrl = global.document && global.document.URL;
-    global.document = { URL: originalUrl };
+    it('setContent normalizes lessonUrl using anchored regex without catastrophic backtracking', function () {
+      // Arrange: construct a long, adversarial URL that would stress /.lesson.*/ style regexes.
+      var longPathSegment = new Array(5000).join('a');
+      window.document.URL = 'https://example.org/lesson/' + longPathSegment + '.lesson/123';
 
-    const model = new LessonContentModel();
+      var model = createModel();
 
-    model.setContent('<html>content</html>', true);
+      // Act
+      model.setContent('<html>dummy</html>', false);
 
-    expect(model.get('lessonUrl')).toBe('http://example.com/path/to/page.lesson');
-    expect(model.get('pageNum')).toBe(0);
+      // Assert:
+      // With the new regex /\.lesson(?:\/.*)?$/, lessonUrl should be truncated at ".lesson".
+      var lessonUrl = model.get('lessonUrl');
+      expect(lessonUrl).toBe('https://example.org/lesson/' + longPathSegment + '.lesson');
+    });
 
-    if (previousDocumentUrl) {
-      global.document.URL = previousDocumentUrl;
-    }
+    it('setContent extracts pageNum using match-based extraction with safe regex', function () {
+      // Arrange
+      window.document.URL = 'https://example.org/path/to/anything.lesson/42';
+      var model = createModel();
+
+      // Act
+      model.setContent('<html>dummy</html>', false);
+
+      // Assert
+      expect(model.get('pageNum')).toBe('42');
+    });
+
+    it('setContent falls back to pageNum 0 when URL does not match pattern', function () {
+      // Arrange
+      window.document.URL = 'https://example.org/path/to/no-lesson-here';
+      var model = createModel();
+
+      // Act
+      model.setContent('<html>dummy</html>', false);
+
+      // Assert
+      expect(model.get('pageNum')).toBe(0);
+    });
   });
 });
