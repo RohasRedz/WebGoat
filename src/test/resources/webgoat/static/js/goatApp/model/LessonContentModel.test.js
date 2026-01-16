@@ -1,99 +1,98 @@
-const Backbone = require('backbone');
-const _ = require('underscore');
+// File: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 
-const HTMLContentModel = Backbone.Model.extend({});
+/**
+ * Delta tests for LessonContentModel focusing only on the changed regex-based URL parsing.
+ * These tests verify:
+ *  - lessonUrl normalization now safely trims only the optional numeric page suffix.
+ *  - pageNum extraction uses the updated, more specific regex and matching logic.
+ */
 
-function createLessonContentModelModule() {
-  return HTMLContentModel.extend({
-    urlRoot: null,
-    defaults: {
-      items: null,
-      selectedItem: null,
-    },
+define([
+  'jquery',
+  'underscore',
+  'backbone',
+  'goatApp/model/LessonContentModel'
+], function ($, _, Backbone, LessonContentModel) {
+  'use strict';
 
-    initialize: function () {},
+  function createModel() {
+    // The production code returns HTMLContentModel.extend({...}),
+    // so we instantiate it as a Backbone model.
+    return new LessonContentModel();
+  }
 
-    loadData: function (options) {
-      this.urlRoot = encodeURIComponent(options.name) + '.lesson';
-      const self = this;
-      this.fetch().done(function (data) {
-        self.setContent(data);
+  describe('LessonContentModel delta tests for regex changes', function () {
+    var originalLocation;
+
+    beforeEach(function () {
+      // Save original global location/document.URL
+      originalLocation = global.location;
+      // JSDOM-style fake location
+      global.location = { href: 'http://example.com' };
+      // Document shim
+      global.document = {
+        URL: ''
+      };
+    });
+
+    afterEach(function () {
+      global.location = originalLocation;
+      delete global.document;
+    });
+
+    it('normalizes lessonUrl by removing optional page number suffix only', function (done) {
+      // Arrange
+      var model = createModel();
+      var url =
+        'http://localhost:8080/WebGoat/start.mvc#lesson/SqlInjection.lesson/12';
+      global.document.URL = url;
+
+      // We cannot easily hit the real fetch() network, so we call setContent directly.
+      // Old behavior used a broad /\\.lesson.*/ pattern; new behavior uses
+      // /\.lesson(?:\/[0-9]{1,4})?$/ to avoid catastrophic backtracking.
+      model.on('content:loaded', function () {
+        // Assert
+        var lessonUrl = model.get('lessonUrl');
+        expect(lessonUrl).toBe(
+          'http://localhost:8080/WebGoat/start.mvc#lesson/SqlInjection.lesson'
+        );
+        done();
       });
-    },
 
-    setContent: function (content, loadHelps) {
-      if (typeof loadHelps === 'undefined') {
-        loadHelps = true;
-      }
-      this.set('content', content);
+      // Act
+      model.setContent('<html>dummy</html>');
+    });
 
-      const currentUrl = global.document.URL;
-      let lessonUrl = currentUrl;
-      const lessonIndex = currentUrl.indexOf('.lesson');
-      if (lessonIndex !== -1) {
-        lessonUrl = currentUrl.substring(0, lessonIndex + '.lesson'.length);
-      }
-      this.set('lessonUrl', lessonUrl);
+    it('extracts pageNum using the safer match-based regex', function (done) {
+      // Arrange: URL ending with .lesson/<pageNum>
+      var model = createModel();
+      global.document.URL =
+        'http://localhost:8080/WebGoat/start.mvc#lesson/SqlInjection.lesson/27';
 
-      let pageNum = 0;
-      const pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-      if (pageMatch && pageMatch[1]) {
-        const parsed = parseInt(pageMatch[1], 10);
-        if (!isNaN(parsed)) {
-          pageNum = parsed;
-        }
-      }
-      this.set('pageNum', pageNum);
+      model.on('content:loaded', function () {
+        var pageNum = model.get('pageNum');
+        expect(pageNum).toBe('27'); // captured as the first group
+        done();
+      });
 
-      this.trigger('content:loaded', this, loadHelps);
-    },
+      // Act
+      model.setContent('<html>dummy</html>');
+    });
 
-    fetch: function (options) {
-      options = options || {};
-      return Backbone.Model.prototype.fetch.call(
-        this,
-        _.extend({ dataType: 'html' }, options)
-      );
-    },
-  });
-}
+    it('sets pageNum to 0 when no numeric suffix is present', function (done) {
+      // Arrange: URL without /<pageNum> suffix
+      var model = createModel();
+      global.document.URL =
+        'http://localhost:8080/WebGoat/start.mvc#lesson/SqlInjection.lesson';
 
-describe('LessonContentModel URL handling (delta tests)', () => {
-  let LessonContentModel;
-  let originalDocument;
+      model.on('content:loaded', function () {
+        var pageNum = model.get('pageNum');
+        expect(pageNum).toBe(0);
+        done();
+      });
 
-  beforeEach(() => {
-    LessonContentModel = createLessonContentModelModule();
-    originalDocument = global.document;
-    global.document = { URL: '' };
-  });
-
-  afterEach(() => {
-    global.document = originalDocument;
-  });
-
-  test('setContent derives lessonUrl by trimming after .lesson and parses pageNum', () => {
-    global.document.URL =
-      'http://example.com/WebGoat.lesson/12?foo=bar#section';
-    const model = new LessonContentModel();
-
-    model.setContent('<html>dummy</html>');
-
-    expect(model.get('lessonUrl')).toBe(
-      'http://example.com/WebGoat.lesson'
-    );
-    expect(model.get('pageNum')).toBe(12);
-  });
-
-  test('setContent defaults pageNum to 0 when URL has no page suffix', () => {
-    global.document.URL = 'http://example.com/WebGoat.lesson';
-    const model = new LessonContentModel();
-
-    model.setContent('<html>dummy</html>');
-
-    expect(model.get('lessonUrl')).toBe(
-      'http://example.com/WebGoat.lesson'
-    );
-    expect(model.get('pageNum')).toBe(0);
+      // Act
+      model.setContent('<html>dummy</html>');
+    });
   });
 });
