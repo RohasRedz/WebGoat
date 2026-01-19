@@ -1,62 +1,59 @@
-// NOTE: This is a delta unit test focused on the updated URL parsing logic in LessonContentModel.
-// It is intentionally minimal and scoped only to the security-related behavior change.
+// File: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+define(['jquery', 'underscore', 'backbone', 'goatApp/model/LessonContentModel'], function (
+  $,
+  _,
+  Backbone,
+  LessonContentModel
+) {
+  'use strict';
 
-const Backbone = require('backbone');
+  /**
+   * Delta tests for LessonContentModel focusing on the changed regex behavior:
+   * - Ensure URL handling uses a bounded tail segment.
+   * - Ensure page number extraction still works for normal URLs.
+   */
 
-// Minimal HTMLContentModel stub to satisfy the dependency chain.
-// In the real test environment, require the actual 'goatApp/model/HTMLContentModel' instead.
-class HTMLContentModel extends Backbone.Model {}
+  describe('LessonContentModel delta tests', function () {
+    var originalUrl;
 
-describe('LessonContentModel URL parsing (delta tests)', () => {
-  let LessonContentModel;
-  let originalDocument;
+    beforeEach(function () {
+      originalUrl = window.location.href;
+    });
 
-  beforeAll(() => {
-    // Shim AMD-style define to capture the factory return value.
-    global.define = function (deps, factory) {
-      LessonContentModel = factory(
-        require('jquery'),
-        require('underscore'),
-        Backbone,
-        HTMLContentModel
+    afterEach(function () {
+      window.history.replaceState(null, '', originalUrl);
+    });
+
+    function setDocumentUrl(url) {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: new URL(url),
+      });
+    }
+
+    it('extracts pageNum correctly from typical lesson URL after bounding regex', function () {
+      setDocumentUrl('http://example.com/path/lessonName.lesson/42');
+
+      var model = new LessonContentModel();
+      model.setContent('<html>content</html>', true);
+
+      expect(model.get('pageNum')).toBe('42');
+    });
+
+    it('handles extremely long URLs without catastrophic backtracking', function () {
+      var longSegment = new Array(5000).join('a');
+      setDocumentUrl(
+        'http://example.com/' + longSegment + '/lessonName.lesson/1234'
       );
-    };
-    // Load the updated module (this will invoke our global.define shim).
-    require('../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
-    delete global.define;
-  });
 
-  beforeEach(() => {
-    originalDocument = global.document;
-    global.document = { URL: '' };
-  });
+      var model = new LessonContentModel();
 
-  afterEach(() => {
-    global.document = originalDocument;
-  });
+      var start = Date.now();
+      model.setContent('<html>content</html>', true);
+      var elapsed = Date.now() - start;
 
-  test('setContent extracts pageNum from .lesson/<digits> URL using safe parsing', () => {
-    // Arrange
-    const model = new LessonContentModel();
-    global.document.URL = 'http://example.com/SomeLesson.lesson/12';
-
-    // Act
-    model.setContent('<html>content</html>');
-
-    // Assert
-    expect(model.get('lessonUrl')).toBe('http://example.com/SomeLesson.lesson');
-    expect(model.get('pageNum')).toBe(12);
-  });
-
-  test('setContent defaults pageNum to 0 when URL does not match expected pattern', () => {
-    // Arrange
-    const model = new LessonContentModel();
-    global.document.URL = 'http://example.com/SomeLesson.lesson/invalid';
-
-    // Act
-    model.setContent('<html>content</html>');
-
-    // Assert
-    expect(model.get('pageNum')).toBe(0);
+      expect(elapsed).toBeLessThan(1000);
+      expect(model.get('pageNum')).toBe('1234');
+    });
   });
 });

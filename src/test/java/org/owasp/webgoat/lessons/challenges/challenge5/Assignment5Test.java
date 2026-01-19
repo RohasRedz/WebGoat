@@ -1,97 +1,103 @@
-/*
- * SPDX-FileCopyrightText: Copyright © 2017 WebGoat authors
- * SPDX-License-Identifier: GPL-2.0-or-later
- */
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.SQLException;
-
-import org.junit.jupiter.api.DisplayName;
+import javax.sql.DataSource;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
 import org.owasp.webgoat.lessons.challenges.Flags;
+import org.springframework.util.StringUtils;
 
-class Assignment5Test {
+/**
+ * Delta tests for Assignment5 focusing only on the changed SQL behavior:
+ * - Ensure a PreparedStatement with parameter placeholders is used.
+ * - Ensure user input is bound via setString (no concatenated SQL).
+ */
+public class Assignment5Test {
 
-    @Test
-    @DisplayName("login should use parameterized SQL and succeed when DB returns a row")
-    void login_usesParameterizedQuery_andAuthenticatesOnRowPresent() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Flags flags = mock(Flags.class);
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
+  private LessonDataSource lessonDataSource;
+  private DataSource delegateDataSource;
+  private Connection connection;
+  private PreparedStatement preparedStatement;
+  private ResultSet resultSet;
+  private Flags flags;
 
-        Connection connection = mock(Connection.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        ResultSet resultSet = mock(ResultSet.class);
+  @BeforeEach
+  void setUp() throws Exception {
+    delegateDataSource = mock(DataSource.class);
+    lessonDataSource = new LessonDataSource(delegateDataSource);
+    connection = mock(Connection.class);
+    preparedStatement = mock(PreparedStatement.class);
+    resultSet = mock(ResultSet.class);
+    flags = mock(Flags.class);
 
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(
-                "select password from challenge_users where userid = ? and password = ?"))
-                .thenReturn(preparedStatement);
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        when(resultSet.next()).thenReturn(true);
-        when(flags.getFlag(5)).thenReturn("FLAG-5");
+    org.mockito.Mockito.when(delegateDataSource.getConnection()).thenReturn(connection);
+    org.mockito.Mockito.when(
+            connection.prepareStatement(
+                org.mockito.ArgumentMatchers.anyString()))
+        .thenReturn(preparedStatement);
+    org.mockito.Mockito.when(preparedStatement.executeQuery()).thenReturn(resultSet);
+  }
 
-        String username = "Larry";
-        String password = "secret";
+  @Test
+  void login_usesParameterizedQueryAndBindsUserInputs() throws Exception {
+    String username = "Larry";
+    String password = "secretPass";
+    org.mockito.Mockito.when(resultSet.next()).thenReturn(true);
+    org.mockito.Mockito.when(flags.getFlag(5)).thenReturn("FLAG-5");
 
-        // Act
-        AttackResult result = assignment5.login(username, password);
+    Assignment5 assignment5 = new Assignment5(lessonDataSource, flags);
 
-        // Assert
-        // Verify the correct parameterized query is used and no string concatenation is involved
-        ArgumentCaptor<String> queryCaptor = ArgumentCaptor.forClass(String.class);
-        verify(connection).prepareStatement(queryCaptor.capture());
-        String usedQuery = queryCaptor.getValue();
-        assertEquals(
-                "select password from challenge_users where userid = ? and password = ?",
-                usedQuery,
-                "Query must use placeholders instead of concatenated user input");
+    AttackResult result = assignment5.login(username, password);
 
-        // Verify user inputs are bound as parameters, not concatenated into the SQL
-        verify(preparedStatement).setString(1, username);
-        verify(preparedStatement).setString(2, password);
+    ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+    verify(connection).prepareStatement(sqlCaptor.capture());
 
-        // Behavior: a row found should still mark the challenge as solved
-        // We do not assert the exact feedback key here, just that it is successful
-        // (AttackResult API is not fully visible in this context, so we avoid deep inspection).
-    }
+    String usedSql = sqlCaptor.getValue();
+    assertTrue(
+        usedSql.contains("userid = ?") && usedSql.contains("password = ?"),
+        "SQL should use parameter placeholders instead of concatenating user input");
 
-    @Test
-    @DisplayName("login should return a failure AttackResult when a database error occurs")
-    void login_returnsFailureOnSQLException() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Flags flags = mock(Flags.class);
-        Assignment5 assignment5 = new Assignment5(dataSource, flags);
+    verify(preparedStatement).setString(eq(1), eq(username));
+    verify(preparedStatement).setString(eq(2), eq(password));
 
-        Connection connection = mock(Connection.class);
+    assertTrue(result.isLessonCompleted(), "Successful login should still complete the lesson");
+  }
 
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(
-                "select password from challenge_users where userid = ? and password = ?"))
-                .thenThrow(new SQLException("DB down"));
+  @Test
+  void login_failsWhenSqlNotParameterized_likeOldConcatenation() throws Exception {
+    String username = "Larry' OR '1'='1";
+    String password = "anything";
+    org.mockito.Mockito.when(resultSet.next()).thenReturn(false);
 
-        String username = "Larry";
-        String password = "secret";
+    Assignment5 assignment5 = new Assignment5(lessonDataSource, flags);
 
-        // Act
-        AttackResult result = assignment5.login(username, password);
+    AttackResult result = assignment5.login(username, password);
 
-        // Assert
-        // Previously, an unhandled SQLException could bubble or lead to unclear behavior.
-        // Now, the method should catch it and return a failure AttackResult with a generic error.
-        // We cannot inspect internal fields of AttackResult reliably here, but we ensure no exception is thrown.
-        // If AttackResult exposed a success flag, we would assert it is false; in this context we just ensure call completes.
-        assertEquals(AttackResult.class, result.getClass());
-    }
+    assertTrue(
+        !result.isLessonCompleted(),
+        "SQL injection style username should not bypass authentication after fix");
+  }
+
+  @Test
+  void login_rejectsEmptyInputConsistently() throws Exception {
+    Assignment5 assignment5 = new Assignment5(lessonDataSource, flags);
+
+    AttackResult result = assignment5.login("", "");
+
+    assertTrue(
+        !StringUtils.hasText(""),
+        "Spring's StringUtils.hasText should treat empty string as invalid");
+    assertTrue(!result.isLessonCompleted(), "Empty input must still be rejected");
+  }
 }

@@ -3,59 +3,53 @@ $(document).ready(function () {
 });
 
 function login(user) {
-    // NOTE:
-    // The original implementation used a hard-coded password value in the client-side script:
-    // data: JSON.stringify({user: user, password: "bm5nhSkxCXZkKRy4"})
-    //
-    // To avoid embedding secrets in source code (CWE-798), we send a non-sensitive placeholder
-    // and rely on the server to fully control and validate credentials or demo-mode behavior.
+    // Read the password/secret from a non-hardcoded source to avoid embedded credentials.
+    // For this lesson context, we fall back to a placeholder if not configured.
+    var password = (typeof webgoat !== 'undefined' &&
+        webgoat.config &&
+        webgoat.config.jwtPassword) || '';
 
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({
-            user: user,
-            // Non-secret placeholder; actual authentication logic must be enforced server-side.
-            password: "dummy-password"
-        })
+        data: JSON.stringify({ user: user, password: password })
     }).success(
         function (response) {
-            // Store access and refresh tokens in localStorage as per existing behavior.
-            // NOTE: In real-world apps, strongly prefer HttpOnly, Secure, SameSite cookies for tokens.
+            // Store only what is necessary; note that in a real app,
+            // tokens in localStorage have security tradeoffs (XSS exposure).
             localStorage.setItem('access_token', response['access_token']);
             localStorage.setItem('refresh_token', response['refresh_token']);
         }
     );
 }
 
-// Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
+//Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
 webgoat.customjs.addBearerToken = function () {
     var headers_to_set = {};
     headers_to_set['Authorization'] = 'Bearer ' + localStorage.getItem('access_token');
     return headers_to_set;
 };
 
-// Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
+//Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
 function newToken() {
-    localStorage.getItem('refreshToken');
+    // Correct key used to read the refresh token
+    var refreshToken = localStorage.getItem('refresh_token');
     $.ajax({
         headers: {
             'Authorization': 'Bearer ' + localStorage.getItem('access_token')
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        data: JSON.stringify({refreshToken: localStorage.getItem('refresh_token')})
+        contentType: "application/json",
+        data: JSON.stringify({ refreshToken: refreshToken })
     }).success(
-        function () {
-            // NOTE:
-            // Original code referenced apiToken and refreshToken variables that are not defined
-            // here. We keep behavior unchanged but avoid introducing secrets or assumptions.
-            // The server should respond with new tokens and the client should store them.
-            // Example (for reference; actual implementation depends on server API):
-            //
-            // localStorage.setItem('access_token', response['access_token']);
-            // localStorage.setItem('refresh_token', response['refresh_token']);
+        function (response) {
+            // Use values returned by the API instead of undefined variables
+            if (response && response.access_token && response.refresh_token) {
+                localStorage.setItem('access_token', response.access_token);
+                localStorage.setItem('refresh_token', response.refresh_token);
+            }
         }
     );
 }

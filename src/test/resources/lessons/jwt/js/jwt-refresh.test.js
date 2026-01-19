@@ -1,69 +1,82 @@
-// Delta tests for jwt-refresh.js focusing on the fixed hard-coded password vulnerability.
-// We verify that the AJAX payload no longer contains the original secret value and instead
-// uses a non-sensitive placeholder, while preserving the rest of the behavior.
+// File: src/test/resources/lessons/jwt/js/jwt-refresh.test.js
 
-jest.mock('jquery', () => {
-  const ajaxMock = jest.fn(() => ({
-    success: function (cb) {
-      // Simulate a successful response with tokens to exercise the success callback.
-      cb({ access_token: 'access123', refresh_token: 'refresh123' });
-      return this;
-    }
-  }));
-  return {
-    ajax: ajaxMock,
-    fn: {},
-    ready: jest.fn()
-  };
-});
+/**
+ * Delta tests for jwt-refresh.js focusing on the changed security behavior:
+ * - Ensure there is no hard-coded password literal in the request payload.
+ * - Ensure login() uses a configurable password source.
+ */
 
-const $ = require('jquery');
+const fs = require('fs');
+const path = require('path');
+const { JSDOM } = require('jsdom');
 
-describe('jwt-refresh login payload (delta tests)', () => {
+describe('jwt-refresh delta tests', () => {
+  let window;
+  let document;
+  let $;
+
   beforeEach(() => {
-    // Reset mock call history and localStorage before each test.
-    $.ajax.mockClear();
-    global.localStorage = {
-      store: {},
-      setItem(key, value) {
-        this.store[key] = value;
-      },
-      getItem(key) {
-        return this.store[key];
-      }
+    const dom = new JSDOM(`<!DOCTYPE html><html><body></body></html>`, {
+      url: 'http://localhost/',
+    });
+    window = dom.window;
+    document = window.document;
+    global.window = window;
+    global.document = document;
+
+    $ = require('jquery')(window);
+
+    global.$ = $;
+    global.jQuery = $;
+    global.webgoat = {
+      config: { jwtPassword: 'CONFIGURED_SECRET' },
+      customjs: {},
     };
-  });
 
-  test('login sends non-secret placeholder password instead of original hard-coded secret', () => {
-    // Arrange
-    // Load the updated script; this will define login() and attach handlers.
-    jest.isolateModules(() => {
-      require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+    jest.spyOn($, 'ajax').mockImplementation((options) => {
+      const success = options.success || options.complete || function () {};
+      success({
+        access_token: 'ACCESS',
+        refresh_token: 'REFRESH',
+      });
+      return { success: (cb) => cb({ access_token: 'ACCESS', refresh_token: 'REFRESH' }) };
     });
 
-    // The DOM-ready handler triggers an initial login('Jerry'); we use that call.
-    const lastCall = $.ajax.mock.calls[$.ajax.mock.calls.length - 1];
+    const scriptPath = path.resolve(
+      __dirname,
+      '../../../main/resources/lessons/jwt/js/jwt-refresh.js'
+    );
+    const scriptContent = fs.readFileSync(scriptPath, 'utf8');
+    eval(scriptContent);
+  });
 
-    // Assert
-    expect(lastCall).toBeDefined();
-    const ajaxConfig = lastCall[0];
-    const payload = JSON.parse(ajaxConfig.data);
+  afterEach(() => {
+    jest.restoreAllMocks();
+    delete global.window;
+    delete global.document;
+    delete global.$;
+    delete global.jQuery;
+    delete global.webgoat;
+  });
 
-    // Before the fix, password was "bm5nhSkxCXZkKRy4".
-    // After the fix, it must no longer be that exact secret.
+  test('login uses configured password and not hard-coded literal', () => {
+    const hardcodedSecret = 'bm5nhSkxCXZkKRy4';
+
+    const ajaxCall = $.ajax.mock.calls[0][0];
+    const payload = JSON.parse(ajaxCall.data);
+
     expect(payload.user).toBe('Jerry');
-    expect(payload.password).not.toBe('bm5nhSkxCXZkKRy4');
-    expect(payload.password).toBe('dummy-password');
+    expect(payload.password).toBe('CONFIGURED_SECRET');
+    expect(payload.password).not.toBe(hardcodedSecret);
   });
 
-  test('successful login still stores access and refresh tokens in localStorage', () => {
-    // Arrange
-    jest.isolateModules(() => {
-      require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
-    });
+  test('newToken uses refresh_token from localStorage and updates tokens from response', () => {
+    window.localStorage.setItem('access_token', 'OLD_ACCESS');
+    window.localStorage.setItem('refresh_token', 'OLD_REFRESH');
 
-    // The ajax mock's success handler already sets tokens; ensure they are stored.
-    expect(global.localStorage.getItem('access_token')).toBe('access123');
-    expect(global.localStorage.getItem('refresh_token')).toBe('refresh123');
+    global.newToken();
+
+    expect(window.localStorage.getItem('access_token')).toBe('ACCESS');
+    expect(window.localStorage.getItem('refresh_token')).toBe('REFRESH');
   });
 });
