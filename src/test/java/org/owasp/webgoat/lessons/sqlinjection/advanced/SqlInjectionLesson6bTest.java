@@ -1,8 +1,10 @@
+// File: src/test/java/org/owasp/webgoat/lessons/sqlinjection/advanced/SqlInjectionLesson6bTest.java
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -10,13 +12,16 @@ import java.sql.Statement;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
+import org.owasp.webgoat.container.assignments.AttackResult;
 
-public class SqlInjectionLesson6bTest {
+class SqlInjectionLesson6bTest {
 
     @Test
-    @DisplayName("getPassword should return database password when query succeeds")
-    void getPassword_returnsPasswordFromDatabase() throws Exception {
+    @DisplayName("completed uses password retrieved from DB and still succeeds on correct value")
+    void completed_usesDatabasePasswordAndSucceedsOnMatch() throws Exception {
+        // Arrange
         LessonDataSource dataSource = mock(LessonDataSource.class);
         Connection connection = mock(Connection.class);
         Statement statement = mock(Statement.class);
@@ -25,32 +30,46 @@ public class SqlInjectionLesson6bTest {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
                 .thenReturn(statement);
-        when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
-                .thenReturn(resultSet);
+        when(statement.executeQuery(anyString())).thenReturn(resultSet);
         when(resultSet.first()).thenReturn(true);
-        when(resultSet.getString("password")).thenReturn("db-password");
+        when(resultSet.getString("password")).thenReturn("secret-from-db");
 
         SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
 
-        String password = lesson.getPassword();
+        // Act
+        AttackResult result = lesson.completed("secret-from-db");
 
-        assertEquals("db-password", password);
+        // Assert
+        assertEquals(true, result.getLessonCompleted(),
+                "Expected success when supplied userid_6b matches password retrieved from DB");
+
+        ArgumentCaptor<String> queryCaptor = ArgumentCaptor.forClass(String.class);
+        verify(statement).executeQuery(queryCaptor.capture());
+        String query = queryCaptor.getValue();
+        // Ensure the query is as expected; we only validate that the fix did not alter its semantics
+        assertEquals("SELECT password FROM user_system_data WHERE user_name = 'dave'", query);
     }
 
     @Test
-    @DisplayName("getPassword should fall back to default when SQLException occurs and not throw")
-    void getPassword_handlesSqlExceptionAndReturnsDefault() throws Exception {
+    @DisplayName("getPassword returns default when SQLException occurs and does not propagate exception")
+    void getPassword_handlesSQLException_andReturnsDefault() throws SQLException {
+        // Arrange
         LessonDataSource dataSource = mock(LessonDataSource.class);
         Connection connection = mock(Connection.class);
 
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-                .thenThrow(new SQLException("DB error"));
+                .thenThrow(new SQLException("DB failure"));
 
         SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
 
+        // Act
         String password = lesson.getPassword();
 
-        assertEquals("dave", password);
+        // Assert
+        assertEquals("dave", password,
+                "When DB access fails, getPassword should return the default value instead of leaking/throwing");
+
+        // Note: We do not assert on logging output; this test ensures control flow and non-exposure via exceptions.
     }
 }
