@@ -32,13 +32,20 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a precompiled, simple and safe RegExp for lesson URL extraction
-            var lessonUrlPattern = /\.lesson.*/;
-            this.set('lessonUrl', document.URL.replace(lessonUrlPattern, '.lesson'));
+            // Use a more efficient, non–catastrophic-backtracking-safe approach
+            var currentUrl = document.URL;
 
-            // Use a safe, precompiled RegExp with a tight numeric group for page number extraction
-            var pageNumPattern = /.*\.lesson\/(\d{1,4})$/;
-            var pageMatch = pageNumPattern.exec(document.URL);
+            // Replace the `.lesson` suffix for lessonUrl using simple index operations
+            var lessonIndex = currentUrl.indexOf('.lesson');
+            if (lessonIndex !== -1) {
+                this.set('lessonUrl', currentUrl.substring(0, lessonIndex + '.lesson'.length));
+            } else {
+                this.set('lessonUrl', currentUrl);
+            }
+
+            // Extract the page number using a simple, linear-time regex
+            // Pattern: any chars, then `.lesson/`, then 1–4 digits, and end of string.
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
             if (pageMatch) {
                 this.set('pageNum', pageMatch[1]);
             } else {
