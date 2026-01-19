@@ -1,28 +1,28 @@
 $(document).ready(function () {
     login('Jerry');
-})
+});
 
 function login(user) {
-    // NOTE:
-    // - Password is no longer hard-coded here.
-    // - This script now expects the password to be provided via a runtime-safe mechanism.
-    //   For example, an integration test harness or the server can inject a non-hardcoded
-    //   password into sessionStorage under the key 'jwt_refresh_password'.
-    //
-    // If no password is available, we avoid sending a hard-coded secret and fail gracefully.
-    var password = sessionStorage.getItem('jwt_refresh_password') || '';
+    // Use a non-hardcoded password placeholder; actual secret must be provided securely by the backend.
+    var password = window.WEBGOAT_JWT_PASSWORD;
+    if (typeof password !== 'string' || !password.length) {
+        // Fail closed if password is not configured – do not send a hardcoded or empty password.
+        // In production, this should be wired to a secure, server-provided configuration mechanism.
+        // For the lesson, we avoid embedding secrets directly in source.
+        return;
+    }
 
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({user: user, password: password})
+        data: JSON.stringify({ user: user, password: password })
     }).success(
         function (response) {
             localStorage.setItem('access_token', response['access_token']);
             localStorage.setItem('refresh_token', response['refresh_token']);
         }
-    )
+    );
 }
 
 //Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
@@ -41,11 +41,11 @@ function newToken() {
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        data: JSON.stringify({refreshToken: localStorage.getItem('refresh_token')})
+        data: JSON.stringify({ refreshToken: localStorage.getItem('refresh_token') })
     }).success(
         function () {
             localStorage.setItem('access_token', apiToken);
             localStorage.setItem('refresh_token', refreshToken);
         }
-    )
+    );
 }

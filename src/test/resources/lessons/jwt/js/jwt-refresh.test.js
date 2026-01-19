@@ -1,63 +1,60 @@
-// Derived test path: src/test/resources/lessons/jwt/js/jwt-refresh.test.js
-// Delta tests for jwt-refresh.js focusing on removal of hard-coded password
-// and correct request structure using a runtime-provided password.
+// File: src/test/resources/lessons/jwt/js/jwt-refresh.test.js
+/**
+ * Delta tests for jwt-refresh.js focusing on removal of hard-coded password:
+ * - Ensures that login() uses the configured window.WEBGOAT_JWT_PASSWORD
+ * - Verifies that no request is made when the password is missing/empty
+ */
 
 const $ = require('jquery');
 
-jest.mock('jquery', () => {
-  const ajaxMock = jest.fn(() => ({
-    success: function (cb) {
-      cb({ access_token: 'access', refresh_token: 'refresh' });
-      return this;
+describe('jwt-refresh delta tests', () => {
+  let originalAjax;
+  let originalPassword;
+
+  beforeAll(() => {
+    originalAjax = $.ajax;
+    originalPassword = global.window && global.window.WEBGOAT_JWT_PASSWORD;
+    global.window = global.window || {};
+  });
+
+  afterAll(() => {
+    $.ajax = originalAjax;
+    if (originalPassword !== undefined) {
+      global.window.WEBGOAT_JWT_PASSWORD = originalPassword;
+    } else {
+      delete global.window.WEBGOAT_JWT_PASSWORD;
     }
-  }));
-  return Object.assign(function () {}, {
-    ajax: ajaxMock
   });
-});
 
-describe('jwt-refresh.js delta tests', () => {
   beforeEach(() => {
-    // Reset storage between tests
+    // Reset mock for each test
+    $.ajax = jest.fn().mockReturnValue({ success: (cb) => cb({ access_token: 'a', refresh_token: 'r' }) });
     localStorage.clear();
-    sessionStorage.clear();
-    jest.clearAllMocks();
   });
 
-  test('login uses password from sessionStorage and not a hard-coded value', () => {
-    // Arrange: set a runtime password into sessionStorage
-    const runtimePassword = 'runtime-secret';
-    sessionStorage.setItem('jwt_refresh_password', runtimePassword);
+  test('login uses configured password instead of hard-coded literal', () => {
+    // Arrange
+    const configuredPassword = 'secure-configured-password';
+    global.window.WEBGOAT_JWT_PASSWORD = configuredPassword;
+    const { login } = require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
 
-    // Load the module under test (this will define login)
-    require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+    // Act
+    login('Jerry');
 
-    // Act: invoke login via the global function defined by the script
-    global.login('Jerry');
-
-    // Assert: jQuery.ajax should be called with data containing the runtime password
+    // Assert
     expect($.ajax).toHaveBeenCalledTimes(1);
-    const callArgs = $.ajax.mock.calls[0][0];
-    const sentData = JSON.parse(callArgs.data);
-
-    expect(sentData.user).toBe('Jerry');
-    expect(sentData.password).toBe(runtimePassword);
-    // Ensure no obvious hard-coded secret is used
-    expect(sentData.password).not.toBe('bm5nhSkxCXZkKRy4');
+    const call = $.ajax.mock.calls[0][0];
+    const body = JSON.parse(call.data);
+    expect(body.password).toBe(configuredPassword);
+    expect(body.password).not.toBe('bm5nhSkxCXZkKRy4');
   });
 
-  test('login falls back to empty password when sessionStorage value is missing', () => {
-    // Arrange: do not set any password in sessionStorage
+  test('login does not send request when password is not configured', () => {
+    delete global.window.WEBGOAT_JWT_PASSWORD;
+    const { login } = require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
 
-    require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+    login('Jerry');
 
-    global.login('Jerry');
-
-    expect($.ajax).toHaveBeenCalledTimes(1);
-    const callArgs = $.ajax.mock.calls[0][0];
-    const sentData = JSON.parse(callArgs.data);
-
-    expect(sentData.user).toBe('Jerry');
-    expect(sentData.password).toBe('');
+    expect($.ajax).not.toHaveBeenCalled();
   });
 });

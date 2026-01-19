@@ -32,17 +32,23 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a precompiled, simple, non-backtracking-prone regex for performance safety
-            var lessonUrlPattern = /[.]lesson.*/;
-            this.set('lessonUrl', document.URL.replace(lessonUrlPattern, '.lesson'));
+            // Use an explicit, non-backtracking-heavy regex for .lesson URL handling
+            var currentUrl = document.URL;
+            var lessonUrlMatch = currentUrl.match(/(^.*?\.lesson)(?:\/\d{1,4})?$/);
 
-            // Use anchored, precompiled regexes to avoid catastrophic backtracking
-            var pageNumPattern = /[.]lesson\/(\d{1,4})$/;
-            if (pageNumPattern.test(document.URL)) {
-                this.set('pageNum', document.URL.replace(pageNumPattern, '$1'));
+            if (lessonUrlMatch) {
+                this.set('lessonUrl', lessonUrlMatch[1]);
+            } else {
+                this.set('lessonUrl', currentUrl);
+            }
+
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
+
             this.trigger('content:loaded',this,loadHelps);
         },
 
