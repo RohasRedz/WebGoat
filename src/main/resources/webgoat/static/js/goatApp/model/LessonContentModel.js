@@ -32,16 +32,23 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a safe constant lesson URL instead of a complex regex on document.URL
-            this.set('lessonUrl', window.location.origin + window.location.pathname.replace(/\.lesson.*/, '.lesson'));
+            // Hardened URL handling to avoid inefficient regular expressions
+            var currentUrl = document.URL || '';
+            var lessonUrl = currentUrl;
+            var lessonIndex = currentUrl.indexOf('.lesson');
+            if (lessonIndex !== -1) {
+                lessonUrl = currentUrl.substring(0, lessonIndex + '.lesson'.length);
+            }
+            this.set('lessonUrl', lessonUrl);
 
-            // Derive pageNum using a simplified, bounded pattern and input validation
             var pageNum = 0;
-            var match = window.location.pathname.match(/\/(\d{1,4})$/);
-            if (match && match[1]) {
-                var parsed = parseInt(match[1], 10);
-                if (!isNaN(parsed) && parsed >= 0 && parsed <= 9999) {
-                    pageNum = parsed;
+            var lastSlash = currentUrl.lastIndexOf('/');
+            if (lastSlash !== -1) {
+                var maybePage = currentUrl.substring(lastSlash + 1);
+                // Accept only 1–4 digit numeric page segments
+                var pageMatch = maybePage.match(/^[0-9]{1,4}$/);
+                if (pageMatch) {
+                    pageNum = parseInt(pageMatch[0], 10);
                 }
             }
             this.set('pageNum', pageNum);

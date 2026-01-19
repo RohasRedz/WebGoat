@@ -1,60 +1,82 @@
-/**
- * Delta tests for jwt-refresh.js focusing on the removal of the hard-coded password.
- * Verifies that:
- *  - login() no longer sends the literal password "bm5nhSkxCXZkKRy4"
- *  - login() uses getUserPassword() instead.
- */
+// File: src/test/resources/lessons/jwt/js/jwt-refresh.test.js
 
-const $ = require('jquery');
+// Delta test for jwt-refresh.js to verify removal of hard-coded password
+// and correct usage of getLessonPassword() in the login flow.
 
-// Require the script so that login and getUserPassword are defined in the global scope.
-// Adjust the path to match your module resolution if necessary.
-require('../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+const { JSDOM } = require('jsdom');
 
-describe('jwt-refresh delta tests', () => {
-    beforeEach(() => {
-        // Mock jQuery.ajax
-        jest.spyOn($, 'ajax').mockImplementation(() => ({
-            success: function (cb) {
-                // Simulate immediate success callback
-                cb({ access_token: 'token', refresh_token: 'refresh' });
-            }
-        }));
+// Load jQuery and set up a basic DOM environment for the script
+let dom;
+let $;
+
+beforeEach(() => {
+  dom = new JSDOM(`<!doctype html><html><body>
+      <div id="jwt-refresh-config" data-password="dynamicSecret123"></div>
+    </body></html>`, {
+    url: 'http://example.com'
+  });
+  global.window = dom.window;
+  global.document = dom.window.document;
+  $ = require('jquery')(dom.window);
+  global.$ = $;
+
+  // Provide the webgoat namespace with customjs as used in the script
+  global.webgoat = { customjs: {} };
+});
+
+afterEach(() => {
+  // Cleanup globals
+  delete global.window;
+  delete global.document;
+  delete global.$;
+  delete global.webgoat;
+});
+
+describe('jwt-refresh login and getLessonPassword behavior (hard-coded password fix)', () => {
+  test('login uses getLessonPassword and no hard-coded password literal is present', () => {
+    // Spy on $.ajax to capture payload
+    const ajaxSpy = jest.spyOn($, 'ajax').mockImplementation((options) => {
+      // Simulate a successful request, invoking success callback
+      if (typeof options.success === 'function') {
+        options.success({ access_token: 'access', refresh_token: 'refresh' });
+      } else if (typeof options.then === 'function') {
+        options.then({ access_token: 'access', refresh_token: 'refresh' });
+      }
+      return { success: (cb) => cb({ access_token: 'access', refresh_token: 'refresh' }) };
     });
 
-    afterEach(() => {
-        jest.restoreAllMocks();
-        // Clean up any tokens from localStorage
-        if (typeof localStorage !== 'undefined') {
-            localStorage.clear();
-        }
-    });
+    // Require the updated script; it will define login and getLessonPassword in global scope
+    require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
 
-    test('login uses getUserPassword() instead of hard-coded password', () => {
-        // Arrange
-        const getUserPasswordSpy = jest.spyOn(global, 'getUserPassword').mockReturnValue('dynamic-password');
+    // Ensure getLessonPassword is available and returns the DOM-configured password
+    expect(typeof global.getLessonPassword).toBe('function');
+    const password = global.getLessonPassword();
+    expect(password).toBe('dynamicSecret123');
 
-        // Act
-        global.login('Jerry');
+    // Call login, which should internally call getLessonPassword() and use its result
+    global.login('Jerry');
 
-        // Assert
-        expect(getUserPasswordSpy).toHaveBeenCalled();
+    expect(ajaxSpy).toHaveBeenCalledTimes(1);
+    const callArgs = ajaxSpy.mock.calls[0][0];
+    const body = JSON.parse(callArgs.data);
 
-        expect($.ajax).toHaveBeenCalledTimes(1);
-        const ajaxArg = $.ajax.mock.calls[0][0];
+    expect(body.user).toBe('Jerry');
+    // Crucial delta assertion: password comes from getLessonPassword and is not a hard-coded literal
+    expect(body.password).toBe('dynamicSecret123');
+    expect(body.password).not.toBe('bm5nhSkxCXZkKRy4');
 
-        // Ensure request body no longer contains the old hard-coded password
-        const sentBody = JSON.parse(ajaxArg.data);
-        expect(sentBody.user).toBe('Jerry');
-        expect(sentBody.password).toBe('dynamic-password');
-        expect(sentBody.password).not.toBe('bm5nhSkxCXZkKRy4');
-    });
+    ajaxSpy.mockRestore();
+  });
 
-    test('getUserPassword returns empty string by default (no hard-coded secret)', () => {
-        // Act
-        const value = global.getUserPassword();
+  test('getLessonPassword falls back to a non-sensitive placeholder when no DOM config present', () => {
+    // Remove the config element so that fallback path is exercised
+    const configEl = document.getElementById('jwt-refresh-config');
+    configEl.parentNode.removeChild(configEl);
 
-        // Assert
-        expect(value).toBe('');
-    });
+    require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
+
+    const password = global.getLessonPassword();
+    // Verifies the non-hard-coded, clearly placeholder nature
+    expect(password).toBe('CHANGE_ME_LESSON_PASSWORD');
+  });
 });
