@@ -7,10 +7,8 @@ package org.owasp.webgoat.lessons.challenges.challenge5;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 
-import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
@@ -41,23 +39,19 @@ public class Assignment5 implements AssignmentEndpoint {
     if (!"Larry".equals(username_login)) {
       return failed(this).feedback("user.not.larry").feedbackArgs(username_login).build();
     }
-    try (Connection connection = dataSource.getConnection()) {
-      // Fix: Replaced string concatenation with PreparedStatement to prevent SQL Injection
-      String sql = "select password from challenge_users where userid = ? and password = ?";
-      try (PreparedStatement statement = connection.prepareStatement(sql)) {
-        statement.setString(1, username_login);
-        statement.setString(2, password_login);
-        ResultSet resultSet = statement.executeQuery();
+    try (var connection = dataSource.getConnection()) {
+      PreparedStatement statement =
+          connection.prepareStatement(
+              "select password from challenge_users where userid = ? and password = ?");
+      statement.setString(1, username_login);
+      statement.setString(2, password_login);
+      ResultSet resultSet = statement.executeQuery();
 
-        if (resultSet.next()) {
-          return success(this).feedback("challenge.solved").feedbackArgs(flags.getFlag(5)).build();
-        } else {
-          return failed(this).feedback("challenge.close").build();
-        }
+      if (resultSet.next()) {
+        return success(this).feedback("challenge.solved").feedbackArgs(flags.getFlag(5)).build();
+      } else {
+        return failed(this).feedback("challenge.close").build();
       }
-    } catch (SQLException e) {
-      log.error("Database error during login attempt for user: {}", username_login, e);
-      return failed(this).feedback("error.database").build();
     }
   }
 }

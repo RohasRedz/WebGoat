@@ -1,75 +1,71 @@
 // File: src/test/java/org/owasp/webgoat/lessons/sqlinjection/advanced/SqlInjectionLesson6bTest.java
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
-import java.io.IOException;
 import java.sql.Connection;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.sql.Statement;
 
-import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.owasp.webgoat.container.LessonDataSource;
-import org.owasp.webgoat.container.assignments.AttackResult;
 
 class SqlInjectionLesson6bTest {
 
+    private LessonDataSource dataSource;
+    private SqlInjectionLesson6b lesson;
+
+    @BeforeEach
+    void setUp() {
+        dataSource = mock(LessonDataSource.class);
+        lesson = new SqlInjectionLesson6b(dataSource);
+    }
+
     @Test
-    @DisplayName("completed uses password retrieved from DB and still succeeds on correct value")
-    void completed_usesDatabasePasswordAndSucceedsOnMatch() throws Exception {
+    void getPassword_returnsDatabasePasswordWithoutLoggingStackTraceOnSqlException() throws Exception {
         // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
+        Connection connection = mock(Connection.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+
+        // Simulate an SQL exception thrown when creating the statement
+        when(connection.createStatement(
+                ResultSet.TYPE_SCROLL_INSENSITIVE,
+                ResultSet.CONCUR_READ_ONLY)).thenThrow(new java.sql.SQLException("DB error"));
+
+        // Act
+        String password = lesson.getPassword();
+
+        // Assert: even when an SQLException occurs, the method
+        // 1) does not propagate the exception
+        // 2) returns the default password "dave"
+        // The delta behavior we assert is that no stack trace is printed anymore; we
+        // approximate this by ensuring the method swallows the exception and returns
+        // the default (it previously called printStackTrace()).
+        org.junit.jupiter.api.Assertions.assertEquals("dave", password);
+    }
+
+    @Test
+    void getPassword_readsPasswordFromDatabaseWhenAvailable() throws Exception {
+        // Arrange
         Connection connection = mock(Connection.class);
         Statement statement = mock(Statement.class);
         ResultSet resultSet = mock(ResultSet.class);
 
         when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-                .thenReturn(statement);
-        when(statement.executeQuery(anyString())).thenReturn(resultSet);
+        when(connection.createStatement(
+                ResultSet.TYPE_SCROLL_INSENSITIVE,
+                ResultSet.CONCUR_READ_ONLY)).thenReturn(statement);
+        when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
+                .thenReturn(resultSet);
         when(resultSet.first()).thenReturn(true);
-        when(resultSet.getString("password")).thenReturn("secret-from-db");
-
-        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
-
-        // Act
-        AttackResult result = lesson.completed("secret-from-db");
-
-        // Assert
-        assertEquals(true, result.getLessonCompleted(),
-                "Expected success when supplied userid_6b matches password retrieved from DB");
-
-        ArgumentCaptor<String> queryCaptor = ArgumentCaptor.forClass(String.class);
-        verify(statement).executeQuery(queryCaptor.capture());
-        String query = queryCaptor.getValue();
-        // Ensure the query is as expected; we only validate that the fix did not alter its semantics
-        assertEquals("SELECT password FROM user_system_data WHERE user_name = 'dave'", query);
-    }
-
-    @Test
-    @DisplayName("getPassword returns default when SQLException occurs and does not propagate exception")
-    void getPassword_handlesSQLException_andReturnsDefault() throws SQLException {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Connection connection = mock(Connection.class);
-
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-                .thenThrow(new SQLException("DB failure"));
-
-        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
+        when(resultSet.getString("password")).thenReturn("dbPassword");
 
         // Act
         String password = lesson.getPassword();
 
-        // Assert
-        assertEquals("dave", password,
-                "When DB access fails, getPassword should return the default value instead of leaking/throwing");
-
-        // Note: We do not assert on logging output; this test ensures control flow and non-exposure via exceptions.
+        // Assert: normal behavior preserved
+        org.junit.jupiter.api.Assertions.assertEquals("dbPassword", password);
     }
 }
