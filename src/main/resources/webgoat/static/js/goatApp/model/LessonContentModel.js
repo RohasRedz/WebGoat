@@ -32,23 +32,22 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a stricter, linear-time regex and pre-validate the URL to avoid inefficient backtracking
-            var currentUrl = String(document.URL || '');
-            var isLessonUrl = /\.lesson(\/\d{1,4})?$/.test(currentUrl);
+            var currentUrl = document.URL;
+            var lessonUrl = currentUrl;
+            var pageNum = 0;
 
-            if (isLessonUrl) {
-                this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
-
-                var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-                if (pageMatch && pageMatch[1]) {
-                    this.set('pageNum', pageMatch[1]);
-                } else {
-                    this.set('pageNum', 0);
+            var lastSlashIndex = currentUrl.lastIndexOf('/');
+            if (lastSlashIndex !== -1) {
+                var possiblePage = currentUrl.substring(lastSlashIndex + 1);
+                if (/^\d{1,4}$/.test(possiblePage)) {
+                    lessonUrl = currentUrl.substring(0, lastSlashIndex);
+                    pageNum = parseInt(possiblePage, 10);
                 }
-            } else {
-                this.set('lessonUrl', currentUrl);
-                this.set('pageNum', 0);
             }
+            lessonUrl = lessonUrl.replace(/\.lesson.*/, '.lesson');
+
+            this.set('lessonUrl', lessonUrl);
+            this.set('pageNum', pageNum);
 
             this.trigger('content:loaded',this,loadHelps);
         },
