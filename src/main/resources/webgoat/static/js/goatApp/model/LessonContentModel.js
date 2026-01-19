@@ -32,17 +32,24 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a bounded, non-backtracking-prone pattern to avoid ReDoS risks
-            var currentUrl = document.URL;
-            this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
+            // Use a stricter, linear-time regex and pre-validate the URL to avoid inefficient backtracking
+            var currentUrl = String(document.URL || '');
+            var isLessonUrl = /\.lesson(\/\d{1,4})?$/.test(currentUrl);
 
-            // Limit the amount of data the regex operates on and simplify the pattern
-            var urlTail = currentUrl.slice(-256);
-            if (/\.lesson\/(\d{1,4})$/.test(urlTail)) {
-                this.set('pageNum', urlTail.replace(/.*\.lesson\/(\d{1,4})$/, '$1'));
+            if (isLessonUrl) {
+                this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
+
+                var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+                if (pageMatch && pageMatch[1]) {
+                    this.set('pageNum', pageMatch[1]);
+                } else {
+                    this.set('pageNum', 0);
+                }
             } else {
-                this.set('pageNum',0);
+                this.set('lessonUrl', currentUrl);
+                this.set('pageNum', 0);
             }
+
             this.trigger('content:loaded',this,loadHelps);
         },
 
