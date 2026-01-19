@@ -7,7 +7,9 @@ function login(user) {
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({user: user, password: "bm5nhSkxCXZkKRy4"})
+        // Removed hard-coded password from client-side; password should be provided by a secure flow
+        // For training/demo purposes, send only the username from the client.
+        data: JSON.stringify({ user: user })
     }).success(
         function (response) {
             localStorage.setItem('access_token', response['access_token']);
@@ -25,18 +27,24 @@ webgoat.customjs.addBearerToken = function () {
 
 //Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
 function newToken() {
-    localStorage.getItem('refreshToken');
+    // NOTE: refresh token should only be handled by secure server-side flows; avoid exposing it unnecessarily
+    var refreshToken = localStorage.getItem('refresh_token');
     $.ajax({
         headers: {
             'Authorization': 'Bearer ' + localStorage.getItem('access_token')
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        data: JSON.stringify({refreshToken: localStorage.getItem('refresh_token')})
+        data: JSON.stringify({ refreshToken: refreshToken })
     }).success(
-        function () {
-            localStorage.setItem('access_token', apiToken);
-            localStorage.setItem('refresh_token', refreshToken);
+        function (response) {
+            // Update tokens from server response rather than undefined identifiers
+            if (response && response.access_token) {
+                localStorage.setItem('access_token', response.access_token);
+            }
+            if (response && response.refresh_token) {
+                localStorage.setItem('refresh_token', response.refresh_token);
+            }
         }
     )
 }
