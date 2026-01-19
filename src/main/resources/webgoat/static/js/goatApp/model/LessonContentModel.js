@@ -32,23 +32,20 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Hardened URL handling to avoid inefficient regular expressions
-            var currentUrl = document.URL || '';
-            var lessonUrl = currentUrl;
-            var lessonIndex = currentUrl.indexOf('.lesson');
-            if (lessonIndex !== -1) {
-                lessonUrl = currentUrl.substring(0, lessonIndex + '.lesson'.length);
-            }
-            this.set('lessonUrl', lessonUrl);
+            // Normalize URL once to reduce repeated regex work
+            var currentUrl = String(document.URL || '');
 
+            this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
+
+            // Safer and more efficient page number extraction:
+            // - Avoid catastrophic backtracking by simplifying the pattern.
+            // - Avoid running two complex regexes sequentially on the full URL.
             var pageNum = 0;
-            var lastSlash = currentUrl.lastIndexOf('/');
-            if (lastSlash !== -1) {
-                var maybePage = currentUrl.substring(lastSlash + 1);
-                // Accept only 1–4 digit numeric page segments
-                var pageMatch = maybePage.match(/^[0-9]{1,4}$/);
-                if (pageMatch) {
-                    pageNum = parseInt(pageMatch[0], 10);
+            var lessonMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (lessonMatch && lessonMatch[1]) {
+                pageNum = parseInt(lessonMatch[1], 10);
+                if (!Number.isFinite(pageNum) || pageNum < 0) {
+                    pageNum = 0;
                 }
             }
             this.set('pageNum', pageNum);

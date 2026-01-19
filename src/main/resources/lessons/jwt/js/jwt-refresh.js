@@ -1,40 +1,40 @@
 $(document).ready(function () {
     login('Jerry');
-})
+});
 
 /**
- * Retrieve the password used for this lesson from a non-hardcoded source.
- * Falls back to a non-sensitive placeholder if nothing is provided.
- *
- * In a real application this should come from a secure configuration or
- * secrets manager, never hardcoded in the front-end.
+ * Derive the password from a configurable source instead of hardcoding it in code.
+ * In a real deployment this should be provided via a secure configuration channel
+ * (e.g., environment variable injected at build time or server-rendered meta tag)
+ * rather than being a literal string in source.
  */
-function getLessonPassword() {
-    // Allow the password to be injected via a data-attribute for lesson/demo purposes.
-    var el = document.getElementById('jwt-refresh-config');
-    if (el && el.getAttribute) {
-        var configured = el.getAttribute('data-password');
-        if (configured && typeof configured === 'string' && configured.length > 0) {
-            return configured;
-        }
+function getConfiguredPassword() {
+    // Example: read from a meta tag if present (server-controlled), otherwise fall back
+    // to a non-secret placeholder that must be overridden in production.
+    var meta = document.querySelector('meta[name="jwt-refresh-password"]');
+    if (meta && meta.content) {
+        return meta.content;
     }
 
-    // Fallback to a neutral placeholder, not an actual secret
-    return 'CHANGE_ME_LESSON_PASSWORD';
+    // NOTE: This fallback value is intentionally non-sensitive and MUST be overridden
+    // in any real deployment via a secure configuration mechanism.
+    return 'CHANGE_ME_IN_SECURE_CONFIG';
 }
 
 function login(user) {
+    var password = getConfiguredPassword();
+
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({user: user, password: getLessonPassword()})
+        data: JSON.stringify({user: user, password: password})
     }).success(
         function (response) {
             localStorage.setItem('access_token', response['access_token']);
             localStorage.setItem('refresh_token', response['refresh_token']);
         }
-    )
+    );
 }
 
 //Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
@@ -59,5 +59,5 @@ function newToken() {
             localStorage.setItem('access_token', apiToken);
             localStorage.setItem('refresh_token', refreshToken);
         }
-    )
+    );
 }
