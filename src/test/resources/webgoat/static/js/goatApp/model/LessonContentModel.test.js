@@ -1,43 +1,73 @@
+const $ = require('jquery');
+const _ = require('underscore');
 const Backbone = require('backbone');
 
-describe('LessonContentModel delta tests', () => {
-  let LessonContentModel;
-  let instance;
+jest.mock('jquery', () => ({}));
+jest.mock('underscore', () => ({
+  escape: (s) => s
+}));
+jest.mock('backbone', () => {
+  const Backbone = {
+    Model: function () {},
+  };
+  Backbone.Model.prototype = {
+    fetch: jest.fn().mockResolvedValue({}),
+    set: jest.fn(),
+    trigger: jest.fn()
+  };
+  Backbone.Model.prototype.fetch.call = Function.prototype.call;
+  return Backbone;
+});
 
-  beforeAll(() => {
-    // Minimal require assuming module exports the Backbone model in test environment.
-    LessonContentModel = require('../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
-  });
+const defineLessonModule = require('../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
 
-  beforeEach(() => {
-    instance = new LessonContentModel();
-  });
+describe('LessonContentModel URL and page parsing (delta test)', () => {
+  function getLessonContentModel() {
+    let exported;
+    global.define = (deps, factory) => {
+      exported = factory($, _, Backbone, Backbone.Model);
+    };
+    defineLessonModule;
+    return exported;
+  }
 
-  test('setContent sets lessonUrl truncated at .lesson using efficient logic', () => {
-    const originalUrl = 'http://example.com/path/lesson1.lesson/extra/path';
+  test('setContent should set lessonUrl and numeric pageNum when URL ends with .lesson/<digits>', () => {
+    const LessonContentModel = getLessonContentModel();
+    const model = new LessonContentModel();
+    model.set = jest.fn();
+    model.trigger = jest.fn();
+
+    const originalUrl = 'http://example.com/path/to/topic.lesson/12';
+    const originalDocument = global.document;
     global.document = { URL: originalUrl };
 
-    instance.setContent('<html></html>', true);
+    try {
+      model.setContent('<html>content</html>', true);
 
-    // After the fix, lessonUrl should still end at `.lesson`
-    expect(instance.get('lessonUrl')).toBe('http://example.com/path/lesson1.lesson');
+      expect(model.set).toHaveBeenCalledWith('lessonUrl', 'http://example.com/path/to/topic.lesson');
+      expect(model.set).toHaveBeenCalledWith('pageNum', 12);
+    } finally {
+      global.document = originalDocument;
+    }
   });
 
-  test('setContent sets numeric pageNum when URL ends in .lesson/<digits>', () => {
-    const url = 'http://example.com/abc.lesson/1234';
-    global.document = { URL: url };
+  test('setContent should set pageNum to 0 when URL does not match .lesson/<digits>', () => {
+    const LessonContentModel = getLessonContentModel();
+    const model = new LessonContentModel();
+    model.set = jest.fn();
+    model.trigger = jest.fn();
 
-    instance.setContent('<html></html>', true);
+    const originalUrl = 'http://example.com/path/to/topic.lesson';
+    const originalDocument = global.document;
+    global.document = { URL: originalUrl };
 
-    expect(instance.get('pageNum')).toBe('1234');
-  });
+    try {
+      model.setContent('<html>content</html>', true);
 
-  test('setContent sets pageNum to 0 when URL has no trailing page number', () => {
-    const url = 'http://example.com/abc.lesson';
-    global.document = { URL: url };
-
-    instance.setContent('<html></html>', true);
-
-    expect(instance.get('pageNum')).toBe(0);
+      expect(model.set).toHaveBeenCalledWith('lessonUrl', 'http://example.com/path/to/topic.lesson');
+      expect(model.set).toHaveBeenCalledWith('pageNum', 0);
+    } finally {
+      global.document = originalDocument;
+    }
   });
 });

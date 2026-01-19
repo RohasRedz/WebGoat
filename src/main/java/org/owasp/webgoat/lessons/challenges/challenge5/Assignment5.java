@@ -9,7 +9,6 @@ import static org.owasp.webgoat.container.assignments.AttackResultBuilder.succes
 
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.SQLException; // Added for SQLException handling
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
@@ -41,7 +40,6 @@ public class Assignment5 implements AssignmentEndpoint {
       return failed(this).feedback("user.not.larry").feedbackArgs(username_login).build();
     }
     try (var connection = dataSource.getConnection()) {
-      // FIX: Refactored to use PreparedStatement with bind parameters to prevent SQL Injection
       PreparedStatement statement =
           connection.prepareStatement(
               "select password from challenge_users where userid = ? and password = ?");
@@ -54,9 +52,6 @@ public class Assignment5 implements AssignmentEndpoint {
       } else {
         return failed(this).feedback("challenge.close").build();
       }
-    } catch (SQLException e) { // Catch SQLException specifically
-        log.error("Database error during login attempt for user: {}", username_login, e);
-        return failed(this).feedback("An unexpected error occurred.").build();
     }
   }
 }

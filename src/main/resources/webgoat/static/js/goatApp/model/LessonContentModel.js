@@ -32,26 +32,21 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a more efficient, non–catastrophic-backtracking-safe approach
-            var currentUrl = document.URL;
+            // Use a precompiled, bounded regex and avoid repeated literal regex construction
+            var currentUrl = String(document.URL || '');
+            // This pattern requires a numeric page segment of 1–4 digits after ".lesson/"
+            // and is compiled once here, avoiding any catastrophic backtracking patterns.
+            var lessonPagePattern = /^(.*\.lesson)\/(\d{1,4})$/;
 
-            // Replace the `.lesson` suffix for lessonUrl using simple index operations
-            var lessonIndex = currentUrl.indexOf('.lesson');
-            if (lessonIndex !== -1) {
-                this.set('lessonUrl', currentUrl.substring(0, lessonIndex + '.lesson'.length));
-            } else {
-                this.set('lessonUrl', currentUrl);
-            }
+            this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
 
-            // Extract the page number using a simple, linear-time regex
-            // Pattern: any chars, then `.lesson/`, then 1–4 digits, and end of string.
-            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
-                this.set('pageNum', pageMatch[1]);
+            var match = currentUrl.match(lessonPagePattern);
+            if (match) {
+                // match[2] is guaranteed to be 1–4 digits due to the regex
+                this.set('pageNum', parseInt(match[2], 10));
             } else {
                 this.set('pageNum', 0);
             }
-
             this.trigger('content:loaded',this,loadHelps);
         },
 

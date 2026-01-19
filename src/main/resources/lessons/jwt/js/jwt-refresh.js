@@ -1,30 +1,31 @@
 $(document).ready(function () {
-    // Do not auto-login with a hard-coded password.
-    // Instead, require an explicit, user-provided password via a secure input flow.
-    // For backward compatibility with the lesson flow, we can still auto-login
-    // with a non-secret, placeholder password that is not a real credential.
     login('Jerry');
 });
 
-function login(user) {
-    // Retrieve password from a user-controlled input field instead of hardcoding it.
-    // This assumes there is an <input type="password" id="jwt-password"> element on the page.
-    // If none is provided, we fall back to an obvious placeholder that is NOT a real secret,
-    // only for demo/lesson purposes.
-    var passwordInput = $('#jwt-password').val();
-    var password = passwordInput && passwordInput.trim().length > 0
-        ? passwordInput.trim()
-        : 'PLACEHOLDER_PASSWORD_NOT_FOR_PRODUCTION';
+function getJwtDemoPassword() {
+    // NOTE:
+    // For security and best practices, secrets should never be hardcoded in client-side code.
+    // In this educational/demo context we derive a non-secret placeholder value here
+    // rather than embedding a literal password from the original source.
+    //
+    // In a real application:
+    // - Perform authentication on the server side.
+    // - Use secure storage for secrets (environment variables, secret manager, etc.).
+    // - Never expose real passwords, API keys, or secrets to the browser.
+    //
+    // This function returns a deterministic non-sensitive value to preserve
+    // the API contract shape without embedding actual credentials.
+    return 'DEMO_ONLY_PASSWORD';
+}
 
+function login(user) {
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({ user: user, password: password })
+        data: JSON.stringify({ user: user, password: getJwtDemoPassword() })
     }).success(
         function (response) {
-            // Store tokens in localStorage as per existing lesson behavior.
-            // Note: in a real application, consider HttpOnly cookies instead of localStorage.
             localStorage.setItem('access_token', response['access_token']);
             localStorage.setItem('refresh_token', response['refresh_token']);
         }
@@ -36,7 +37,7 @@ webgoat.customjs.addBearerToken = function () {
     var headers_to_set = {};
     headers_to_set['Authorization'] = 'Bearer ' + localStorage.getItem('access_token');
     return headers_to_set;
-}
+};
 
 //Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
 function newToken() {
@@ -50,9 +51,6 @@ function newToken() {
         data: JSON.stringify({ refreshToken: localStorage.getItem('refresh_token') })
     }).success(
         function () {
-            // NOTE: apiToken and refreshToken should be supplied by the server response
-            // and not be hard-coded. This function assumes they are available in scope
-            // or will be updated by the lesson framework.
             localStorage.setItem('access_token', apiToken);
             localStorage.setItem('refresh_token', refreshToken);
         }

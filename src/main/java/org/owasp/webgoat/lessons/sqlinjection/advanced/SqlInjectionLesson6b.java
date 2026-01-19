@@ -12,7 +12,6 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import lombok.extern.slf4j.Slf4j; // Added Slf4j import
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -20,9 +19,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import lombok.extern.slf4j.Slf4j;
 
 @RestController
-@Slf4j // Added Slf4j annotation
+@Slf4j
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -33,9 +33,6 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   @PostMapping("/SqlInjectionAdvanced/attack6b")
   @ResponseBody
   public AttackResult completed(@RequestParam String userid_6b) throws IOException {
-    // The original logic compares userid_6b with the password retrieved from the database.
-    // This is a logical flaw in a real application, but for a lesson, it might be intentional.
-    // The fix focuses on the logging vulnerability as per the prompt.
     if (userid_6b.equals(getPassword())) {
       return success(this).build();
     } else {
@@ -44,9 +41,7 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "dave"; // This hardcoded default is a potential vulnerability (CWE-798)
-                              // but the prompt for this batch focuses on "Information Exposure Through Log Files".
-                              // For a real fix, this should be removed or managed securely.
+    String password = "dave";
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -59,14 +54,12 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        // FIX: Replaced printStackTrace with secure logging to prevent information exposure.
-        log.error("Database error during password retrieval attempt.", sqle);
-        // do nothing (original comment, keeping for minimal diff, but logging is now secure)
+        log.error("SQL Exception in getPassword method: {}", sqle.getMessage(), sqle);
+        // do nothing
       }
     } catch (Exception e) {
-      // FIX: Replaced printStackTrace with secure logging to prevent information exposure.
-      log.error("Unexpected error during password retrieval process.", e);
-      // do nothing (original comment, keeping for minimal diff, but logging is now secure)
+      log.error("General Exception in getPassword method: {}", e.getMessage(), e);
+      // do nothing
     }
     return (password);
   }
