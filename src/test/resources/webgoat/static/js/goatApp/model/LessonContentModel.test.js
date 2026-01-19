@@ -1,60 +1,61 @@
-define([
-    'jquery',
-    'underscore',
-    'backbone',
-    'goatApp/model/HTMLContentModel',
-    'webgoat/static/js/goatApp/model/LessonContentModel'
-], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
+// File: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+const $ = require('jquery');
+const _ = require('underscore');
+const Backbone = require('backbone');
 
-    describe('LessonContentModel delta tests for URL regex changes', function () {
+// Minimal HTMLContentModel stub to satisfy the AMD dependency.
+// In the real project, this should import the actual module.
+const HTMLContentModel = Backbone.Model.extend({});
 
-        function createModel() {
-            return new LessonContentModel();
-        }
+// Shim for AMD define used in the source file
+global.define = function (deps, factory) {
+  const module = factory($, _, Backbone, HTMLContentModel);
+  module.__esModule = true;
+  module.default = module;
+  moduleUnderTest.exports = module;
+};
 
-        it('sets lessonUrl and pageNum correctly when URL has page number suffix', function () {
-            // Arrange
-            var model = createModel();
-            var originalUrl = 'http://example.com/attack.lesson/12';
-            var oldDocumentUrl = global.document && global.document.URL;
-            global.document = global.document || {};
-            global.document.URL = originalUrl;
+const moduleUnderTest = { exports: null };
 
-            try {
-                // Act
-                model.setContent('<html>dummy</html>', true);
+// Load the module under test (will fill moduleUnderTest.exports via global.define)
+require('../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel');
 
-                // Assert
-                expect(model.get('lessonUrl')).toBe('http://example.com/attack.lesson');
-                expect(model.get('pageNum')).toBe('12');
-            } finally {
-                // Cleanup
-                if (oldDocumentUrl !== undefined) {
-                    global.document.URL = oldDocumentUrl;
-                }
-            }
-        });
+const LessonContentModel = moduleUnderTest.exports;
 
-        it('sets pageNum to 0 when URL has no page number suffix', function () {
-            // Arrange
-            var model = createModel();
-            var originalUrl = 'http://example.com/attack.lesson';
-            var oldDocumentUrl = global.document && global.document.URL;
-            global.document = global.document || {};
-            global.document.URL = originalUrl;
+describe('LessonContentModel setContent delta tests', () => {
+  let model;
 
-            try {
-                // Act
-                model.setContent('<html>dummy</html>', true);
+  beforeEach(() => {
+    model = new LessonContentModel();
+  });
 
-                // Assert
-                expect(model.get('lessonUrl')).toBe('http://example.com/attack.lesson');
-                expect(model.get('pageNum')).toBe(0);
-            } finally {
-                if (oldDocumentUrl !== undefined) {
-                    global.document.URL = oldDocumentUrl;
-                }
-            }
-        });
-    });
+  test('setContent derives lessonUrl and pageNum when URL has page number', () => {
+    const originalUrl = 'http://example.com/MyLesson.lesson/12';
+    const oldUrl = global.document && global.document.URL;
+    global.document = { URL: originalUrl };
+
+    model.setContent('<html>content</html>');
+
+    expect(model.get('lessonUrl')).toBe('http://example.com/MyLesson.lesson');
+    expect(model.get('pageNum')).toBe('12');
+
+    if (oldUrl !== undefined) {
+      global.document.URL = oldUrl;
+    }
+  });
+
+  test('setContent sets pageNum to 0 when URL has no page number', () => {
+    const originalUrl = 'http://example.com/MyLesson.lesson';
+    const oldUrl = global.document && global.document.URL;
+    global.document = { URL: originalUrl };
+
+    model.setContent('<html>content</html>');
+
+    expect(model.get('lessonUrl')).toBe('http://example.com/MyLesson.lesson');
+    expect(model.get('pageNum')).toBe(0);
+
+    if (oldUrl !== undefined) {
+      global.document.URL = oldUrl;
+    }
+  });
 });

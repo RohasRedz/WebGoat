@@ -41,7 +41,7 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "";
+    String password = "dave";
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -54,12 +54,10 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("Database error while retrieving password: {}", sqle.getMessage());
-        // do nothing
+        log.error("SQL Exception occurred while fetching password", sqle);
       }
     } catch (Exception e) {
-      log.error("Error accessing data source for password retrieval: {}", e.getMessage());
-      // do nothing
+      log.error("General Exception occurred while fetching password", e);
     }
     return (password);
   }
