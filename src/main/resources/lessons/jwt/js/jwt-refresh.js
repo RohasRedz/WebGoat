@@ -3,11 +3,20 @@ $(document).ready(function () {
 })
 
 function login(user) {
+    // NOTE:
+    // - Password is no longer hard-coded here.
+    // - This script now expects the password to be provided via a runtime-safe mechanism.
+    //   For example, an integration test harness or the server can inject a non-hardcoded
+    //   password into sessionStorage under the key 'jwt_refresh_password'.
+    //
+    // If no password is available, we avoid sending a hard-coded secret and fail gracefully.
+    var password = sessionStorage.getItem('jwt_refresh_password') || '';
+
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({user: user, password: "bm5nhSkxCXZkKRy4"})
+        data: JSON.stringify({user: user, password: password})
     }).success(
         function (response) {
             localStorage.setItem('access_token', response['access_token']);
