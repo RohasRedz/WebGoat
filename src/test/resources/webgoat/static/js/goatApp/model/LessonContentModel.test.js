@@ -1,59 +1,67 @@
-define([
-    'jquery',
-    'underscore',
-    'backbone',
-    'goatApp/model/HTMLContentModel',
-    'webgoat/static/js/goatApp/model/LessonContentModel'
-], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
+// Derived test path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
 
-    describe('LessonContentModel delta tests - URL and pageNum derivation', function () {
+define(['jquery', 'underscore', 'backbone', 'goatApp/model/HTMLContentModel'], function (
+  $,
+  _,
+  Backbone,
+  HTMLContentModel
+) {
+  // NOTE: This AMD-style wrapper is only to keep import semantics similar to the production file.
+  // The Jest tests themselves focus on the changed behavior (sanitization and regex handling).
 
-        function createModel() {
-            return new LessonContentModel();
-        }
+  const LessonContentModel = HTMLContentModel.extend({
+    // Minimal stub; actual implementation comes from the app in real runtime.
+  });
 
-        it('should build urlRoot using encodeURIComponent on name', function () {
-            var model = createModel();
-            var options = { name: 'Lesson 1 & Intro' };
+  describe('LessonContentModel delta tests', () => {
+    function createModel() {
+      // In production, LessonContentModel is created by AMD loader; here we assume a plain Backbone model
+      // with extended methods. For delta testing we only need behavior related to URL/page parsing and
+      // options.name sanitization. So we re-require the original implementation.
+      // TODO: Adjust if module loader differs in real test setup.
+      const OriginalModel = require('../../../../../../../../main/resources/webgoat/static/js/goatApp/model/LessonContentModel.js');
+      return new OriginalModel();
+    }
 
-            model.loadData(options);
+    test('loadData should sanitize options.name and not allow unsafe characters into urlRoot', () => {
+      const model = createModel();
+      const unsafeName = 'less/on\\name?with@bad#chars<script>';
+      model.loadData({ name: unsafeName });
 
-            expect(model.urlRoot).toBe(encodeURIComponent(options.name) + '.lesson');
-        });
+      const urlRoot = model.urlRoot || model.get('urlRoot');
+      expect(urlRoot).toBeDefined();
+      expect(urlRoot.endsWith('.lesson')).toBe(true);
 
-        it('should derive lessonUrl and pageNum from standard lesson URL', function () {
-            var model = createModel();
+      // urlRoot should be encoded and must not contain raw unsafe characters
+      expect(urlRoot).not.toMatch(/[\/\\?<>'"<]/);
 
-            var originalLocation = window.location;
-            delete window.location;
-            window.location = { href: 'http://example.com/attack.lesson/12' };
-
-            try {
-                model.setContent('<html></html>', true);
-
-                expect(model.get('lessonUrl')).toBe('http://example.com/attack.lesson');
-                expect(model.get('pageNum')).toBe('12');
-            } finally {
-                window.location = originalLocation;
-            }
-        });
-
-        it('should set pageNum to 0 when URL does not match pattern', function () {
-            var model = createModel();
-
-            var originalLocation = window.location;
-            delete window.location;
-            window.location = { href: 'http://example.com/attack.lesson' };
-
-            try {
-                model.setContent('<html></html>', true);
-
-                expect(model.get('lessonUrl')).toBe('http://example.com/attack.lesson');
-                expect(model.get('pageNum')).toBe(0);
-            } finally {
-                window.location = originalLocation;
-            }
-        });
-
+      // Encoded value should only contain allowed URL-encoded segments
+      const base = urlRoot.replace(/\.lesson$/, '');
+      expect(decodeURIComponent(base)).not.toMatch(/[\/\\?<>'"<]/);
     });
+
+    test('setContent should derive lessonUrl and pageNum with efficient regex', () => {
+      const model = createModel();
+
+      // Simulate a URL with page number at the end
+      const oldHref = global.window && global.window.location && global.window.location.href;
+      delete global.window.location;
+      global.window.location = { href: 'http://example.com/path/to/lesson.lesson/1234' };
+
+      try {
+        model.setContent('<html></html>', true);
+
+        const lessonUrl = model.get('lessonUrl');
+        const pageNum = model.get('pageNum');
+
+        expect(lessonUrl).toBe('http://example.com/path/to/lesson.lesson');
+        expect(pageNum).toBe('1234');
+      } finally {
+        // Restore window.location
+        if (oldHref !== undefined) {
+          global.window.location = { href: oldHref };
+        }
+      }
+    });
+  });
 });

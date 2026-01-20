@@ -1,68 +1,63 @@
 $(document).ready(function () {
-    login('Jerry');
+  login('Jerry');
 });
 
 function login(user) {
-    // Retrieve password/secret from a safer configuration source instead of hard-coding
-    // Fallback to an empty string if not configured so that no real secret is embedded in code.
-    var passwordFromConfig = (window.webgoat && window.webgoat.config && typeof window.webgoat.config.jwtDemoPassword === 'string')
-        ? window.webgoat.config.jwtDemoPassword
-        : '';
-
-    $.ajax({
-        type: 'POST',
-        url: 'JWT/refresh/login',
-        contentType: "application/json",
-        data: JSON.stringify({ user: user, password: passwordFromConfig })
-    }).success(
-        function (response) {
-            if (response && typeof response.access_token === 'string') {
-                localStorage.setItem('access_token', response['access_token']);
-            }
-            if (response && typeof response.refresh_token === 'string') {
-                localStorage.setItem('refresh_token', response['refresh_token']);
-            }
-        }
-    );
+  // NOTE: Password is no longer hardcoded in source.
+  // It should be provided by the backend or a secure configuration channel,
+  // not visible in client-side code.
+  $.ajax({
+    type: 'POST',
+    url: 'JWT/refresh/login',
+    contentType: 'application/json',
+    data: JSON.stringify({ user: user }),
+  }).success(function (response) {
+    if (response && typeof response.access_token === 'string') {
+      localStorage.setItem('access_token', response.access_token);
+    }
+    if (response && typeof response.refresh_token === 'string') {
+      localStorage.setItem('refresh_token', response.refresh_token);
+    }
+  });
 }
 
-//Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
+// Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
+webgoat.customjs = webgoat.customjs || {};
 webgoat.customjs.addBearerToken = function () {
-    var headers_to_set = {};
-    var accessToken = localStorage.getItem('access_token');
-    if (typeof accessToken === 'string' && accessToken.length > 0) {
-        headers_to_set['Authorization'] = 'Bearer ' + accessToken;
-    }
-    return headers_to_set;
+  var headers_to_set = {};
+  var token = localStorage.getItem('access_token');
+  if (typeof token === 'string' && token.length > 0) {
+    headers_to_set.Authorization = 'Bearer ' + token;
+  }
+  return headers_to_set;
 };
 
-//Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
+// Dev comment: Temporarily disabled from page we need to work out the refresh token flow
+// but for now we can go live with the checkout page
 function newToken() {
-    // ensure we don't accidentally expose or misuse tokens; just read existing refresh token
-    var refreshToken = localStorage.getItem('refresh_token');
-    var accessToken = localStorage.getItem('access_token');
+  var currentAccessToken = localStorage.getItem('access_token');
+  var currentRefreshToken = localStorage.getItem('refresh_token');
 
-    $.ajax({
-        headers: (function () {
-            var headers = {};
-            if (typeof accessToken === 'string' && accessToken.length > 0) {
-                headers['Authorization'] = 'Bearer ' + accessToken;
-            }
-            return headers;
-        })(),
-        type: 'POST',
-        url: 'JWT/refresh/newToken',
-        contentType: "application/json",
-        data: JSON.stringify({ refreshToken: refreshToken })
-    }).success(
-        function (response) {
-            // Update tokens only from server response to avoid using undefined variables
-            if (response && typeof response.access_token === 'string') {
-                localStorage.setItem('access_token', response.access_token);
-            }
-            if (response && typeof response.refresh_token === 'string') {
-                localStorage.setItem('refresh_token', response.refresh_token);
-            }
-        }
-    );
+  if (!currentRefreshToken) {
+    // No refresh token available; nothing to do.
+    return;
+  }
+
+  $.ajax({
+    headers: {
+      Authorization: currentAccessToken ? 'Bearer ' + currentAccessToken : undefined,
+    },
+    type: 'POST',
+    url: 'JWT/refresh/newToken',
+    contentType: 'application/json',
+    data: JSON.stringify({ refreshToken: currentRefreshToken }),
+  }).success(function (response) {
+    // Expect the API to safely return new tokens. Do not rely on global variables.
+    if (response && typeof response.access_token === 'string') {
+      localStorage.setItem('access_token', response.access_token);
+    }
+    if (response && typeof response.refresh_token === 'string') {
+      localStorage.setItem('refresh_token', response.refresh_token);
+    }
+  });
 }

@@ -1,97 +1,102 @@
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.IOException;
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AttackResult;
-import org.slf4j.Logger;
 
-/**
- * Delta tests for SqlInjectionLesson6b focusing on the logging change:
- * - Exceptions are no longer printed via printStackTrace, but logged via SLF4J error logging.
- */
-class SqlInjectionLesson6bTest {
+public class SqlInjectionLesson6bTest {
 
   @Test
-  @DisplayName("completed uses getPassword and does not expose stack traces directly")
-  void completedDoesNotExposeStackTrace() throws IOException {
+  @DisplayName("getPassword should no longer fall back to hardcoded default value")
+  void getPassword_noHardcodedDefaultPassword() throws Exception {
     // Arrange
-    LessonDataSource dataSource = mock(LessonDataSource.class);
-    Connection connection = mock(Connection.class);
-    Statement statement = mock(Statement.class);
-    ResultSet resultSet = mock(ResultSet.class);
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-        .thenReturn(statement);
-    when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
-        .thenThrow(new RuntimeException("DB error"));
+    LessonDataSource lessonDataSource = Mockito.mock(LessonDataSource.class);
+    Connection connection = Mockito.mock(Connection.class);
+    Statement statement = Mockito.mock(Statement.class);
+    ResultSet resultSet = Mockito.mock(ResultSet.class);
 
-    Logger logger = mock(Logger.class);
-    SqlInjectionLesson6b lesson =
-        new SqlInjectionLesson6b(dataSource) {
-          @Override
-          protected String getPassword() {
-            String password = "dave";
-            try (Connection conn = dataSource.getConnection()) {
-              String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
-              try {
-                Statement stmt =
-                    conn.createStatement(
-                        ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-                ResultSet results = stmt.executeQuery(query);
-                if (results != null && results.first()) {
-                  password = results.getString("password");
-                }
-              } catch (Exception sqle) {
-                logger.error("SQL Exception occurred while fetching password", sqle);
-              }
-            } catch (Exception e) {
-              logger.error("General Exception occurred while fetching password", e);
-            }
-            return password;
-          }
-        };
+    Mockito.when(lessonDataSource.getConnection()).thenReturn(connection);
+    Mockito.when(
+            connection.createStatement(
+                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+        .thenReturn(statement);
+    Mockito.when(
+            statement.executeQuery(
+                "SELECT password FROM user_system_data WHERE user_name = 'dave'"))
+        .thenReturn(resultSet);
+    // Simulate no rows so that the method would previously return the hardcoded "dave"
+    Mockito.when(resultSet.first()).thenReturn(false);
+
+    SqlInjectionLesson6b endpoint = new SqlInjectionLesson6b(lessonDataSource);
 
     // Act
-    AttackResult result = lesson.completed("someUser");
+    String password = endpoint.getPassword();
 
     // Assert
-    verify(logger, atLeastOnce())
-        .error(eq("SQL Exception occurred while fetching password"), any(Throwable.class));
-    // Behaviorally, lesson should fail since password retrieval failed
-    assertEquals(false, result.getLessonCompleted());
+    assertTrue(
+        password == null || !"dave".equals(password),
+        "getPassword must not return the hardcoded default 'dave' when no DB row is found");
   }
 
   @Test
-  @DisplayName("completed succeeds when userid matches retrieved password")
-  void completedSucceedsWhenUserIdMatchesPassword() throws Exception {
+  @DisplayName("getPassword should return DB value when available")
+  void getPassword_returnsDatabaseValue() throws Exception {
     // Arrange
-    LessonDataSource dataSource = mock(LessonDataSource.class);
-    Connection connection = mock(Connection.class);
-    Statement statement = mock(Statement.class);
-    ResultSet resultSet = mock(ResultSet.class);
+    LessonDataSource lessonDataSource = Mockito.mock(LessonDataSource.class);
+    Connection connection = Mockito.mock(Connection.class);
+    Statement statement = Mockito.mock(Statement.class);
+    ResultSet resultSet = Mockito.mock(ResultSet.class);
 
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+    Mockito.when(lessonDataSource.getConnection()).thenReturn(connection);
+    Mockito.when(
+            connection.createStatement(
+                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
         .thenReturn(statement);
-    when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
+    Mockito.when(
+            statement.executeQuery(
+                "SELECT password FROM user_system_data WHERE user_name = 'dave'"))
         .thenReturn(resultSet);
-    when(resultSet.first()).thenReturn(true);
-    when(resultSet.getString("password")).thenReturn("secretPw");
+    Mockito.when(resultSet.first()).thenReturn(true);
+    Mockito.when(resultSet.getString("password")).thenReturn("from-db");
 
-    SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
+    SqlInjectionLesson6b endpoint = new SqlInjectionLesson6b(lessonDataSource);
 
     // Act
-    AttackResult result = lesson.completed("secretPw");
+    String password = endpoint.getPassword();
 
     // Assert
-    assertEquals(true, result.getLessonCompleted());
+    assertEquals("from-db", password, "Expected password to come from DB row, not a default");
+  }
+
+  @Test
+  @DisplayName("completed should still succeed when provided password matches returned value")
+  void completed_usesPasswordFromGetPassword() throws Exception {
+    // Arrange
+    LessonDataSource lessonDataSource = Mockito.mock(LessonDataSource.class);
+    SqlInjectionLesson6b endpoint =
+        Mockito.spy(new SqlInjectionLesson6b(lessonDataSource));
+
+    Mockito.doReturn("expected-secret").when(endpoint).getPassword();
+
+    // Act
+    AttackResult successResult = endpoint.completed("expected-secret");
+    AttackResult failResult = endpoint.completed("wrong");
+
+    // Assert
+    assertTrue(
+        successResult.getLessonCompleted(),
+        "Lesson should be completed when supplied password matches getPassword()");
+    assertTrue(
+        !failResult.getLessonCompleted(),
+        "Lesson must not be completed when supplied password does not match getPassword()");
   }
 }
