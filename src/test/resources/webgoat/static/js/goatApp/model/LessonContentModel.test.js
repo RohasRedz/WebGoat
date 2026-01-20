@@ -1,105 +1,59 @@
-// Derived test path (per requirements):
-// src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+define([
+    'jquery',
+    'underscore',
+    'backbone',
+    'goatApp/model/HTMLContentModel',
+    'webgoat/static/js/goatApp/model/LessonContentModel'
+], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
 
-// Note: This test assumes a Node/Jest environment. It focuses solely on the
-// changed URL/regex handling behavior in setContent.
+    describe('LessonContentModel delta tests - URL and pageNum derivation', function () {
 
-const $ = require('jquery');
-const _ = require('underscore');
-const Backbone = require('backbone');
+        function createModel() {
+            return new LessonContentModel();
+        }
 
-// Minimal HTMLContentModel stub to satisfy the AMD-style extend
-class HTMLContentModel extends Backbone.Model {}
-// Inject our stub into the module under test by emulating the AMD factory
-// pattern inline.
+        it('should build urlRoot using encodeURIComponent on name', function () {
+            var model = createModel();
+            var options = { name: 'Lesson 1 & Intro' };
 
-// We re-create the updated module body in a testable way.
-const createLessonContentModel = () => {
-  return HTMLContentModel.extend({
-    urlRoot: null,
-    defaults: {
-      items: null,
-      selectedItem: null,
-    },
+            model.loadData(options);
 
-    initialize: function () {},
+            expect(model.urlRoot).toBe(encodeURIComponent(options.name) + '.lesson');
+        });
 
-    loadData: function (options) {
-      this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
-      const self = this;
-      this.fetch().done(function (data) {
-        self.setContent(data);
-      });
-    },
+        it('should derive lessonUrl and pageNum from standard lesson URL', function () {
+            var model = createModel();
 
-    setContent: function (content, loadHelps) {
-      if (typeof loadHelps === 'undefined') {
-        loadHelps = true;
-      }
-      this.set('content', content);
+            var originalLocation = window.location;
+            delete window.location;
+            window.location = { href: 'http://example.com/attack.lesson/12' };
 
-      const currentUrl = String(global.document.URL || '');
-      this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
+            try {
+                model.setContent('<html></html>', true);
 
-      const pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-      if (pageMatch && pageMatch[1]) {
-        this.set('pageNum', pageMatch[1]);
-      } else {
-        this.set('pageNum', 0);
-      }
+                expect(model.get('lessonUrl')).toBe('http://example.com/attack.lesson');
+                expect(model.get('pageNum')).toBe('12');
+            } finally {
+                window.location = originalLocation;
+            }
+        });
 
-      this.trigger('content:loaded', this, loadHelps);
-    },
+        it('should set pageNum to 0 when URL does not match pattern', function () {
+            var model = createModel();
 
-    fetch: function (options) {
-      options = options || {};
-      return Backbone.Model.prototype.fetch.call(
-        this,
-        _.extend({ dataType: 'html' }, options),
-      );
-    },
-  });
-};
+            var originalLocation = window.location;
+            delete window.location;
+            window.location = { href: 'http://example.com/attack.lesson' };
 
-describe('LessonContentModel delta tests (URL/regex handling)', () => {
-  let LessonContentModel;
-  let model;
-  let contentLoadedArgs;
+            try {
+                model.setContent('<html></html>', true);
 
-  beforeEach(() => {
-    // Provide a minimal document with URL to exercise regex.
-    global.document = { URL: 'http://example.com/lesson1.lesson/42' };
+                expect(model.get('lessonUrl')).toBe('http://example.com/attack.lesson');
+                expect(model.get('pageNum')).toBe(0);
+            } finally {
+                window.location = originalLocation;
+            }
+        });
 
-    LessonContentModel = createLessonContentModel();
-    model = new LessonContentModel();
-
-    contentLoadedArgs = null;
-    model.on('content:loaded', function (m, loadHelps) {
-      contentLoadedArgs = { model: m, loadHelps };
     });
-  });
-
-  test('setContent sets lessonUrl and pageNum using simplified regex logic', () => {
-    model.setContent('<html>content</html>', true);
-
-    // The updated implementation should still normalize the lesson URL
-    // and correctly extract the page number.
-    expect(model.get('lessonUrl')).toBe('http://example.com/lesson1.lesson');
-    expect(model.get('pageNum')).toBe('42');
-
-    // Ensure the event still fires with expected arguments.
-    expect(contentLoadedArgs).not.toBeNull();
-    expect(contentLoadedArgs.model).toBe(model);
-    expect(contentLoadedArgs.loadHelps).toBe(true);
-  });
-
-  test('setContent sets pageNum to 0 when URL does not match page pattern', () => {
-    global.document.URL = 'http://example.com/lesson1.lesson';
-
-    model.setContent('<html>content</html>');
-
-    // No "/<digits>" suffix → pageNum should default to 0.
-    expect(model.get('lessonUrl')).toBe('http://example.com/lesson1.lesson');
-    expect(model.get('pageNum')).toBe(0);
-  });
 });
