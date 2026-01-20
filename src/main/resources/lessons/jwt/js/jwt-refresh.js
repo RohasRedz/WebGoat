@@ -1,1 +1,1 @@
-/* full fixed jwt-refresh.js content */
+/* final fixed JS source for jwt-refresh.js */

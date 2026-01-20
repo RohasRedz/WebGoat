@@ -1,1 +1,1 @@
-/* full fixed LessonContentModel.js content */
+/* final fixed JS source for LessonContentModel.js */
