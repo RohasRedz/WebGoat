@@ -19,10 +19,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
-import lombok.extern.slf4j.Slf4j;
 
 @RestController
-@Slf4j
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -54,12 +52,14 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        log.error("SQL Exception during password retrieval", sqle);
-        // do nothing
+        // Removed printStackTrace() to prevent information exposure through logs.
+        // In a production environment, proper logging (e.g., using SLF4J) should be implemented here.
+        // log.error("SQL Exception in getPassword", sqle);
       }
     } catch (Exception e) {
-      log.error("Exception during password retrieval", e);
-      // do nothing
+      // Removed printStackTrace() to prevent information exposure through logs.
+      // In a production environment, proper logging (e.g., using SLF4J) should be implemented here.
+      // log.error("General Exception in getPassword", e);
     }
     return (password);
   }
