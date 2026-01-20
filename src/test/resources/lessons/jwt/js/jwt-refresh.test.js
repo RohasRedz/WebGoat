@@ -1,91 +1,78 @@
-// File: src/test/resources/lessons/jwt/js/jwt-refresh.test.js
 /**
- * Delta tests for jwt-refresh.js focusing on:
- * - login() using getConfiguredPassword() instead of a hard-coded literal.
- * - Behavior when WEBGOAT_JWT_DEMO_PASSWORD is defined vs undefined.
+ * Delta tests for jwt-refresh.js focusing on the hard-coded password remediation:
+ * - Verifies that getJwtDemoPassword prefers window.webgoatConfig.jwtDemoPassword when set.
+ * - Verifies that the fallback value is a non-secret placeholder and not the original hard-coded secret.
  */
 
-const $ = require('jquery');
-
-// Since the original script uses global jQuery and DOM ready, we simulate the environment.
-describe('jwt-refresh delta tests', () => {
-    let originalPasswordGlobal;
-    let originalLocalStorage;
+describe('jwt-refresh hard-coded password remediation (delta tests)', () => {
+    let originalWebgoatConfig;
+    let originalDocumentReady;
+    let ajaxSpy;
 
     beforeEach(() => {
-        // mock global WEBGOAT_JWT_DEMO_PASSWORD if present
-        originalPasswordGlobal = global.WEBGOAT_JWT_DEMO_PASSWORD;
-        delete global.WEBGOAT_JWT_DEMO_PASSWORD;
+        originalWebgoatConfig = window.webgoatConfig;
+        window.webgoatConfig = undefined;
 
-        // mock localStorage
-        originalLocalStorage = global.localStorage;
-        const store = {};
-        global.localStorage = {
-            getItem: (k) => store[k],
-            setItem: (k, v) => { store[k] = v; }
+        // Prevent the real document.ready from firing login() automatically in tests
+        originalDocumentReady = $.fn.ready;
+        $.fn.ready = function (handler) {
+            // Do not execute handler automatically during tests
+            return this;
         };
 
-        // mock $.ajax
-        jest.spyOn($, 'ajax').mockImplementation((options) => {
-            // mimic jQuery's success callback signature
-            if (options && typeof options.success === 'function') {
-                options.success({
-                    access_token: 'ACCESS',
-                    refresh_token: 'REFRESH'
-                });
+        ajaxSpy = jest.spyOn($, 'ajax').mockImplementation(() => ({
+            success: (cb) => {
+                cb({ access_token: 'token', refresh_token: 'refresh' });
+                return { success: () => {} };
             }
-            return { success: (cb) => cb({ access_token: 'ACCESS', refresh_token: 'REFRESH' }) };
-        });
+        }));
 
-        global.$ = $;
-        global.webgoat = { customjs: {} };
-
-        // Require module under test after globals are set
-        jest.isolateModules(() => {
-            require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
-        });
+        // Require the module under test after stubbing globals
+        jest.resetModules();
+        require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
     });
 
     afterEach(() => {
-        if (originalPasswordGlobal !== undefined) {
-            global.WEBGOAT_JWT_DEMO_PASSWORD = originalPasswordGlobal;
-        } else {
-            delete global.WEBGOAT_JWT_DEMO_PASSWORD;
-        }
-        global.localStorage = originalLocalStorage;
-        jest.restoreAllMocks();
-        delete require.cache[require.resolve('../../../../main/resources/lessons/jwt/js/jwt-refresh.js')];
+        window.webgoatConfig = originalWebgoatConfig;
+        $.fn.ready = originalDocumentReady;
+        ajaxSpy.mockRestore();
+        jest.resetModules();
     });
 
-    test('login uses configured password when WEBGOAT_JWT_DEMO_PASSWORD is set', () => {
+    it('should use window.webgoatConfig.jwtDemoPassword when provided', () => {
         // Arrange
-        global.WEBGOAT_JWT_DEMO_PASSWORD = 'configured-secret';
-        const ajaxSpy = jest.spyOn($, 'ajax');
+        window.webgoatConfig = { jwtDemoPassword: 'CONFIG_FROM_ENV' };
+        jest.resetModules();
+        require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
 
         // Act
-        // call login directly from required module's global scope
-        global.login('Jerry');
+        // Call login directly to bypass document.ready
+        // eslint-disable-next-line no-undef
+        login('Jerry');
 
         // Assert
-        expect(ajaxSpy).toHaveBeenCalledTimes(1);
-        const callArgs = ajaxSpy.mock.calls[0][0];
-        const payload = JSON.parse(callArgs.data);
-        expect(payload.user).toBe('Jerry');
-        expect(payload.password).toBe('configured-secret');
+        expect($.ajax).toHaveBeenCalledTimes(1);
+        const callArgs = $.ajax.mock.calls[0][0];
+        const body = JSON.parse(callArgs.data);
+        expect(body.password).toBe('CONFIG_FROM_ENV');
     });
 
-    test('login falls back to empty password when WEBGOAT_JWT_DEMO_PASSWORD is not set', () => {
+    it('should fall back to a non-secret placeholder when config is missing', () => {
         // Arrange
-        delete global.WEBGOAT_JWT_DEMO_PASSWORD;
-        const ajaxSpy = jest.spyOn($, 'ajax');
+        window.webgoatConfig = undefined;
+        jest.resetModules();
+        require('../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
 
         // Act
-        global.login('Jerry');
+        // eslint-disable-next-line no-undef
+        login('Jerry');
 
         // Assert
-        const callArgs = ajaxSpy.mock.calls[0][0];
-        const payload = JSON.parse(callArgs.data);
-        expect(payload.user).toBe('Jerry');
-        expect(payload.password).toBe('');
+        const callArgs = $.ajax.mock.calls[0][0];
+        const body = JSON.parse(callArgs.data);
+
+        // The original vulnerable hard-coded secret must no longer be present
+        expect(body.password).toBe('CONFIGURE_JWT_DEMO_PASSWORD');
+        expect(body.password).not.toBe('bm5nhSkxCXZkKRy4');
     });
 });

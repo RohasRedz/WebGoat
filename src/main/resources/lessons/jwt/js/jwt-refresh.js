@@ -1,44 +1,37 @@
 $(document).ready(function () {
     login('Jerry');
-});
+})
 
-/**
- * FIX: Avoid hard-coded password in source code.
- * The password is now retrieved from a configuration variable that should be
- * provided securely via server-side templating or environment-backed config.
- * In this training context, we fall back to an empty string if not present to
- * avoid embedding a real secret.
- */
-function getConfiguredPassword() {
-    // In a real system, this should be injected server-side as a constant
-    // or via a configuration endpoint that does not expose secrets in source.
-    // Example (server-side templating):
-    //   const password = '${WEBGOAT_JWT_DEMO_PASSWORD}';
-    // Here we default to an empty string to avoid hard-coded secrets.
-    var configured = (typeof WEBGOAT_JWT_DEMO_PASSWORD !== 'undefined')
-        ? WEBGOAT_JWT_DEMO_PASSWORD
-        : '';
-    return configured;
+function getJwtDemoPassword() {
+    // In a real deployment, this value must NOT be hard-coded and must be provided
+    // via a secure configuration source (e.g., environment variable -> server -> window.webgoatConfig).
+    if (typeof window.webgoatConfig !== 'undefined' &&
+        window.webgoatConfig !== null &&
+        typeof window.webgoatConfig.jwtDemoPassword === 'string' &&
+        window.webgoatConfig.jwtDemoPassword.length > 0) {
+        return window.webgoatConfig.jwtDemoPassword;
+    }
+
+    // SECURITY HARDENING:
+    // We no longer provide any valid secret as a hard-coded fallback.
+    // This placeholder clearly indicates misconfiguration and MUST NOT be used as a real credential.
+    return "CONFIGURE_JWT_DEMO_PASSWORD";
 }
 
 function login(user) {
+    var password = getJwtDemoPassword();
+
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
         contentType: "application/json",
-        data: JSON.stringify({
-            user: user,
-            // FIX: use configuration-based password instead of hard-coded literal
-            password: getConfiguredPassword()
-        })
+        data: JSON.stringify({user: user, password: password})
     }).success(
         function (response) {
-            // NOTE: This is a training application; in production, prefer HttpOnly cookies
-            // over localStorage for access/refresh tokens.
             localStorage.setItem('access_token', response['access_token']);
             localStorage.setItem('refresh_token', response['refresh_token']);
         }
-    );
+    )
 }
 
 //Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
@@ -46,7 +39,7 @@ webgoat.customjs.addBearerToken = function () {
     var headers_to_set = {};
     headers_to_set['Authorization'] = 'Bearer ' + localStorage.getItem('access_token');
     return headers_to_set;
-};
+}
 
 //Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
 function newToken() {
@@ -63,5 +56,5 @@ function newToken() {
             localStorage.setItem('access_token', apiToken);
             localStorage.setItem('refresh_token', refreshToken);
         }
-    );
+    )
 }

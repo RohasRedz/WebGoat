@@ -1,78 +1,99 @@
-// File: src/test/java/org/owasp/webgoat/lessons/sqlinjection/advanced/SqlInjectionLesson6bTest.java
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
-import java.io.IOException;
 import java.sql.Connection;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.sql.Statement;
 
-import lombok.extern.slf4j.Slf4j;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
 import org.owasp.webgoat.container.LessonDataSource;
+import org.slf4j.LoggerFactory;
 
 /**
- * Delta unit tests focused on:
- * - Ensuring getPassword() still reads from the database when available.
- * - Ensuring exceptions do not leak via printStackTrace and are logged using SLF4J instead.
+ * Delta tests for SqlInjectionLesson6b focusing on the secure logging fix:
+ * - Verifies that SQL and general exceptions are logged with generic messages.
+ * - Verifies no sensitive details (like the query) are formatted into the log message text.
  */
-@Slf4j
-class SqlInjectionLesson6bTest {
+public class SqlInjectionLesson6bTest {
 
     @Test
-    @DisplayName("getPassword returns database password when query succeeds")
-    void getPassword_returnsPasswordFromDatabase() throws Exception {
+    @DisplayName("getPassword() should log generic message for SQL exceptions without exposing sensitive query details")
+    void getPassword_logsGenericMessageForSqlException() throws Exception {
         // Arrange
         LessonDataSource dataSource = mock(LessonDataSource.class);
         Connection connection = mock(Connection.class);
         Statement statement = mock(Statement.class);
-        ResultSet resultSet = mock(ResultSet.class);
 
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
                 .thenReturn(statement);
-        when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
-                .thenReturn(resultSet);
-        when(resultSet.first()).thenReturn(true);
-        when(resultSet.getString("password")).thenReturn("from-db");
+
+        SQLExceptionForTest sqlException = new SQLExceptionForTest("synthetic SQL error");
+        when(statement.executeQuery(anyString())).thenThrow(sqlException);
 
         SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
+
+        // Capture logs via Logback test logger
+        Logger logger = (Logger) LoggerFactory.getLogger(SqlInjectionLesson6b.class);
+        TestLogAppender appender = new TestLogAppender();
+        appender.setContext(logger.getLoggerContext());
+        logger.addAppender(appender);
+        logger.setLevel(Level.ERROR);
+        appender.start();
 
         // Act
         String password = lesson.getPassword();
 
-        // Assert
-        verify(statement).executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'");
-        assertEquals("from-db", password, "Expected password read from database");
+        // Assert: password falls back to default value due to error
+        assertEquals("dave", password, "On SQL error, password should remain default");
+
+        // Assert: exactly one error log with generic message is produced
+        assertEquals(1, appender.getEvents().size(), "Expected a single error log event");
+        String logMessage = appender.getEvents().get(0).getFormattedMessage();
+
+        // The fixed code uses generic messages; it should not contain SQL text or table names.
+        // It should match the updated message string from the source.
+        // We also assert that it does not contain 'user_system_data' or 'SELECT password'.
+        org.junit.jupiter.api.Assertions.assertTrue(
+                logMessage.contains("An SQL error occurred during password retrieval."),
+                "Log should use a generic error message");
+        org.junit.jupiter.api.Assertions.assertFalse(
+                logMessage.contains("user_system_data") || logMessage.contains("SELECT password"),
+                "Log message should not expose SQL query or table details");
+
+        // Verify that the exception object was attached to the log (so stack trace is available internally)
+        Throwable thrown = appender.getEvents().get(0).getThrowableProxy() != null
+                ? appender.getEvents().get(0).getThrowableProxy().getThrowable()
+                : null;
+        org.junit.jupiter.api.Assertions.assertSame(sqlException, thrown,
+                "Logged exception should be the thrown SQL exception instance");
     }
 
-    @Test
-    @DisplayName("getPassword logs SQLException and falls back to default without printStackTrace")
-    void getPassword_logsSQLException_andDoesNotPrintStackTrace() throws Exception {
-        // Arrange
-        LessonDataSource dataSource = mock(LessonDataSource.class);
-        Connection connection = mock(Connection.class);
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-                .thenThrow(new SQLException("test-sql-error"));
+    // Helper SQLException subclass for clarity in tests
+    private static class SQLExceptionForTest extends java.sql.SQLException {
+        SQLExceptionForTest(String message) {
+            super(message);
+        }
+    }
 
-        SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
+    /**
+     * Simple Logback appender to capture log events for assertions.
+     */
+    private static class TestLogAppender extends ch.qos.logback.core.AppenderBase<ch.qos.logback.classic.spi.ILoggingEvent> {
+        private final java.util.List<ch.qos.logback.classic.spi.ILoggingEvent> events = new java.util.ArrayList<>();
 
-        // Act
-        String password = lesson.getPassword();
+        @Override
+        protected void append(ch.qos.logback.classic.spi.ILoggingEvent eventObject) {
+            events.add(eventObject);
+        }
 
-        // Assert
-        // On failure, method should return the default "dave"
-        assertEquals("dave", password, "Expected default password when SQLException occurs");
-
-        // We cannot capture logs without a configured appender here, but we
-        // can at least assert that no SQLException is rethrown.
-        // The removal of printStackTrace is verified structurally by tests compiling
-        // against the updated class and by relying on the absence of thrown exceptions.
+        java.util.List<ch.qos.logback.classic.spi.ILoggingEvent> getEvents() {
+            return events;
+        }
     }
 }
