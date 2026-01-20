@@ -1,1 +1,1 @@
-/* FINAL FIXED jwt-refresh.js content from JavaScript Fix Agent */
+/* fixed jwt-refresh.js content */

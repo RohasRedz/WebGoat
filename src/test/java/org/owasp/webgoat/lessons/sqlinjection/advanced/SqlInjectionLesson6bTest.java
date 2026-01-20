@@ -1,1 +1,1 @@
-/* GENERATED delta unit test content for SqlInjectionLesson6bTest.java */
+/* delta unit test content for SqlInjectionLesson6b.java */

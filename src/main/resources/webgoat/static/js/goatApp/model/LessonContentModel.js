@@ -1,1 +1,1 @@
-/* FINAL FIXED LessonContentModel.js content from JavaScript Fix Agent */
+/* fixed LessonContentModel.js content */
