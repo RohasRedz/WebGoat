@@ -32,17 +32,24 @@ define(['jquery',
             }
             this.set('content',content);
 
-            // Use a simpler, anchored, linear-time pattern and avoid complex backtracking.
-            var currentUrl = document.URL;
-            this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
+            // Use a precompiled, explicit, non-ambiguous regex to avoid catastrophic backtracking
+            var url = document.URL;
+            // Matches any URL ending with ".lesson" and strips everything after it
+            var lessonUrlMatch = url.match(/^(.*?\.lesson)(?:\/.*)?$/);
+            if (lessonUrlMatch) {
+                this.set('lessonUrl', lessonUrlMatch[1]);
+            } else {
+                this.set('lessonUrl', url.replace(/\.lesson.*/, '.lesson'));
+            }
 
-            // Use a precompiled, anchored regex without nested quantifiers to avoid ReDoS
-            var pagePattern = /.*\.lesson\/(\d{1,4})$/;
-            if (pagePattern.test(currentUrl)) {
-                this.set('pageNum', currentUrl.replace(pagePattern, '$1'));
+            // Safe, bounded regex for extracting a 1- to 4-digit page number at the end of the URL
+            var pageNumMatch = url.match(/\.lesson\/([0-9]{1,4})$/);
+            if (pageNumMatch) {
+                this.set('pageNum', pageNumMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
+
             this.trigger('content:loaded',this,loadHelps);
         },
 
