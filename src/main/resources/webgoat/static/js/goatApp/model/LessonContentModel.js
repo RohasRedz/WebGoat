@@ -1,61 +1,54 @@
-define([
-    'jquery',
+define(['jquery',
     'underscore',
     'backbone',
-    'goatApp/model/HTMLContentModel'
-], function ($, _, Backbone, HTMLContentModel) {
+    'goatApp/model/HTMLContentModel'],
+     function($,
+        _,
+        Backbone,
+        HTMLContentModel){
 
     return HTMLContentModel.extend({
-        urlRoot: null,
+        urlRoot:null,
         defaults: {
-            items: null,
-            selectedItem: null
+            items:null,
+            selectedItem:null
         },
 
         initialize: function (options) {
+
         },
 
-        loadData: function (options) {
-            // Use encodeURIComponent directly and avoid unnecessary double-escaping
-            var safeName = encodeURIComponent(options.name);
-            this.urlRoot = safeName + '.lesson';
-
+        loadData: function(options) {
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
             var self = this;
-            this.fetch().done(function (data) {
+            this.fetch().done(function(data) {
                 self.setContent(data);
             });
         },
 
-        setContent: function (content, loadHelps) {
+        setContent: function(content, loadHelps) {
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
-            this.set('content', content);
+            this.set('content',content);
 
-            // Use a more efficient, non-catastrophic regular expression for lessonUrl and pageNum
-            var currentUrl = document.URL;
-
-            // Normalize URL once to avoid repeated work
-            // Replace the trailing ".lesson" (with or without a following "/<digits>") safely
-            var lessonUrl = currentUrl.replace(/\.lesson(?:\/\d+)?$/, '.lesson');
-            this.set('lessonUrl', lessonUrl);
+            // Use a safer, less complex regex and avoid repeated evaluation on document.URL
+            var currentUrl = String(document.URL || '');
+            this.set('lessonUrl', currentUrl.replace(/\.lesson.*/, '.lesson'));
 
             var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
-            if (pageMatch) {
+            if (pageMatch && pageMatch[1]) {
                 this.set('pageNum', pageMatch[1]);
             } else {
                 this.set('pageNum', 0);
             }
 
-            this.trigger('content:loaded', this, loadHelps);
+            this.trigger('content:loaded',this,loadHelps);
         },
 
         fetch: function (options) {
             options = options || {};
-            return Backbone.Model.prototype.fetch.call(
-                this,
-                _.extend({ dataType: 'html' }, options)
-            );
+            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
         }
     });
 });

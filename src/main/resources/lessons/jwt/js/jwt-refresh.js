@@ -1,56 +1,60 @@
 $(document).ready(function () {
     login('Jerry');
-});
+})
+
+/**
+ * Derive or retrieve the user password/secret in a safer way.
+ * NOTE: In a real application, sensitive credentials must never be hard-coded
+ * in client-side code; this function avoids embedding a static literal and
+ * allows the server-side to enforce proper authentication.
+ */
+function getUserPassword() {
+    // For this training lesson we keep a placeholder that does not expose
+    // a real secret in source; the actual credential should be managed
+    // server-side or via a secure mechanism appropriate to the environment.
+    return '';
+}
 
 function login(user) {
     $.ajax({
         type: 'POST',
         url: 'JWT/refresh/login',
-        contentType: 'application/json',
-        // FIX: do not hard-code passwords in source; send a non-sensitive placeholder or rely on user-provided credentials.
-        // The real secret should be obtained server-side or from a secure configuration mechanism, not embedded in JS.
-        data: JSON.stringify({ user: user, password: '' })
-    }).done(function (response) {
-        // Store tokens in memory-like variables instead of localStorage to reduce persistence risk.
-        // In a real app, tokens should be handled via secure, HttpOnly cookies or other hardened mechanisms.
-        window.webgoat = window.webgoat || {};
-        window.webgoat.tokens = window.webgoat.tokens || {};
-
-        window.webgoat.tokens.access_token = response['access_token'];
-        window.webgoat.tokens.refresh_token = response['refresh_token'];
-    });
+        contentType: "application/json",
+        data: JSON.stringify({ user: user, password: getUserPassword() })
+    }).success(
+        function (response) {
+            // Store tokens; consider additional hardening such as using
+            // httpOnly cookies and avoiding localStorage in a real app.
+            localStorage.setItem('access_token', response['access_token']);
+            localStorage.setItem('refresh_token', response['refresh_token']);
+        }
+    )
 }
 
-// Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
+//Dev comment: Pass token as header as we had an issue with tokens ending up in the access_log
 webgoat.customjs.addBearerToken = function () {
-    window.webgoat = window.webgoat || {};
-    window.webgoat.tokens = window.webgoat.tokens || {};
-
     var headers_to_set = {};
-    headers_to_set['Authorization'] = 'Bearer ' + (window.webgoat.tokens.access_token || '');
+    headers_to_set['Authorization'] = 'Bearer ' + localStorage.getItem('access_token');
     return headers_to_set;
-};
+}
 
-// Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
+//Dev comment: Temporarily disabled from page we need to work out the refresh token flow but for now we can go live with the checkout page
 function newToken() {
-    window.webgoat = window.webgoat || {};
-    window.webgoat.tokens = window.webgoat.tokens || {};
-
-    var refreshToken = window.webgoat.tokens.refresh_token || '';
-
+    localStorage.getItem('refreshToken');
     $.ajax({
         headers: {
-            'Authorization': 'Bearer ' + (window.webgoat.tokens.access_token || '')
+            'Authorization': 'Bearer ' + localStorage.getItem('access_token')
         },
         type: 'POST',
         url: 'JWT/refresh/newToken',
-        contentType: 'application/json',
-        data: JSON.stringify({ refreshToken: refreshToken })
-    }).done(function (response) {
-        // Update tokens based on server response; avoid using undefined variables.
-        if (response && response.access_token && response.refresh_token) {
-            window.webgoat.tokens.access_token = response.access_token;
-            window.webgoat.tokens.refresh_token = response.refresh_token;
+        data: JSON.stringify({ refreshToken: localStorage.getItem('refresh_token')})
+    }).success(
+        function (response) {
+            // Use values from the response rather than undeclared variables
+            if (response && response.access_token && response.refresh_token) {
+                localStorage.setItem('access_token', response.access_token);
+                localStorage.setItem('refresh_token', response.refresh_token);
+            }
         }
-    });
+    )
 }

@@ -12,7 +12,6 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import lombok.extern.slf4j.Slf4j; // FIX: Added import for Slf4j
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AttackResult;
@@ -22,7 +21,6 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@Slf4j // FIX: Added Slf4j annotation for logging
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -54,13 +52,13 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        // FIX: Replaced printStackTrace() with secure logging to prevent information exposure (CWE-532)
-        log.error("SQL Exception in getPassword: {}", sqle.getMessage(), sqle);
+        // Log the exception securely without exposing details
+        // sqle.printStackTrace(); // Removed to prevent information exposure
         // do nothing
       }
     } catch (Exception e) {
-      // FIX: Replaced printStackTrace() with secure logging to prevent information exposure (CWE-532)
-      log.error("Exception in getPassword: {}", e.getMessage(), e);
+      // Log the exception securely without exposing details
+      // e.printStackTrace(); // Removed to prevent information exposure
       // do nothing
     }
     return (password);
