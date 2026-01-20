@@ -1,60 +1,72 @@
-const $ = require('jquery');
-const _ = require('underscore');
-const Backbone = require('backbone');
-const HTMLContentModel = require('goatApp/model/HTMLContentModel');
+// Derived test path: src/test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js
+// Jest tests focused on the changed behavior: safe handling of `options.name` and URL parsing regex.
 
-jest.mock('goatApp/model/HTMLContentModel', () => {
-  const Backbone = require('backbone');
-  return Backbone.Model.extend({});
-});
+define([
+    'jquery',
+    'underscore',
+    'backbone',
+    'goatApp/model/HTMLContentModel',
+    'webgoat/static/js/goatApp/model/LessonContentModel'
+], function ($, _, Backbone, HTMLContentModel, LessonContentModel) {
 
-describe('LessonContentModel delta tests', () => {
-  let LessonContentModel;
+    describe('LessonContentModel delta tests', function () {
 
-  beforeEach(() => {
-    jest.resetModules();
-    // Re-require the module under test after mocks are set
-    LessonContentModel = require('../../../../test/resources/webgoat/static/js/goatApp/model/LessonContentModel.test.js'); // TODO: Adjust relative path in real test setup
-  });
+        function createModel() {
+            return new LessonContentModel();
+        }
 
-  test('setContent derives lessonUrl without using complex regex replace', () => {
-    // Arrange
-    const ModelImpl = require('webgoat/static/js/goatApp/model/LessonContentModel.js'); // TODO: Adjust path mapping to actual module resolution
-    const model = new ModelImpl();
+        it('trims, bounds, and normalizes options.name before building urlRoot', function () {
+            var model = createModel();
 
-    const originalUrl = 'http://example.com/WebGoat.lesson/1';
-    const originalReplace = String.prototype.replace;
-    const replaceSpy = jest.spyOn(String.prototype, 'replace');
+            var options = {
+                name: '  some/very\\long\\name-with-path ' +
+                    new Array(200).join('x') // exceed 128 chars
+            };
 
-    delete global.document;
-    global.document = { URL: originalUrl };
+            model.loadData(options);
 
-    // Act
-    model.setContent('<html>content</html>');
+            var urlRoot = model.urlRoot;
+            expect(urlRoot).toMatch(/\\.lesson$/);
 
-    // Assert
-    const lessonUrl = model.get('lessonUrl');
-    expect(lessonUrl).toBe('http://example.com/WebGoat.lesson');
+            var encodedPart = urlRoot.replace(/\\.lesson$/, '');
+            var decoded = decodeURIComponent(encodedPart);
 
-    // Ensure any use of replace is not using the original vulnerable pattern.
-    expect(replaceSpy).not.toHaveBeenCalledWith(/\.lesson.*/, '.lesson');
+            expect(decoded.length).toBeLessThanOrEqual(128);
+            expect(decoded).not.toMatch(/[\\/]/);
+        });
 
-    // Cleanup
-    replaceSpy.mockRestore();
-    String.prototype.replace = originalReplace;
-  });
+        it('extracts lessonUrl and pageNum using constrained regex without throwing for complex URLs', function () {
+            var model = createModel();
 
-  test('setContent extracts pageNum from URL safely', () => {
-    // Arrange
-    const ModelImpl = require('webgoat/static/js/goatApp/model/LessonContentModel.js'); // TODO: Adjust path mapping to actual module resolution
-    const model = new ModelImpl();
+            var originalUrl = window.location.href;
+            delete window.location;
+            // simulate complex but valid URL
+            window.location = {
+                href: 'http://example.com/path/to/lesson.lesson/1234?foo=bar#section'
+            };
 
-    global.document = { URL: 'http://example.com/WebGoat.lesson/123' };
+            model.setContent('<div>content</div>', true);
 
-    // Act
-    model.setContent('<html>content</html>');
+            expect(model.get('lessonUrl')).toBe('http://example.com/path/to/lesson.lesson');
+            expect(model.get('pageNum')).toBe('1234');
 
-    // Assert
-    expect(model.get('pageNum')).toBe('123');
-  });
+            window.location = { href: originalUrl };
+        });
+
+        it('defaults pageNum to 0 when URL does not match pattern', function () {
+            var model = createModel();
+
+            var originalUrl = window.location.href;
+            delete window.location;
+            window.location = {
+                href: 'http://example.com/path/to/lesson.lesson?foo=bar'
+            };
+
+            model.setContent('<div>content</div>', true);
+
+            expect(model.get('pageNum')).toBe(0);
+
+            window.location = { href: originalUrl };
+        });
+    });
 });
