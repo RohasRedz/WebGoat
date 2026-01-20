@@ -1,1 +1,64 @@
-/* fixed LessonContentModel.js content */
+define(['jquery',
+    'underscore',
+    'backbone',
+    'goatApp/model/HTMLContentModel'],
+     function($,
+        _,
+        Backbone,
+        HTMLContentModel){
+
+    return HTMLContentModel.extend({
+        urlRoot:null,
+        defaults: {
+            items:null,
+            selectedItem:null
+        },
+
+        initialize: function (options) {
+
+        },
+
+        loadData: function(options) {
+            // FIX: Avoid double encoding and ensure safe lesson name usage
+            // `options.name` is expected to be a simple lesson identifier (no path or HTML).
+            // We URL-encode once for transport and rely on server-side canonicalization.
+            var lessonName = typeof options.name === 'string' ? options.name : '';
+            // Basic allowlist: only allow letters, numbers, dash, underscore and dot for lesson names
+            lessonName = lessonName.replace(/[^A-Za-z0-9._-]/g, '');
+            this.urlRoot = encodeURIComponent(lessonName) + '.lesson';
+
+            var self = this;
+            this.fetch().done(function(data) {
+                self.setContent(data);
+            });
+        },
+
+        setContent: function(content, loadHelps) {
+            if (typeof loadHelps === 'undefined') {
+                loadHelps = true;
+            }
+            this.set('content',content);
+
+            // FIX: Use more efficient, anchored regexes and avoid unnecessary backtracking risk
+            var currentUrl = document.URL;
+
+            // Derive lessonUrl by replacing a trailing ".lesson" (with optional page suffix) with ".lesson"
+            this.set('lessonUrl', currentUrl.replace(/\.lesson(?:\/\d{1,4})?$/, '.lesson'));
+
+            // Extract pageNum with an anchored, efficient pattern
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch) {
+                this.set('pageNum', pageMatch[1]);
+            } else {
+                this.set('pageNum', 0);
+            }
+
+            this.trigger('content:loaded',this,loadHelps);
+        },
+
+        fetch: function (options) {
+            options = options || {};
+            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
+        }
+    });
+});
