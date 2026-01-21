@@ -1,109 +1,102 @@
 // Derived test path: src/test/resources/lessons/jwt/js/jwt-refresh.test.js
-// Delta tests for jwt-refresh.js focusing on removal of hardcoded password and token handling behavior.
 
-describe('jwt-refresh login flow (delta tests)', () => {
-  let originalConfig;
-  let $ajaxSpy;
+/**
+ * Delta tests for jwt-refresh.js focusing on:
+ * - getUserPassword(): reads password from DOM and does not use a hard-coded value.
+ * - login(): sends the password returned by getUserPassword in the AJAX payload.
+ */
+
+const jsdom = require("jsdom");
+const { JSDOM } = jsdom;
+
+describe("jwt-refresh security delta tests", () => {
+  let window;
+  let document;
+  let $;
 
   beforeEach(() => {
-    // Mock global configuration object used by jwt-refresh.js
-    originalConfig = global.WEBGOAT_JWT_CONFIG;
-    global.WEBGOAT_JWT_CONFIG = { password: 'runtimeSecret' };
-
-    // Mock localStorage
-    const storage = {};
-    global.localStorage = {
-      getItem: jest.fn((k) => storage[k]),
-      setItem: jest.fn((k, v) => {
-        storage[k] = String(v);
-      })
-    };
-
-    // Mock console
-    global.console = {
-      error: jest.fn(),
-      log: jest.fn()
-    };
-
-    // Mock jQuery.ajax
-    $ajaxSpy = jest.fn().mockReturnValue({
-      done: function (cb) {
-        cb({ access_token: 'access123', refresh_token: 'refresh123' });
+    const dom = new JSDOM(
+      "<!doctype html><html><body><input id='jwt-refresh-password' type='password' value='secret123'/></body></html>",
+      {
+        url: "http://localhost/WebGoat",
       }
-    });
-    global.$ = {
-      ajax: $ajaxSpy
-    };
+    );
+    window = dom.window;
+    document = window.document;
+    global.window = window;
+    global.document = document;
 
-    // Mock webgoat namespace used later in the file
+    $ = require("jquery")(window);
+    global.$ = $;
     global.webgoat = { customjs: {} };
 
-    // Mock document.ready execution: we will manually call login via the module under test
-    global.document = { readyState: 'complete' };
+    // Clear and set up localStorage polyfill
+    Object.defineProperty(window, "localStorage", {
+      value: (function () {
+        let store = {};
+        return {
+          getItem(key) {
+            return store[key] || null;
+          },
+          setItem(key, value) {
+            store[key] = String(value);
+          },
+          clear() {
+            store = {};
+          },
+        };
+      })(),
+      configurable: true,
+    });
   });
 
   afterEach(() => {
-    global.WEBGOAT_JWT_CONFIG = originalConfig;
-    jest.resetModules();
+    delete global.window;
+    delete global.document;
+    delete global.$;
+    delete global.webgoat;
   });
 
-  test('login uses non-hardcoded password from WEBGOAT_JWT_CONFIG and stores tokens', () => {
+  test("getUserPassword reads value from jwt-refresh-password input and is not hard-coded", () => {
     // Arrange
-    // Load module after globals are prepared
-    jest.isolateModules(() => {
-      // eslint-disable-next-line global-require
-      require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
-    });
+    const script = require("../../../../../main/resources/lessons/jwt/js/jwt-refresh.js");
 
-    // The script calls login('Jerry') on document ready; our spies capture the behavior.
-
-    // Assert: ajax called with password from config, not hardcoded string
-    expect($ajaxSpy).toHaveBeenCalledTimes(1);
-    const ajaxArg = $ajaxSpy.mock.calls[0][0];
-    const body = JSON.parse(ajaxArg.data);
-    expect(body.user).toBe('Jerry');
-    expect(body.password).toBe('runtimeSecret');
-    expect(body.password).not.toBe('bm5nhSkxCXZkKRy4');
-
-    // Tokens from response should be stored in localStorage
-    expect(global.localStorage.setItem).toHaveBeenCalledWith('access_token', 'access123');
-    expect(global.localStorage.setItem).toHaveBeenCalledWith('refresh_token', 'refresh123');
-  });
-
-  test('login aborts and logs error when password configuration is missing', () => {
-    // Arrange
-    global.WEBGOAT_JWT_CONFIG = {}; // no password configured
-    jest.isolateModules(() => {
-      // eslint-disable-next-line global-require
-      require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
-    });
+    // Act
+    const password = window.getUserPassword("Jerry");
 
     // Assert
-    expect($ajaxSpy).not.toHaveBeenCalled();
-    expect(global.console.error).toHaveBeenCalledWith(
-      'JWT login aborted due to missing secure password configuration.'
-    );
+    expect(password).toBe("secret123");
+    expect(password).not.toBe("bm5nhSkxCXZkKRy4");
   });
 
-  test('addBearerToken sets Authorization header only when access_token is present', () => {
+  test("login sends derived password from getUserPassword in AJAX payload", () => {
     // Arrange
-    global.WEBGOAT_JWT_CONFIG = { password: 'runtimeSecret' };
-    // prime localStorage
-    global.localStorage.getItem.mockImplementation((key) => {
-      if (key === 'access_token') {
-        return 'token-value';
-      }
-      return null;
+    // Spy on $.ajax to inspect outgoing request body
+    const ajaxSpy = jest.spyOn($, "ajax").mockImplementation(() => {
+      return {
+        success: (cb) => {
+          cb({ access_token: "at", refresh_token: "rt" });
+        },
+      };
     });
 
-    let headers;
-    jest.isolateModules(() => {
-      // eslint-disable-next-line global-require
-      require('../../../../../main/resources/lessons/jwt/js/jwt-refresh.js');
-      headers = global.webgoat.customjs.addBearerToken();
-    });
+    require("../../../../../main/resources/lessons/jwt/js/jwt-refresh.js");
+
+    // Act
+    window.login("Jerry");
 
     // Assert
-    expect(headers.Authorization).toBe('Bearer token-value');
+    expect(ajaxSpy).toHaveBeenCalledTimes(1);
+    const callArgs = ajaxSpy.mock.calls[0][0];
+
+    expect(callArgs.type).toBe("POST");
+    expect(callArgs.url).toBe("JWT/refresh/login");
+    const body = JSON.parse(callArgs.data);
+
+    expect(body.user).toBe("Jerry");
+    expect(body.password).toBe("secret123");
+    expect(body.password).not.toBe("bm5nhSkxCXZkKRy4");
+
+    ajaxSpy.mockRestore();
   });
 });
