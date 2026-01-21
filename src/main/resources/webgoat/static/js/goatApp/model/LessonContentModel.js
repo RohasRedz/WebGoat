@@ -1,56 +1,73 @@
-define([
-    'jquery',
+define(['jquery',
     'underscore',
     'backbone',
-    'goatApp/model/HTMLContentModel'
-], function ($, _, Backbone, HTMLContentModel) {
+    'goatApp/model/HTMLContentModel'],
+     function($,
+        _,
+        Backbone,
+        HTMLContentModel){
 
     return HTMLContentModel.extend({
-        urlRoot: null,
+        urlRoot:null,
         defaults: {
-            items: null,
-            selectedItem: null
+            items:null,
+            selectedItem:null
         },
 
         initialize: function (options) {
 
         },
 
-        loadData: function (options) {
-            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson';
+        loadData: function(options) {
+            this.urlRoot = _.escape(encodeURIComponent(options.name)) + '.lesson'
             var self = this;
-            this.fetch().done(function (data) {
+            this.fetch().done(function(data) {
                 self.setContent(data);
             });
         },
 
-        setContent: function (content, loadHelps) {
+        setContent: function(content, loadHelps) {
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
-            this.set('content', content);
+            this.set('content',content);
 
-            // Use a precompiled, simple and efficient RegExp to avoid catastrophic backtracking (ReDoS)
-            // Original: document.URL.replace(/\.lesson.*/,'.lesson');
-            var lessonUrlPattern = /\.lesson.*/;
-            this.set('lessonUrl', document.URL.replace(lessonUrlPattern, '.lesson'));
+            // Use safer, simple substring checks to derive lessonUrl and pageNum
+            var currentUrl = document.URL || "";
+            var lessonSuffix = '.lesson';
+            var lessonSuffixWithSlash = '.lesson/';
+            var lessonIndex = currentUrl.indexOf(lessonSuffix);
 
-            // Also simplify the page number extraction regex using a precompiled, safe pattern
-            // Original: /.*\.lesson\/(\d{1,4})$/
-            var pageNumPattern = /\.lesson\/(\d{1,4})$/;
-            var pageNumMatch = document.URL.match(pageNumPattern);
-            if (pageNumMatch) {
-                this.set('pageNum', pageNumMatch[1]);
+            if (lessonIndex !== -1) {
+                // Everything up to and including ".lesson" is the base lesson URL
+                var baseLessonUrl = currentUrl.substring(0, lessonIndex + lessonSuffix.length);
+                this.set('lessonUrl', baseLessonUrl);
+
+                var remaining = currentUrl.substring(lessonIndex + lessonSuffix.length);
+                // When there is a trailing "/<digits>" after ".lesson"
+                if (remaining.indexOf('/') === 0) {
+                    var pagePart = remaining.substring(1);
+                    // Accept only purely numeric page numbers of reasonable length (1-4 digits)
+                    if (/^[0-9]{1,4}$/.test(pagePart)) {
+                        this.set('pageNum', pagePart);
+                    } else {
+                        this.set('pageNum', 0);
+                    }
+                } else {
+                    this.set('pageNum', 0);
+                }
             } else {
+                // Fallbacks if URL does not contain ".lesson"
+                this.set('lessonUrl', currentUrl);
                 this.set('pageNum', 0);
             }
 
-            this.trigger('content:loaded', this, loadHelps);
+            this.trigger('content:loaded',this,loadHelps);
         },
 
         fetch: function (options) {
             options = options || {};
-            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: 'html' }, options));
+            return Backbone.Model.prototype.fetch.call(this, _.extend({ dataType: "html"}, options));
         }
     });
 });

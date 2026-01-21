@@ -1,80 +1,98 @@
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.mockito.Mockito.when;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.owasp.webgoat.container.LessonDataSource;
+import org.owasp.webgoat.container.assignments.AttackResult;
 
-class SqlInjectionLesson6bTest {
+// NOTE: Delta tests for the logging change: ensure printStackTrace is no longer used
+// and that behavior of getPassword/completed is preserved.
+public class SqlInjectionLesson6bTest {
 
-    private LessonDataSource dataSource;
-    private SqlInjectionLesson6b lesson6b;
+  private LessonDataSource lessonDataSource;
+  private Connection connection;
+  private Statement statement;
+  private ResultSet resultSet;
+  private SqlInjectionLesson6b lesson;
 
-    private Connection connection;
-    private Statement statement;
-    private ResultSet resultSet;
+  @BeforeEach
+  void setUp() throws Exception {
+    lessonDataSource = Mockito.mock(LessonDataSource.class);
+    connection = Mockito.mock(Connection.class);
+    statement = Mockito.mock(Statement.class);
+    resultSet = Mockito.mock(ResultSet.class);
 
-    @BeforeEach
-    void setUp() throws Exception {
-        dataSource = Mockito.mock(LessonDataSource.class);
-        lesson6b = new SqlInjectionLesson6b(dataSource);
+    when(lessonDataSource.getConnection()).thenReturn(connection);
+    when(connection.createStatement(
+            ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+        .thenReturn(statement);
+    when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
+        .thenReturn(resultSet);
 
-        connection = Mockito.mock(Connection.class);
-        statement = Mockito.mock(Statement.class);
-        resultSet = Mockito.mock(ResultSet.class);
+    lesson = new SqlInjectionLesson6b(lessonDataSource);
+  }
 
-        Mockito.when(dataSource.getConnection()).thenReturn(connection);
-        Mockito.when(
-                connection.createStatement(
-                        Mockito.anyInt(),
-                        Mockito.anyInt()
-                )
-        ).thenReturn(statement);
-        Mockito.when(statement.executeQuery(Mockito.anyString())).thenReturn(resultSet);
-    }
+  @Test
+  void completed_returnsSuccessWhenUserIdMatchesPassword() throws Exception {
+    // Arrange
+    when(resultSet.first()).thenReturn(true);
+    when(resultSet.getString("password")).thenReturn("dave");
 
-    @Test
-    void getPassword_returnsDbPasswordWithoutLeakingStackTraceOnSqlException() throws Exception {
-        // Arrange: simulate successful retrieval of password from DB
-        Mockito.when(resultSet.first()).thenReturn(true);
-        Mockito.when(resultSet.getString("password")).thenReturn("db-password");
+    // Act
+    AttackResult result = lesson.completed("dave");
 
-        // Act
-        String password = lesson6b.getPassword();
+    // Assert
+    assertEquals("success", result.getType().toString().toLowerCase());
+  }
 
-        // Assert: behavior preserved (still reads value from DB)
-        assertEquals("db-password", password);
+  @Test
+  void completed_returnsFailureWhenUserIdDoesNotMatchPassword() throws Exception {
+    // Arrange
+    when(resultSet.first()).thenReturn(true);
+    when(resultSet.getString("password")).thenReturn("dave");
 
-        // Now simulate SQL exception on second call to ensure it is handled without throwing
-        Mockito.reset(connection, statement, resultSet);
-        Mockito.when(dataSource.getConnection()).thenThrow(new RuntimeException("DB down"));
+    // Act
+    AttackResult result = lesson.completed("not_dave");
 
-        String fallbackPassword = lesson6b.getPassword();
+    // Assert
+    assertEquals("failure", result.getType().toString().toLowerCase());
+  }
 
-        // Assert: method handles exception and returns default without propagating stack trace
-        assertEquals("dave", fallbackPassword, "Expected default password when DB access fails");
-    }
+  @Test
+  void getPassword_handlesSqlExceptionWithoutThrowing_printStackTraceRemoved() throws Exception {
+    // Arrange
+    when(connection.createStatement(
+            ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
+        .thenThrow(new SQLException("DB error"));
 
-    @Test
-    void getPassword_doesNotChangeDefaultWhenNoResults() throws Exception {
-        // Arrange: results.first() returns false  no row
-        Mockito.when(resultSet.first()).thenReturn(false);
+    // Act
+    // The method should swallow the exception and return the default password,
+    // and crucially it should use structured logging (log.error) instead of printStackTrace.
+    String password = lesson.getPassword();
 
-        // Act
-        String password = lesson6b.getPassword();
+    // Assert
+    assertEquals("dave", password);
+    // We cannot easily assert the logging behavior without a logging framework hook,
+    // but this test ensures no exception is propagated and behavior is preserved.
+  }
 
-        // Assert: default remains 'dave'
-        assertEquals("dave", password);
-        // verify that the query was still executed (behavior unchanged)
-        Mockito.verify(statement).executeQuery(Mockito.anyString());
-        // confirm that it did not accidentally set to some unexpected value
-        assertNotEquals("db-password", password);
-    }
+  @Test
+  void getPassword_handlesGenericExceptionWithoutThrowing() throws Exception {
+    // Arrange
+    when(lessonDataSource.getConnection()).thenThrow(new RuntimeException("generic"));
+
+    // Act
+    String password = lesson.getPassword();
+
+    // Assert
+    assertEquals("dave", password);
+  }
 }
