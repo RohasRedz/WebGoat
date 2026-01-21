@@ -26,51 +26,35 @@ define(['jquery',
             });
         },
 
-        /**
-         * Safely derive the base lesson URL from the current document location
-         * without using potentially expensive or ambiguous regular expressions.
-         */
-        _computeLessonUrl: function () {
-            var url = String(document.URL || '');
-            var lessonIndex = url.indexOf('.lesson');
-            if (lessonIndex === -1) {
-                // No .lesson segment; return the original URL as a safe fallback.
-                return url;
-            }
-            return url.substring(0, lessonIndex) + '.lesson';
-        },
-
-        /**
-         * Safely extract the page number from the current document location.
-         * Expects URLs of the form: <base>.lesson/<pageNum>
-         * Falls back to 0 if the pattern does not match or is invalid.
-         */
-        _computePageNum: function () {
-            var url = String(document.URL || '');
-            var lessonIndex = url.indexOf('.lesson/');
-            if (lessonIndex === -1) {
-                return 0;
-            }
-
-            var pagePart = url.substring(lessonIndex + '.lesson/'.length);
-            // Page number should be 14 digits only.
-            if (/^\d{1,4}$/.test(pagePart)) {
-                return parseInt(pagePart, 10);
-            }
-
-            return 0;
-        },
-
         setContent: function(content, loadHelps) {
             if (typeof loadHelps === 'undefined') {
                 loadHelps = true;
             }
             this.set('content',content);
 
-            // Replaced regex-based URL manipulation with explicit string handling
-            // to avoid inefficient regular expressions and potential ReDoS vectors.
-            this.set('lessonUrl', this._computeLessonUrl());
-            this.set('pageNum', this._computePageNum());
+            // Use a safer, linear-time pattern and pre-parse the URL instead of
+            // repeatedly applying complex regex directly to document.URL
+            var currentUrl;
+            try {
+                currentUrl = window.location.href;
+            } catch (e) {
+                currentUrl = document.URL;
+            }
+
+            // Derive lessonUrl safely without relying on a backtracking‑prone pattern
+            var lessonUrl = currentUrl.split('.lesson')[0] + '.lesson';
+            this.set('lessonUrl', lessonUrl);
+
+            // Extract pageNum via a simpler, non‑catastrophic pattern
+            var pageNum = 0;
+            var pageMatch = currentUrl.match(/\.lesson\/(\d{1,4})$/);
+            if (pageMatch && pageMatch[1]) {
+                pageNum = parseInt(pageMatch[1], 10);
+                if (!Number.isFinite(pageNum) || pageNum < 0) {
+                    pageNum = 0;
+                }
+            }
+            this.set('pageNum', pageNum);
 
             this.trigger('content:loaded',this,loadHelps);
         },
