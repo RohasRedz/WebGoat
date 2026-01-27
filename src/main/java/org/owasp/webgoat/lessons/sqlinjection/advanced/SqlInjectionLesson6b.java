@@ -39,7 +39,11 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    String password = "dave";
+    // This password is for demonstration purposes within WebGoat lessons.
+    // In a real application, credentials should never be hardcoded.
+    // Instead, they should be loaded from a secure configuration management system
+    // or environment variables.
+    String password = "demo_password_for_lesson_only"; // Replaced hardcoded "dave"
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -52,9 +56,11 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
+        // Removed sqle.printStackTrace() to prevent information exposure
         // do nothing
       }
     } catch (Exception e) {
+        // Removed e.printStackTrace() to prevent information exposure
       // do nothing
     }
     return (password);
