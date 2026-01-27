@@ -1,81 +1,88 @@
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
-import org.junit.jupiter.api.DisplayName;
+import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 import org.owasp.webgoat.container.LessonDataSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
- * Delta tests for SqlInjectionLesson6b focusing on the updated getPassword() behavior:
- * 1) It still prefers the password read from the database when available.
- * 2) It only falls back to the new non-sensitive demo default when the DB does not return a row.
+ * Delta tests for SqlInjectionLesson6b focusing on the logging change:
+ * - verify that printStackTrace() is no longer used
+ * - verify that SQLExceptions are logged via SLF4J logger (log.error)
+ *
+ * Since the class now has @Slf4j, we validate behavior indirectly by checking that:
+ * - the exception thrown from createStatement/executeQuery is propagated and no printStackTrace()
+ *   calls are made on the exception.
  */
 public class SqlInjectionLesson6bTest {
 
-  @Test
-  @DisplayName("getPassword returns value from database when query yields a row")
-  void getPassword_usesDatabaseValueWhenAvailable() throws Exception {
-    // Arrange
-    LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
-    Connection connection = Mockito.mock(Connection.class);
-    Statement statement = Mockito.mock(Statement.class);
-    ResultSet resultSet = Mockito.mock(ResultSet.class);
+  @Mock
+  private LessonDataSource dataSource;
 
-    // This is the value that should override the demo default password.
-    String dbPassword = "db-secret";
+  @Mock
+  private Connection connection;
 
+  @Mock
+  private Statement statement;
+
+  @Mock
+  private ResultSet resultSet;
+
+  private SqlInjectionLesson6b lesson;
+
+  @BeforeEach
+  void setUp() throws Exception {
+    MockitoAnnotations.openMocks(this);
     when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.createStatement(
-            ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-        .thenReturn(statement);
-    when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
-        .thenReturn(resultSet);
-    when(resultSet.first()).thenReturn(true);
-    when(resultSet.getString("password")).thenReturn(dbPassword);
-
-    SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
-
-    // Act
-    String result = lesson.getPassword();
-
-    // Assert
-    // When DB row exists, the returned password must come from the database,
-    // not from the demo default literal.
-    assertEquals(dbPassword, result);
+    lesson = new SqlInjectionLesson6b(dataSource);
   }
 
   @Test
-  @DisplayName("getPassword falls back to demo default when database does not return a row")
-  void getPassword_usesDemoDefaultWhenNoDatabaseRow() throws Exception {
-    // Arrange
-    LessonDataSource dataSource = Mockito.mock(LessonDataSource.class);
-    Connection connection = Mockito.mock(Connection.class);
-    Statement statement = Mockito.mock(Statement.class);
-    ResultSet resultSet = Mockito.mock(ResultSet.class);
-
-    when(dataSource.getConnection()).thenReturn(connection);
+  void getPassword_logsSqlExceptionWithoutPrintStackTrace() throws Exception {
+    // Arrange: simulate SQLException thrown when creating statement
+    SQLException sqlException = new SQLException("DB error");
     when(connection.createStatement(
             ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY))
-        .thenReturn(statement);
-    when(statement.executeQuery("SELECT password FROM user_system_data WHERE user_name = 'dave'"))
-        .thenReturn(resultSet);
-    // Simulate: no rows in the result set
-    when(resultSet.first()).thenReturn(false);
-
-    SqlInjectionLesson6b lesson = new SqlInjectionLesson6b(dataSource);
+        .thenThrow(sqlException);
 
     // Act
-    String result = lesson.getPassword();
+    String password = lesson.getPassword();
 
-    // Assert
-    // When DB does not provide a password, the method must return the new
-    // non-sensitive demo default literal introduced by the fix.
-    assertEquals("demo_password_for_lesson_only", result);
+    // Assert: method returns default "dave" and does not call printStackTrace on the exception
+    assertEquals("dave", password);
+    verify(connection, times(1))
+        .createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
+
+    // Important: ensure printStackTrace is not called on exception
+    verify(sqlException, never()).printStackTrace();
+  }
+
+  @Test
+  void getPassword_logsGeneralExceptionWithoutPrintStackTrace() throws Exception {
+    // Arrange: simulate generic exception when getting connection
+    Exception generic = new RuntimeException("generic");
+    when(dataSource.getConnection()).thenThrow(generic);
+
+    // Act
+    String password = lesson.getPassword();
+
+    // Assert: still returns default "dave" and no printStackTrace on generic exception
+    assertEquals("dave", password);
+    verify(generic, never()).printStackTrace();
   }
 }

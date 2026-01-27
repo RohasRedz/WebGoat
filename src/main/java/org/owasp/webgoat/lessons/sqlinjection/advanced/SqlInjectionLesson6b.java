@@ -19,8 +19,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import lombok.extern.slf4j.Slf4j; // Added import for Slf4j
 
 @RestController
+@Slf4j // Added Slf4j annotation
 public class SqlInjectionLesson6b implements AssignmentEndpoint {
   private final LessonDataSource dataSource;
 
@@ -39,11 +41,7 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
   }
 
   protected String getPassword() {
-    // This password is for demonstration purposes within WebGoat lessons.
-    // In a real application, credentials should never be hardcoded.
-    // Instead, they should be loaded from a secure configuration management system
-    // or environment variables.
-    String password = "demo_password_for_lesson_only"; // Replaced hardcoded "dave"
+    String password = "dave";
     try (Connection connection = dataSource.getConnection()) {
       String query = "SELECT password FROM user_system_data WHERE user_name = 'dave'";
       try {
@@ -56,12 +54,10 @@ public class SqlInjectionLesson6b implements AssignmentEndpoint {
           password = results.getString("password");
         }
       } catch (SQLException sqle) {
-        // Removed sqle.printStackTrace() to prevent information exposure
-        // do nothing
+        log.error("SQL Exception during password retrieval: {}", sqle.getMessage()); // Replaced printStackTrace
+      } catch (Exception e) {
+        log.error("General Exception during password retrieval: {}", e.getMessage()); // Replaced printStackTrace
       }
-    } catch (Exception e) {
-        // Removed e.printStackTrace() to prevent information exposure
-      // do nothing
     }
     return (password);
   }
